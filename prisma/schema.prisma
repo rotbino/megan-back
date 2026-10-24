@@ -31,8 +31,8 @@ enum PackageType {
 
 model User {
   id               Int         @id @default(autoincrement())
-  phone            String @unique // ورود فقط با موبایل + OTP
-  userName         String? @unique @map("user_name") // شناسه پروفایل عمومی مثل c34qxnsh
+  phone            String      @unique // ورود فقط با موبایل + OTP
+  userName         String?     @unique @map("user_name") // شناسه پروفایل عمومی مثل c34qxnsh
   firstName        String      @map("first_name")
   lastName         String      @map("last_name")
   role             Role        @default(USER)
@@ -45,11 +45,11 @@ model User {
 
   products     Product[]
   buyRequests  BuyRequest[]
-  reviewsGiven Review[]     @relation("Reviewer")
-  reviewsTaken Review[]     @relation("Reviewed")
+  reviewsGiven Review[]      @relation("Reviewer")
+  reviewsTaken Review[]      @relation("Reviewed")
   favorites    Favorite[]
-  chatThreadsA ChatThread[] @relation("ThreadUserA")
-  chatThreadsB ChatThread[] @relation("ThreadUserB")
+  chatThreadsA ChatThread[]  @relation("ThreadUserA")
+  chatThreadsB ChatThread[]  @relation("ThreadUserB")
   messages     ChatMessage[]
   ladderOrders LadderOrder[]
 
@@ -59,27 +59,39 @@ model User {
 
 // ─────────────────────────────────────────────────────────────
 // Categories — درخت سه‌سطحی باسکول (مثل: کشاورزی ← خشکبار ← پسته)
+// + «نوع کالا» در همان جدول (kind=PRODUCT_TYPE) — فرزندِ برگ دسته‌ها
 // ─────────────────────────────────────────────────────────────
 
+// نوع نود: دسته‌بندی معمولی یا «نوع کالا» (ورودی آزاد کاربران مثل: اکبری، فندقی)
+// نوع کالاها از فرم «ثبت درخواست خرید» می‌آیند و زیر آخرین نودِ دسته کالا
+// ذخیره می‌شوند تا جدول نوع‌کالا به‌مرور شکل بگیرد؛ بعداً برای تطبیق
+// درخواست‌های خرید با فروشندگان همان کالا (نمایش در پنل کاربری) استفاده می‌شوند.
+enum CategoryKind {
+  CATEGORY // نود دسته‌بندی (ریشه/میانی/برگ)
+  PRODUCT_TYPE // نوع کالا — فرزند برگ؛ ورودی آزاد کاربر
+}
+
 model Category {
-  id           Int        @id @default(autoincrement())
-  categoryName String     @map("category_name")
-  slug         String @unique // برای URL فارسی‌پسند مثل باسکول: /product-list/category/پسته
-  unit         String     @default("کیلوگرم") // واحد فروش پیش‌فرض دسته
-  min          Int        @default(100) // حداقل سفارش پیش‌فرض (باسکول: پسته=500)
+  id           Int          @id @default(autoincrement())
+  categoryName String       @map("category_name")
+  slug         String       @unique // برای URL فارسی‌پسند مثل باسکول: /product-list/category/پسته
+  kind         CategoryKind @default(CATEGORY) // دسته‌بندی یا نوع کالا
+  unit         String       @default("کیلوگرم") // واحد فروش پیش‌فرض دسته
+  min          Int          @default(100) // حداقل سفارش پیش‌فرض (باسکول: پسته=500)
   example      String? // نمونه ورودی فرم مثل «فندقی»
-  parentId     Int?       @map("parent_id")
-  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children     Category[] @relation("CategoryTree")
-  score        Int        @default(0) // وزن محبوبیت برای مرتب‌سازی (باسکول: میوه خشک=8272)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  parentId     Int?         @map("parent_id")
+  parent       Category?    @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Category[]   @relation("CategoryTree")
+  score        Int          @default(0) // وزن محبوبیت برای مرتب‌سازی (باسکول: میوه خشک=8272)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
-  products     Product[]      @relation("ProductSubCategory")
-  parentRefs   Product[]      @relation("ProductCategory")
-  buyRequests  BuyRequest[]
+  products    Product[]    @relation("ProductSubCategory")
+  parentRefs  Product[]    @relation("ProductCategory")
+  buyRequests BuyRequest[]
 
-  @@index([parentId, score])
+  // فیلتر رایج: زیرشاخه‌های یک نود به تفکیک نوع (دسته/نوع‌کالا) با مرتب‌سازی score
+  @@index([parentId, kind, score])
   @@map("categories")
 }
 
@@ -89,7 +101,7 @@ model Category {
 
 model Province {
   id          Int          @id @default(autoincrement())
-  name        String @unique
+  name        String       @unique
   cities      City[]
   products    Product[]
   buyRequests BuyRequest[]
@@ -114,13 +126,13 @@ model City {
 // ─────────────────────────────────────────────────────────────
 
 model Product {
-  id            Int      @id @default(autoincrement())
-  productName   String   @map("product_name") // «پسته اکبری20_22»
-  description   String   @db.Text
-  stock         Int      @default(0) // موجودی آماده فروش (کیلوگرم/عدد)
-  minSalePrice  Int?     @map("min_sale_price") // کف قیمت هر واحد (تومان) — 3700000
-  minSaleAmount Int      @map("min_sale_amount") // حداقل میزان فروش در هر معامله — 1000
-  unit          String   @default("کیلوگرم")
+  id            Int    @id @default(autoincrement())
+  productName   String @map("product_name") // «پسته اکبری20_22»
+  description   String @db.Text
+  stock         Int    @default(0) // موجودی آماده فروش (کیلوگرم/عدد)
+  minSalePrice  Int?   @map("min_sale_price") // کف قیمت هر واحد (تومان) — 3700000
+  minSaleAmount Int    @map("min_sale_amount") // حداقل میزان فروش در هر معامله — 1000
+  unit          String @default("کیلوگرم")
 
   // نرمال‌شده مثل باسکول: هم دسته پدر (خشکبار) هم دسته برگ (پسته)
   categoryId    Int      @map("category_id")
@@ -128,22 +140,22 @@ model Product {
   subCategoryId Int      @map("sub_category_id")
   subCategory   Category @relation("ProductSubCategory", fields: [subCategoryId], references: [id])
 
-  provinceId    Int      @map("province_id")
-  province      Province @relation(fields: [provinceId], references: [id])
-  cityId        Int      @map("city_id")
-  city          City     @relation(fields: [cityId], references: [id])
+  provinceId Int      @map("province_id")
+  province   Province @relation(fields: [provinceId], references: [id])
+  cityId     Int      @map("city_id")
+  city       City     @relation(fields: [cityId], references: [id])
 
-  myuserId      Int      @map("myuser_id") // نگهداری نام فیلد باسکول برای مهاجرت
-  myuser        User     @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  myuserId Int  @map("myuser_id") // نگهداری نام فیلد باسکول برای مهاجرت
+  myuser   User @relation(fields: [myuserId], references: [id], onDelete: Cascade)
 
-  isElevated    Boolean  @default(false) @map("is_elevated") // فروشنده ویژه باسکول — در ایمچ v1 کاربرد ندارد (فقط برای مهاجرت داده)
-  isLadder      Boolean  @default(false) @map("is_ladder") // نردبان: آگهی فعال نردبان‌شده — بالای نتایج می‌آید (denorm از LadderOrder)
-  hasVideo      Boolean  @default(false) @map("has_video")
-  isOld         Boolean  @default(false) @map("is_old") // آگهی کهنه/نیازمند به‌روزرسانی قیمت
-  viewCount     Int      @default(0) @map("view_count")
+  isElevated Boolean @default(false) @map("is_elevated") // فروشنده ویژه باسکول — در ایمچ v1 کاربرد ندارد (فقط برای مهاجرت داده)
+  isLadder   Boolean @default(false) @map("is_ladder") // نردبان: آگهی فعال نردبان‌شده — بالای نتایج می‌آید (denorm از LadderOrder)
+  hasVideo   Boolean @default(false) @map("has_video")
+  isOld      Boolean @default(false) @map("is_old") // آگهی کهنه/نیازمند به‌روزرسانی قیمت
+  viewCount  Int     @default(0) @map("view_count")
 
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   photos       Photo[]
   favorites    Favorite[]
@@ -173,20 +185,20 @@ enum LadderOrderStatus {
 }
 
 model LadderOrder {
-  id        Int              @id @default(autoincrement())
-  productId Int              @map("product_id")
-  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
-  myuserId  Int              @map("myuser_id")
-  myuser    User             @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  id         Int               @id @default(autoincrement())
+  productId  Int               @map("product_id")
+  product    Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  myuserId   Int               @map("myuser_id")
+  myuser     User              @relation(fields: [myuserId], references: [id], onDelete: Cascade)
   // بازه نردبان؛ روزها از startDate تا endDate (شامل هر دو) محاسبه و × ۱۰٬۰۰۰ تومان صورت‌حساب می‌شود
-  startDate DateTime         @map("start_date")
-  endDate   DateTime         @map("end_date")
-  days      Int // تعداد روزهای نردبان
-  dailyPrice Int             @default(10000) @map("daily_price") // تومان در روز
-  totalPrice Int             @map("total_price") // days × dailyPrice
-  status    LadderOrderStatus @default(PENDING)
-  createdAt DateTime         @default(now()) @map("created_at")
-  updatedAt DateTime         @updatedAt @map("updated_at")
+  startDate  DateTime          @map("start_date")
+  endDate    DateTime          @map("end_date")
+  days       Int // تعداد روزهای نردبان
+  dailyPrice Int               @default(10000) @map("daily_price") // تومان در روز
+  totalPrice Int               @map("total_price") // days × dailyPrice
+  status     LadderOrderStatus @default(PENDING)
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
 
   @@index([productId, status])
   @@index([myuserId, status])
@@ -216,26 +228,27 @@ enum BuyRequestStatus {
 }
 
 model BuyRequest {
-  id                Int             @id @default(autoincrement())
+  id                Int              @id @default(autoincrement())
   // ⚠️ نام‌گذاری گیج‌کننده ولی عین باسکول (کلمه‌به‌کلمه از get_buyAd_list):
   //   name              = «نوع محصول»  (مثل: پاجوش پیارم / پد بهداشتی پارچه‌ای)
   //   category (رابطه)  = دسته برگ واقعی محصول (مثل: نهال) — در پاسخ باسکول subcategory_name
   // جمله کارت باسکول: «خریدار {requirement_amount} {unit} {subcategory_name} از نوع {name} هستم»
+  // فاز بعد: name به نود PRODUCT_TYPE جدول categories ارجاع می‌شود (تطبیق درخواست با فروشندگان همان نوع کالا).
   name              String? // نوع محصول — در باسکول nullable است
-  description       String?         @db.Text
-  categoryId        Int             @map("category_id")
-  category          Category        @relation(fields: [categoryId], references: [id])
-  requirementAmount Int             @map("requirement_amount") // 600 / 10000
-  unit              String          @default("کیلوگرم")
-  myuserId          Int             @map("myuser_id")
-  myuser            User            @relation(fields: [myuserId], references: [id], onDelete: Cascade)
-  provinceId        Int?            @map("province_id")
-  province          Province?       @relation(fields: [provinceId], references: [id])
-  cityId            Int?            @map("city_id")
-  city              City?           @relation(fields: [cityId], references: [id])
+  description       String?          @db.Text
+  categoryId        Int              @map("category_id")
+  category          Category         @relation(fields: [categoryId], references: [id])
+  requirementAmount Int              @map("requirement_amount") // 600 / 10000
+  unit              String           @default("کیلوگرم")
+  myuserId          Int              @map("myuser_id")
+  myuser            User             @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  provinceId        Int?             @map("province_id")
+  province          Province?        @relation(fields: [provinceId], references: [id])
+  cityId            Int?             @map("city_id")
+  city              City?            @relation(fields: [cityId], references: [id])
   status            BuyRequestStatus @default(ACTIVE)
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
 
   @@index([categoryId, status, createdAt])
   @@index([myuserId])
@@ -289,16 +302,16 @@ model PriceHistory {
 // ─────────────────────────────────────────────────────────────
 
 model ChatThread {
-  id            Int         @id @default(autoincrement())
-  productId     Int         @map("product_id")
-  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  userAId       Int         @map("user_a_id")
-  userA         User        @relation("ThreadUserA", fields: [userAId], references: [id], onDelete: Cascade)
-  userBId       Int         @map("user_b_id")
-  userB         User        @relation("ThreadUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  lastMessageAt DateTime    @default(now()) @map("last_message_at")
+  id            Int      @id @default(autoincrement())
+  productId     Int      @map("product_id")
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userAId       Int      @map("user_a_id")
+  userA         User     @relation("ThreadUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId       Int      @map("user_b_id")
+  userB         User     @relation("ThreadUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
 
-  messages      ChatMessage[]
+  messages ChatMessage[]
 
   @@unique([productId, userAId, userBId])
   @@map("chat_threads")
