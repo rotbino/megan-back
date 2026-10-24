@@ -36,7 +36,7 @@ model User {
   firstName        String      @map("first_name")
   lastName         String      @map("last_name")
   role             Role        @default(USER)
-  activePakageType PackageType @default(FREE) @map("active_pakage_type") // نگهداری املای باسکول برای مهاجرت
+  activePakageType PackageType @default(FREE) @map("active_pakage_type") // نگهداری املای باسکول برای مهاجرت (در ایمچ v1 کاربرد ندارد)
   isVerified       Boolean     @default(false) @map("is_verified") // احراز هویت حقیقی/حقوقی
   avatarUrl        String?     @map("avatar_url")
   businessDesc     String?     @map("business_desc") // «درباره کسب‌وکار» پروفایل
@@ -51,6 +51,7 @@ model User {
   chatThreadsA ChatThread[] @relation("ThreadUserA")
   chatThreadsB ChatThread[] @relation("ThreadUserB")
   messages     ChatMessage[]
+  ladderOrders LadderOrder[]
 
   @@index([activePakageType, isVerified])
   @@map("myusers")
@@ -135,7 +136,8 @@ model Product {
   myuserId      Int      @map("myuser_id") // نگهداری نام فیلد باسکول برای مهاجرت
   myuser        User     @relation(fields: [myuserId], references: [id], onDelete: Cascade)
 
-  isElevated    Boolean  @default(false) @map("is_elevated") // نمایش برجسته «فروشنده ویژه»
+  isElevated    Boolean  @default(false) @map("is_elevated") // فروشنده ویژه باسکول — در ایمچ v1 کاربرد ندارد (فقط برای مهاجرت داده)
+  isLadder      Boolean  @default(false) @map("is_ladder") // نردبان: آگهی فعال نردبان‌شده — بالای نتایج می‌آید (denorm از LadderOrder)
   hasVideo      Boolean  @default(false) @map("has_video")
   isOld         Boolean  @default(false) @map("is_old") // آگهی کهنه/نیازمند به‌روزرسانی قیمت
   viewCount     Int      @default(0) @map("view_count")
@@ -147,12 +149,48 @@ model Product {
   favorites    Favorite[]
   priceRecords PriceHistory[]
   chatThreads  ChatThread[]
+  ladderOrders LadderOrder[]
 
-  @@index([subCategoryId, isElevated, updatedAt])
+  // مرتب‌سازی «مرتبط‌ترین» باسکول (sort_by=BM): نردبان‌ها اول
+  @@index([subCategoryId, isLadder, updatedAt])
   @@index([categoryId])
   @@index([provinceId, cityId])
   @@index([myuserId])
   @@map("products")
+}
+
+// ─────────────────────────────────────────────────────
+// نردبان آگهی — تنها قابلیت تبلیغاتی ایمچ v1
+// تعرفه: ۱۰٬۰۰۰ تومان برای هر آگهی در هر روز
+// (is_ladder روی Product به‌صورت denorm نگه داشته می‌شود تا سورت سریع بماند)
+// ─────────────────────────────────────────────────────
+
+enum LadderOrderStatus {
+  PENDING // در انتظار پرداخت
+  ACTIVE // در حال نردبان
+  FINISHED // تمام‌شده
+  CANCELED // لغو‌شده
+}
+
+model LadderOrder {
+  id        Int              @id @default(autoincrement())
+  productId Int              @map("product_id")
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  myuserId  Int              @map("myuser_id")
+  myuser    User             @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  // بازه نردبان؛ روزها از startDate تا endDate (شامل هر دو) محاسبه و × ۱۰٬۰۰۰ تومان صورت‌حساب می‌شود
+  startDate DateTime         @map("start_date")
+  endDate   DateTime         @map("end_date")
+  days      Int // تعداد روزهای نردبان
+  dailyPrice Int             @default(10000) @map("daily_price") // تومان در روز
+  totalPrice Int             @map("total_price") // days × dailyPrice
+  status    LadderOrderStatus @default(PENDING)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  @@index([productId, status])
+  @@index([myuserId, status])
+  @@map("ladder_orders")
 }
 
 model Photo {
@@ -179,7 +217,11 @@ enum BuyRequestStatus {
 
 model BuyRequest {
   id                Int             @id @default(autoincrement())
-  name              String? // عنوان مثل «پد بهداشتی پارچه‌ای» (در باسکول nullable بود)
+  // ⚠️ نام‌گذاری گیج‌کننده ولی عین باسکول (کلمه‌به‌کلمه از get_buyAd_list):
+  //   name              = «نوع محصول»  (مثل: پاجوش پیارم / پد بهداشتی پارچه‌ای)
+  //   category (رابطه)  = دسته برگ واقعی محصول (مثل: نهال) — در پاسخ باسکول subcategory_name
+  // جمله کارت باسکول: «خریدار {requirement_amount} {unit} {subcategory_name} از نوع {name} هستم»
+  name              String? // نوع محصول — در باسکول nullable است
   description       String?         @db.Text
   categoryId        Int             @map("category_id")
   category          Category        @relation(fields: [categoryId], references: [id])
