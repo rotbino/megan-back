@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/@nestjs/config/schema.json",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {"deleteOutDir": true}
+}

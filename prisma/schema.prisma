@@ -1,0 +1,294 @@
+// Megan Backend — Prisma Schema
+// طراحی‌شده منطبق بر ساختار داده باسکول (buskool.com) برای مهاجرت بی‌دردسر داده‌ها
+// ستون‌های دیتابیس با @map دقیقاً مطابق نام فیلدهای باسکول (snake_case) هستند
+// تا اسکریپت انتقال داده مستقیماً و بدون تبدیل پیچیده کار کند.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // اگر دامپ فعلی شما MySQL است فقط همین provider را به "mysql" تغییر دهید.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Users — جدول باسکول: myusers
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  SELLER
+  ADMIN
+}
+
+enum PackageType {
+  FREE // 0 — عضویت رایگان
+  BASIC // 1 — فروشنده عادی
+  SPECIAL // 2 — فروشنده ویژه (is_elevated محصولات)
+}
+
+model User {
+  id               Int         @id @default(autoincrement())
+  phone            String @unique // ورود فقط با موبایل + OTP
+  userName         String? @unique @map("user_name") // شناسه پروفایل عمومی مثل c34qxnsh
+  firstName        String      @map("first_name")
+  lastName         String      @map("last_name")
+  role             Role        @default(USER)
+  activePakageType PackageType @default(FREE) @map("active_pakage_type") // نگهداری املای باسکول برای مهاجرت
+  isVerified       Boolean     @default(false) @map("is_verified") // احراز هویت حقیقی/حقوقی
+  avatarUrl        String?     @map("avatar_url")
+  businessDesc     String?     @map("business_desc") // «درباره کسب‌وکار» پروفایل
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  products     Product[]
+  buyRequests  BuyRequest[]
+  reviewsGiven Review[]     @relation("Reviewer")
+  reviewsTaken Review[]     @relation("Reviewed")
+  favorites    Favorite[]
+  chatThreadsA ChatThread[] @relation("ThreadUserA")
+  chatThreadsB ChatThread[] @relation("ThreadUserB")
+  messages     ChatMessage[]
+
+  @@index([activePakageType, isVerified])
+  @@map("myusers")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Categories — درخت سه‌سطحی باسکول (مثل: کشاورزی ← خشکبار ← پسته)
+// ─────────────────────────────────────────────────────────────
+
+model Category {
+  id           Int        @id @default(autoincrement())
+  categoryName String     @map("category_name")
+  slug         String @unique // برای URL فارسی‌پسند مثل باسکول: /product-list/category/پسته
+  unit         String     @default("کیلوگرم") // واحد فروش پیش‌فرض دسته
+  min          Int        @default(100) // حداقل سفارش پیش‌فرض (باسکول: پسته=500)
+  example      String? // نمونه ورودی فرم مثل «فندقی»
+  parentId     Int?       @map("parent_id")
+  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Category[] @relation("CategoryTree")
+  score        Int        @default(0) // وزن محبوبیت برای مرتب‌سازی (باسکول: میوه خشک=8272)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  products     Product[]      @relation("ProductSubCategory")
+  parentRefs   Product[]      @relation("ProductCategory")
+  buyRequests  BuyRequest[]
+
+  @@index([parentId, score])
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Location — مثل باسکول: ۳۱ استان + شهرها (province_id کرمان=21، اصفهان=4)
+// ─────────────────────────────────────────────────────────────
+
+model Province {
+  id          Int          @id @default(autoincrement())
+  name        String @unique
+  cities      City[]
+  products    Product[]
+  buyRequests BuyRequest[]
+
+  @@map("provinces")
+}
+
+model City {
+  id          Int          @id @default(autoincrement())
+  name        String
+  provinceId  Int          @map("province_id")
+  province    Province     @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+  products    Product[]
+  buyRequests BuyRequest[]
+
+  @@index([provinceId])
+  @@map("cities")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Products — جدول باسکول: products (تمام فیلدهای استخراج‌شده از API)
+// ─────────────────────────────────────────────────────────────
+
+model Product {
+  id            Int      @id @default(autoincrement())
+  productName   String   @map("product_name") // «پسته اکبری20_22»
+  description   String   @db.Text
+  stock         Int      @default(0) // موجودی آماده فروش (کیلوگرم/عدد)
+  minSalePrice  Int?     @map("min_sale_price") // کف قیمت هر واحد (تومان) — 3700000
+  minSaleAmount Int      @map("min_sale_amount") // حداقل میزان فروش در هر معامله — 1000
+  unit          String   @default("کیلوگرم")
+
+  // نرمال‌شده مثل باسکول: هم دسته پدر (خشکبار) هم دسته برگ (پسته)
+  categoryId    Int      @map("category_id")
+  category      Category @relation("ProductCategory", fields: [categoryId], references: [id])
+  subCategoryId Int      @map("sub_category_id")
+  subCategory   Category @relation("ProductSubCategory", fields: [subCategoryId], references: [id])
+
+  provinceId    Int      @map("province_id")
+  province      Province @relation(fields: [provinceId], references: [id])
+  cityId        Int      @map("city_id")
+  city          City     @relation(fields: [cityId], references: [id])
+
+  myuserId      Int      @map("myuser_id") // نگهداری نام فیلد باسکول برای مهاجرت
+  myuser        User     @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+
+  isElevated    Boolean  @default(false) @map("is_elevated") // نمایش برجسته «فروشنده ویژه»
+  hasVideo      Boolean  @default(false) @map("has_video")
+  isOld         Boolean  @default(false) @map("is_old") // آگهی کهنه/نیازمند به‌روزرسانی قیمت
+  viewCount     Int      @default(0) @map("view_count")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  photos       Photo[]
+  favorites    Favorite[]
+  priceRecords PriceHistory[]
+  chatThreads  ChatThread[]
+
+  @@index([subCategoryId, isElevated, updatedAt])
+  @@index([categoryId])
+  @@index([provinceId, cityId])
+  @@index([myuserId])
+  @@map("products")
+}
+
+model Photo {
+  id        Int     @id @default(autoincrement())
+  productId Int     @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  filePath  String  @map("file_path") // URL آبجکت‌استوریج (مثل ArvanCloud S3 در باسکول)
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([productId])
+  @@map("photos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Buy Requests (RFQ) — درخواست‌های خرید
+// فیلدها مطابق خروجی get_buyAd_list باسکول
+// ─────────────────────────────────────────────────────────────
+
+enum BuyRequestStatus {
+  ACTIVE
+  FULFILLED
+  EXPIRED
+}
+
+model BuyRequest {
+  id                Int             @id @default(autoincrement())
+  name              String? // عنوان مثل «پد بهداشتی پارچه‌ای» (در باسکول nullable بود)
+  description       String?         @db.Text
+  categoryId        Int             @map("category_id")
+  category          Category        @relation(fields: [categoryId], references: [id])
+  requirementAmount Int             @map("requirement_amount") // 600 / 10000
+  unit              String          @default("کیلوگرم")
+  myuserId          Int             @map("myuser_id")
+  myuser            User            @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  provinceId        Int?            @map("province_id")
+  province          Province?       @relation(fields: [provinceId], references: [id])
+  cityId            Int?            @map("city_id")
+  city              City?           @relation(fields: [cityId], references: [id])
+  status            BuyRequestStatus @default(ACTIVE)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@index([categoryId, status, createdAt])
+  @@index([myuserId])
+  @@map("buy_requests")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trust & Engagement
+// ─────────────────────────────────────────────────────────────
+
+model Review {
+  id         Int      @id @default(autoincrement())
+  reviewerId Int      @map("reviewer_id")
+  reviewer   User     @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewedId Int      @map("reviewed_id")
+  reviewed   User     @relation("Reviewed", fields: [reviewedId], references: [id], onDelete: Cascade)
+  rating     Int // 1..5
+  comment    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([reviewerId, reviewedId])
+  @@index([reviewedId, createdAt])
+  @@map("reviews")
+}
+
+model Favorite {
+  userId    Int      @map("myuser_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId Int      @map("product_id")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([userId, productId])
+  @@map("favorites")
+}
+
+// تاریخچه قیمت برای نمودار روند (بهبود نسبت به باسکول)
+model PriceHistory {
+  id         Int      @id @default(autoincrement())
+  productId  Int      @map("product_id")
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price      Int // تومان
+  recordedAt DateTime @map("recorded_at")
+
+  @@index([productId, recordedAt])
+  @@map("price_histories")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chat — اسکلت گفتگو خریدار/فروشنده (فاز بعدی: WebSocket)
+// ─────────────────────────────────────────────────────────────
+
+model ChatThread {
+  id            Int         @id @default(autoincrement())
+  productId     Int         @map("product_id")
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userAId       Int         @map("user_a_id")
+  userA         User        @relation("ThreadUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId       Int         @map("user_b_id")
+  userB         User        @relation("ThreadUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime    @default(now()) @map("last_message_at")
+
+  messages      ChatMessage[]
+
+  @@unique([productId, userAId, userBId])
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id        Int        @id @default(autoincrement())
+  threadId  Int        @map("thread_id")
+  thread    ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId  Int        @map("sender_id")
+  sender    User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body      String     @db.Text
+  readAt    DateTime?  @map("read_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  @@index([threadId, createdAt])
+  @@map("chat_messages")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth — کدهای یک‌بار مصرف ورود با موبایل (همان الگوی باسکول)
+// ─────────────────────────────────────────────────────────────
+
+model OtpCode {
+  id         Int       @id @default(autoincrement())
+  phone      String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  tries      Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, expiresAt])
+  @@map("otp_codes")
+}
