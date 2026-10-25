@@ -4,9 +4,12 @@ node_modules/
 # build
 dist/
 
-# env
+# logs
+logs/
+*.log
+
+# env — طبق انتخاب مالک ریپو track می‌شود (کامیت 8c0ca60)
 #.env
 
 # misc
-*.log
 .DS_Store
