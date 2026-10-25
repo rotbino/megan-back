@@ -57,6 +57,7 @@ model User {
   chatThreadsB ChatThread[]  @relation("ThreadUserB")
   messages     ChatMessage[]
   ladderOrders LadderOrder[]
+  chargeOrders ChargeOrder[] // شارژهای کارت به کارت کیف پول (تایید در پنل ادمین)
   savedLists   SavedList[] // لیست‌های «نشان شده ها» پنل (CRM کوچک)
   savedBy      SavedUser[]   @relation("SavedBy") // مواردی که کاربران دیگر این کاربر را نشان کرده‌اند
 
@@ -227,24 +228,62 @@ enum LadderOrderStatus {
 }
 
 model LadderOrder {
-  id         Int               @id @default(autoincrement())
-  productId  Int               @map("product_id")
-  product    Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
-  myuserId   Int               @map("myuser_id")
-  myuser     User              @relation(fields: [myuserId], references: [id], onDelete: Cascade)
-  // بازه نردبان؛ روزها از startDate تا endDate (شامل هر دو) محاسبه و × ۱۰٬۰۰۰ تومان صورت‌حساب می‌شود
-  startDate  DateTime          @map("start_date")
-  endDate    DateTime          @map("end_date")
-  days       Int // تعداد روزهای نردبان
-  dailyPrice Int               @default(10000) @map("daily_price") // تومان در روز
-  totalPrice Int               @map("total_price") // days × dailyPrice
-  status     LadderOrderStatus @default(PENDING)
-  createdAt  DateTime          @default(now()) @map("created_at")
-  updatedAt  DateTime          @updatedAt @map("updated_at")
+  id           Int               @id @default(autoincrement())
+  productId    Int               @map("product_id")
+  product      Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  myuserId     Int               @map("myuser_id")
+  myuser       User              @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  // نردبان هر محصول برای «یک ماه» (۳۰ روز) ۱۰۰٬۰۰۰ تومان است؛
+  // هزینه از شارژ کیف پول (walletBalance) کسر می‌شود — حداقل شارژ ۱۰۰٬۰۰۰ تومان
+  startDate    DateTime          @map("start_date")
+  endDate      DateTime          @map("end_date")
+  months       Int               @default(1) // تعداد ماه‌های نردبان (v1: همیشه ۱)
+  monthlyPrice Int               @default(100000) @map("monthly_price") // تومان برای هر ماه
+  totalPrice   Int               @map("total_price") // months × monthlyPrice
+  status       LadderOrderStatus @default(PENDING)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
 
   @@index([productId, status])
   @@index([myuserId, status])
   @@map("ladder_orders")
+}
+
+// ─────────────────────────────────────────────────────────────
+// شارژ کیف پول — پرداخت کارت به کارت (جایگزین درگاه پرداخت):
+// کاربر مبلغ را کارت به کارت می‌کند، تصویر فیش را برای ادمین می‌فرستد و
+// پس از تایید در پنل ادمین، شارژ (با بونوس) به walletBalance اضافه می‌شود.
+// پکیج‌ها: ۱۰۰ هزار (بدون بونوس) / ۲۰۰ هزار (+۱۰٪) / ۴۰۰ هزار (+۲۰٪)
+// ─────────────────────────────────────────────────────────────
+
+enum ChargeOrderStatus {
+  PENDING // فیش ارسال شده — در انتظار تایید ادمین
+  CONFIRMED // تایید شده — شارژ به کیف پول اضافه شد
+  REJECTED // رد شده — فیش نامعتبر
+}
+
+enum ChargePackageKey {
+  P100 // ۱۰۰ هزار تومان — بدون شارژ اضافه
+  P200 // ۲۰۰ هزار تومان — ۱۰٪ شارژ اضافه
+  P400 // ۴۰۰ هزار تومان — ۲۰٪ شارژ اضافه
+}
+
+model ChargeOrder {
+  id           Int               @id @default(autoincrement())
+  myuserId     Int               @map("myuser_id")
+  myuser       User              @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  packageKey   ChargePackageKey  @map("package_key")
+  amount       Int // مبلغ واریزشده کارت به کارت (تومان)
+  bonusPercent Int               @default(0) @map("bonus_percent") // ۰ / ۱۰ / ۲۰ درصد شارژ اضافه
+  chargeAmount Int               @map("charge_amount") // شارژ نهایی اعمالی = amount × (۱ + درصد)
+  receiptPhoto String?           @map("receipt_photo") // مسیر تصویر فیش واریزی
+  status       ChargeOrderStatus @default(PENDING)
+  adminNote    String?           @map("admin_note") // یادداشت ادمین هنگام تایید/رد
+  createdAt    DateTime          @default(now()) @map("created_at")
+  confirmedAt  DateTime?         @map("confirmed_at")
+
+  @@index([myuserId, status])
+  @@map("charge_orders")
 }
 
 model Photo {
