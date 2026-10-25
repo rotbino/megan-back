@@ -1,0 +1,239 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Megan (iMach) — Prisma schema on MongoDB Atlas
+//
+// اصول:
+//  • نام فیلدها در دیتابیس snake_case عین باسکول (product_name, min_sale_price,
+//    province_id …) تا داده‌های کراول‌شده از باسکول بدون تبدیل اینزرت شوند.
+//  • داده‌های پایه (Category/Province/City/Product) id عددی باسکول دارند
+//    (پسته=44، اصفهان=4، شهر بابک=230) — Prisma روی مونگو id صریح عددی را
+//    پشتیبانی می‌کند؛ شمارنده جدول Counter برای id محصولات جدید.
+//  • تصاویر هر مدل از طریق جدول چندریختی File مدیریت می‌شوند (دکترین
+//    imach-back): fieldKey اسلات را تعیین می‌کند، ردیف staged قبل از چسبیدن
+//    به مدل توسط reaper حذف می‌شود و replace اول آپلود می‌کند بعد قبلی را
+//    پاک می‌کند — هیچ فایل سرگردانی روی حافظه گران نمی‌ماند.
+//  • TTL ایندکس در Prisma پشتیبانی نمی‌شود → پاک‌سازی OTP/RefreshToken با
+//    reaper دوره‌ای درون پروسه انجام می‌شود.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users & Auth ────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// شماره موبایل — تنها راه ورود (OTP)
+  phone     String   @unique
+  /// شناسه عمومی پروفایل مثل باسکول (wbrstu2g1) — هنگام ثبت‌نام تولید می‌شود
+  userName  String   @unique @map("user_name")
+  firstName String   @default("") @map("first_name")
+  lastName  String   @default("") @map("last_name")
+  /// «آقا» / «خانم» — مثل باسکول
+  sex       String?
+  role      String   @default("USER") // USER | ADMIN
+  /// احراز هویت (کارت ملی + سلفی) — جریان ادمین
+  isVerified   Boolean @default(false) @map("is_verified")
+  isBuyer      Boolean @default(true) @map("is_buyer")
+  isSeller     Boolean @default(false) @map("is_seller")
+  walletBalance Int     @default(0) @map("wallet_balance") // تومان
+  avatarUrl    String? @map("avatar_url")
+  businessDesc String? @map("business_desc")
+  /// پروفایل کسب‌وکار embedded — فیلدهای myuser_profiles باسکول
+  profile    Json?
+
+  files        File[]         @relation("FileOwner")
+  products     Product[]      @relation("ProductOwner")
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+}
+
+/// کد OTP — هش sha256، عمر ۲ دقیقه، پاک‌سازی دوره‌ای توسط reaper
+model OtpCode {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  phone     String
+  codeHash  String   @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  /// شمارش تلاش‌های اشتباه (بعد از ۵ بار کد باطل می‌شود)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phone, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+/// رفرش‌توکن چرخشی — فقط هش sha256 ذخیره می‌شود
+model RefreshToken {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  tokenHash String    @unique @map("token_hash")
+  userId    String    @map("user_id") @db.ObjectId
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// شمارنده id عددی (الگوی کلاسیک مونگو) — seq با increment اتمیک بالا می‌رود
+model Counter {
+  id  String @id @map("_id") // مثل "product"
+  seq Int    @default(0)
+}
+
+// ─── داده‌های پایه باسکول (id عددی باسکول) ──────────────────────────────────
+
+/// درخت دسته سه‌سطحی — id/parent_id عددی باسکول
+model Category {
+  id           Int     @id @map("_id") // پسته=44
+  parentId     Int?    @map("parent_id")
+  categoryName String  @map("category_name")
+  slug         String
+  /// CATEGORY (دسته) | PRODUCT_TYPE (نوع کالا — فرزند کاربر-ساختهٔ برگ، برای RFQ آینده)
+  kind         String  @default("CATEGORY")
+  /// واحد فروش پیش‌فرض (کیلوگرم)
+  unit         String  @default("")
+  /// حداقل سفارش پیش‌فرض
+  min          Int     @default(0)
+  /// نمونه ورودی «نوع {دسته} خود را وارد کنید» (مثل: اکبری)
+  example      String?
+  score        Int     @default(0)
+
+  @@index([parentId, kind, score])
+  @@index([slug])
+}
+
+model Province {
+  id            Int     @id @map("_id") // اصفهان=4
+  provinceName  String  @map("province_name")
+  provinceEnName String? @map("province_en_name")
+  countryId     Int     @default(1) @map("country_id")
+  latitude      Float?
+  longitude     Float?
+}
+
+model City {
+  id          Int     @id @map("_id") // شهر بابک=230
+  provinceId  Int     @map("province_id")
+  cityName    String  @map("city_name")
+  cityEnName  String? @map("city_en_name")
+  latitude    Float?
+  longitude   Float?
+
+  @@index([provinceId, cityName])
+}
+
+// ─── Files (دکترین imach-back) ───────────────────────────────────────────────
+
+/// جدول چندریختی File — تصویر/پیوست هر مدلی با fieldKey مشخص می‌شود:
+///   User.avatar · Product.gallery · (آینده: ChargeOrder.receipt, Verification.docs)
+/// ردیف staged (relatedId=null) اگر تا TTL به مدلی نچسبد → reaper حذفش می‌کند.
+/// ⚠️ relatedId رشته ساده است (نه ObjectId) — چندریختی: id کاربر ObjectId است
+/// اما id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/کوئری می‌شوند.
+model File {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  ownerId     String   @map("owner_id") @db.ObjectId
+  owner       User     @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  /// نام مدل مقصد — فقط مقادیر RELATED_MODELS سرویس
+  relatedModel String  @map("related_model")
+  /// id مدل مقصد (رشته) — null یعنی staged
+  relatedId   String?  @map("related_id")
+  /// اسلات: avatar | gallery | receipt | …
+  fieldKey    String   @map("field_key")
+  /// توضیح اختیاری
+  description String?
+  /// نام فایل اصلی (فقط نمایش)
+  name        String
+  mimeType    String   @map("mime_type")
+  /// حجم فایل اصلی بعد از فشرده‌سازی (بایت)
+  size        Int
+  /// URL عمومی مستقیم — بدون توکن، از CDN
+  url         String
+  thumbUrl    String?  @map("thumb_url")
+  /// کلید ذخیره‌سازی فایل اصلی (دستگیره حذف/تعویض پروایدر) — null برای URL خارجی
+  storageKey  String?  @map("storage_key")
+  thumbStorageKey String? @map("thumb_storage_key")
+  /// متادیتا (ابعاد، حجم اصلی، …)
+  metadata    Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([relatedModel, relatedId, fieldKey])
+  @@index([ownerId])
+  @@index([relatedModel, relatedId])
+  @@index([createdAt])
+}
+
+// ─── Products (آگهی — عین ساختار باسکول) ─────────────────────────────────────
+
+model Product {
+  /// id عددی (باسکول برای seed، Counter برای جدید)
+  id            Int     @id @map("_id")
+  productName   String  @map("product_name")
+  /// slug سئوپذیر — خرید-عمده-{نام}-{id}
+  slug          String
+  description   String
+
+  /// دسته پدر (خشکبار=45)
+  categoryId    Int     @map("category_id")
+  /// دسته برگ (پسته=44)
+  subCategoryId Int     @map("sub_category_id")
+  /// واحد فروش دسته (کیلوگرم) — denorm
+  unit          String
+
+  provinceId    Int     @map("province_id")
+  cityId        Int     @map("city_id")
+
+  /// موجودی آماده فروش
+  stock         Int
+  /// حداقل میزان فروش در هر معامله
+  minSaleAmount Int     @map("min_sale_amount")
+  /// کف قیمت هر واحد (تومان) — 0 یعنی «تماس بگیرید»
+  minSalePrice  Int     @map("min_sale_price")
+
+  /// جزئیات نهایی مرحله ۶ ویزارد — [{key, value}]
+  features      Json?
+  status        String  @default("pending") // pending | confirmed | rejected | deleted
+  /// دلایل رد — آرایه رشته
+  rejectionReasons Json? @map("rejection_reasons")
+
+  /// نردبان — آگهی نردبان‌شده بالای «مرتبط‌ترین» (۱۰۰هزار/ماه)
+  isLadder        Boolean   @default(false) @map("is_ladder")
+  ladderExpiresAt DateTime? @map("ladder_expires_at")
+
+  hasVideo   Boolean @default(false) @map("has_video")
+  isOld      Boolean @default(false) @map("is_old")
+  viewCount  Int     @default(0) @map("view_count")
+
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("ProductOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── denorm نمایشی (لیست بدون join — عین باسکول) ──
+  categoryName    String @map("category_name")
+  subCategoryName String @map("sub_category_name")
+  provinceName    String @map("province_name")
+  cityName        String @map("city_name")
+  sellerUserName  String @map("seller_user_name")
+  sellerFirstName String @map("seller_first_name")
+  sellerLastName  String @map("seller_last_name")
+  sellerIsVerified Boolean @default(false) @map("seller_is_verified")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// سورت «مرتبط‌ترین» = نردبان اول، بعد جدیدترین
+  @@index([status, isLadder, updatedAt(sort: Desc)])
+  @@index([subCategoryId, status])
+  @@index([provinceId, cityId, status])
+  @@index([userId, status])
+  @@index([slug])
+}

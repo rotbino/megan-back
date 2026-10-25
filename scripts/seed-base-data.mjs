@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import mongoose from 'mongoose';
+import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,12 +35,13 @@ async function upsertAll(db, collection, docs, mapFn) {
 
 async function main() {
   console.log('▶ اتصال به MongoDB Atlas…');
-  await mongoose.connect(DATABASE_URL);
-  const db = mongoose.connection.db;
+  const client = new MongoClient(DATABASE_URL, { serverSelectionTimeoutMS: 20000 });
+  await client.connect();
+  const db = client.db();
 
   // ── دسته‌ها ──
   const categories = readJson('categories.json');
-  const catNew = await upsertAll(db, 'categories', categories, (c) => ({
+  const catNew = await upsertAll(db, 'Category', categories, (c) => ({
     _id: c.id,
     category_name: (c.category_name ?? '').trim(),
     slug: (c.category_name ?? '').trim(), // اسلاگ فارسی مثل خود باسکول
@@ -55,33 +56,33 @@ async function main() {
 
   // ── استان‌ها ──
   const provinces = readJson('provinces.json');
-  const provNew = await upsertAll(db, 'provinces', provinces, (p) => ({
+  const provNew = await upsertAll(db, 'Province', provinces, (p) => ({
     _id: p.id,
     province_name: (p.province_name ?? '').trim(),
     province_en_name: p.province_en_name ?? null,
     country_id: p.country_id ?? 1,
-    latitude: p.latitude ?? null,
-    longitude: p.longitude ?? null,
+    latitude: p.latitude != null ? Number(p.latitude) : null,
+    longitude: p.longitude != null ? Number(p.longitude) : null,
   }));
   console.log(`✔ provinces: ${provinces.length} سند (${provNew} جدید)`);
 
-  // ── شهرها ──
+  // ── شهرها (trim نام‌ها) ──
   const cities = readJson('cities.json');
-  const cityNew = await upsertAll(db, 'cities', cities, (c) => ({
+  const cityNew = await upsertAll(db, 'City', cities, (c) => ({
     _id: c.id,
     province_id: c.province_id,
     city_name: (c.city_name ?? '').trim(),
     city_en_name: c.city_en_name ?? null,
-    latitude: c.latitude ?? null,
-    longitude: c.longitude ?? null,
+    latitude: c.latitude != null ? Number(c.latitude) : null,
+    longitude: c.longitude != null ? Number(c.longitude) : null,
   }));
   console.log(`✔ cities: ${cities.length} سند (${cityNew} جدید)`);
 
-  await mongoose.disconnect();
+  await client.close();
   console.log('✅ seed داده‌های پایه کامل شد.');
 }
 
 main().catch((err) => {
-  console.error('✖', err);
+  console.error('✖ خطای seed:', err.message);
   process.exit(1);
 });

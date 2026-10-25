@@ -1,14 +1,14 @@
-import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsString, Length, Matches } from 'class-validator';
 
 export class SendOtpDto {
   @IsString()
-  @Matches(/^09\d{9}$/, { message: 'شماره موبایل باید ۱۱ رقم و با 09 شروع شود.' })
+  @Matches(/^09\d{9}$/, { message: 'شماره موبایل معتبر نیست.' })
   phone!: string;
 }
 
 export class VerifyOtpDto {
   @IsString()
-  @Matches(/^09\d{9}$/, { message: 'شماره موبایل باید ۱۱ رقم و با 09 شروع شود.' })
+  @Matches(/^09\d{9}$/, { message: 'شماره موبایل معتبر نیست.' })
   phone!: string;
 
   @IsString()
@@ -18,6 +18,6 @@ export class VerifyOtpDto {
 
 export class RefreshTokenDto {
   @IsString()
-  @IsNotEmpty({ message: 'رفرش‌توکن الزامی است.' })
+  @Length(20, 512)
   refreshToken!: string;
 }

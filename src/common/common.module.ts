@@ -1,10 +1,10 @@
-import { Global, Module } from '@nestjs/common';
-import { CacheService } from './cache.service';
+import { Module } from '@nestjs/common';
+import { PrismaModule } from './prisma/prisma.module';
+import { CacheModule } from './cache/cache.module';
 
-/** ماژول سراسری — CacheService برای همه ماژول‌ها در دسترس است */
-@Global()
+/** زیرساخت مشترک — Prisma + کش (سراسری‌اند، همه‌جا تزریق می‌شوند) */
 @Module({
-  providers: [CacheService],
-  exports: [CacheService],
+  imports: [PrismaModule, CacheModule],
+  exports: [PrismaModule, CacheModule],
 })
 export class CommonModule {}

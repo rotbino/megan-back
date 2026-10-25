@@ -1,25 +1,22 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
-import { ok } from './common/api-response';
+import { PrismaService } from './common/prisma/prisma.module';
 
-/**
- * GET /health — تنها اندپوینت GET کل سرویس (برای مانیتورینگ آپ‌تایم).
- */
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  @ApiOperation({ summary: 'سلامت سرویس و اتصال دیتابیس' })
-  check() {
-    const dbUp = this.connection.readyState === 1;
-    return ok({
-      service: 'megan-back',
-      db: dbUp ? 'up' : 'down',
-      time: new Date().toISOString(),
-    });
+  @ApiOperation({ summary: 'سلامت سرویس + وضعیت دیتابیس (تنها اندپوینت GET)' })
+  async health() {
+    let db: 'up' | 'down' = 'down';
+    try {
+      await this.prisma.category.findMany({ select: { id: true }, take: 1 });
+      db = 'up';
+    } catch {
+      /* پایین است */
+    }
+    return { status: true, data: { service: 'megan-back', db, time: new Date().toISOString() } };
   }
 }

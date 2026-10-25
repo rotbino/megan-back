@@ -1,181 +1,182 @@
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { createHash, randomBytes } from 'node:crypto';
-import { OtpCode, RefreshToken } from './schemas';
-import { User } from '../users/schemas';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { PrismaService } from '../common/prisma/prisma.module';
+import { AppError } from '../common/errors/app-error';
+import { env, isDev, jwtExpiresInSeconds } from '../common/config/env';
 
-const OTP_TTL_SEC = 120; // ۲ دقیقه — مثل باسکول
-const OTP_MAX_TRIES = 5; // حداکثر تلاش اشتباه برای هر کد
-const OTP_RATE_WINDOW_MS = 10 * 60 * 1000; // پنجره rate limit
-const OTP_RATE_MAX = 3; // حداکثر کد در هر پنجره
+const OTP_TTL_MS = 2 * 60 * 1000; // عمر کد: ۲ دقیقه
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_RATE_LIMIT = 3; // حداکثر ۳ کد در ۱۰ دقیقه برای هر شماره
+const OTP_RATE_WINDOW_MS = 10 * 60 * 1000;
 
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
+
+/** شناسه عمومی پروفایل مثل باسکول (wbrstu2g1) — بدون حروف گیج‌کننده */
+const USERNAME_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
+function generateUserName(): string {
+  const bytes = randomBytes(8);
+  return Array.from(bytes, (b) => USERNAME_ALPHABET[b % USERNAME_ALPHABET.length]).join('');
+}
 
 @Injectable()
-export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-  /** phone → timestamps درخواست‌های اخیر (rate limit درون‌حافظه‌ای) */
-  private readonly otpRequests = new Map<string, number[]>();
+export class AuthService implements OnModuleInit, OnModuleDestroy {
+  private reaperTimer: NodeJS.Timeout | null = null;
 
   constructor(
-    @InjectModel(OtpCode.name) private readonly otpModel: Model<OtpCode>,
-    @InjectModel(RefreshToken.name) private readonly refreshModel: Model<RefreshToken>,
-    @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService,
   ) {}
 
-  /** POST /auth/sendOtp — ساخت و «ارسال» کد ۵ رقمی */
-  async sendOtp(phone: string) {
-    this.assertRateLimit(phone);
-
-    const code = String(Math.floor(10000 + Math.random() * 90000));
-    // فقط آخرین کد هر شماره معتبر است
-    await this.otpModel.deleteMany({ phone });
-    await this.otpModel.create({
-      phone,
-      code_hash: sha256(`${phone}:${code}`),
-      expires_at: new Date(Date.now() + OTP_TTL_SEC * 1000),
-      tries: 0,
-    });
-
-    // TODO(B11): اتصال سرویس پیامک (کاوه‌نگار/…) — تا آن زمان فقط لاگ
-    this.logger.log(`OTP ${phone} → ${code}`);
-
-    const data: Record<string, unknown> = { phone, expiresIn: OTP_TTL_SEC };
-    // در development کد در پاسخ برمی‌گردد تا بدون پنل پیامک قابل تست باشد
-    if (this.config.get('NODE_ENV') === 'development') data.devCode = code;
-    return data;
+  /** پاک‌سازی دوره‌ای کدهای منقضی و رفرش‌توکن‌های باطل (TTL ایندکس در Prisma نیست) */
+  onModuleInit(): void {
+    const boot = setTimeout(() => void this.reapExpired(), 30_000);
+    boot.unref?.();
+    this.reaperTimer = setInterval(() => void this.reapExpired(), 10 * 60 * 1000);
+    this.reaperTimer.unref?.();
+  }
+  onModuleDestroy(): void {
+    if (this.reaperTimer) clearInterval(this.reaperTimer);
   }
 
-  /** POST /auth/verifyOtp — تایید کد + ورود/ثبت‌نام خودکار + صدور توکن‌ها */
-  async verifyOtp(phone: string, code: string) {
-    const otp = await this.otpModel.findOne({ phone }).sort({ created_at: -1 });
-    if (!otp) {
-      throw new BadRequestException({
-        message: 'کد تاییدی برای این شماره یافت نشد؛ دوباره درخواست کنید.',
-        code: 'OTP_NOT_FOUND',
+  private async reapExpired(): Promise<void> {
+    try {
+      const now = new Date();
+      await this.prisma.otpCode.deleteMany({ where: { expiresAt: { lt: now } } });
+      await this.prisma.refreshToken.deleteMany({
+        where: { OR: [{ expiresAt: { lt: now } }, { revokedAt: { not: null } }] },
       });
+    } catch {
+      /* reaper هرگز نباید کاربر را بیدار کند */
     }
-    if (otp.expires_at.getTime() < Date.now()) {
-      await this.otpModel.deleteOne({ _id: otp._id });
-      throw new BadRequestException({
-        message: 'کد تایید منقضی شده است؛ کد جدید بگیرید.',
-        code: 'OTP_EXPIRED',
-      });
-    }
-    if (otp.tries >= OTP_MAX_TRIES) {
-      await this.otpModel.deleteOne({ _id: otp._id });
-      throw new BadRequestException({
-        message: 'تعداد تلاش‌های نامعتبر زیاد است؛ کد جدید بگیرید.',
-        code: 'OTP_LOCKED',
-      });
-    }
-    if (otp.code_hash !== sha256(`${phone}:${code}`)) {
-      otp.tries += 1;
-      await otp.save();
-      throw new BadRequestException({
-        message: 'کد تایید نادرست است.',
-        code: 'OTP_WRONG',
-      });
-    }
-
-    // کد صحیح → مصرف و یافتن/ساخت کاربر (ورود و ثبت‌نام یک جاست — مثل باسکول)
-    await this.otpModel.deleteOne({ _id: otp._id });
-    let user = await this.userModel.findOne({ phone });
-    const isNewUser = !user;
-    if (!user) {
-      user = await this.userModel.create({ phone });
-    }
-
-    const tokens = await this.issueTokens(user);
-    return { isNewUser, user: this.publicUser(user), ...tokens };
   }
 
-  /** POST /auth/refreshToken — چرخش رفرش‌توکن */
-  async refreshToken(refreshToken: string) {
-    const doc = await this.refreshModel.findOne({
-      token_hash: sha256(refreshToken),
-      revoked: false,
+  // ─── OTP ────────────────────────────────────────────────────────────────────
+
+  /** POST /auth/sendOtp — ارسال کد ۵ رقمی؛ rate limit ۳ کد در ۱۰ دقیقه */
+  async sendOtp(phone: string): Promise<{ devCode?: string; expiresInSec: number }> {
+    // سقف ارسال برای هر شماره
+    const since = new Date(Date.now() - OTP_RATE_WINDOW_MS);
+    const recent = await this.prisma.otpCode.count({ where: { phone, createdAt: { gt: since } } });
+    if (recent >= OTP_RATE_LIMIT) {
+      throw AppError.badRequest(
+        'به تعداد کد تایید درخواست‌شده زیاد است؛ چند دقیقه بعد تلاش کنید.',
+        'OTP_RATE_LIMITED',
+      );
+    }
+
+    const code = String(randomInt(10000, 99999));
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    await this.prisma.otpCode.create({
+      data: { phone, codeHash: sha256(`${phone}:${code}`), expiresAt },
     });
-    if (!doc || doc.expires_at.getTime() < Date.now()) {
-      throw new UnauthorizedException({
-        message: 'نشست شما منقضی شده است؛ دوباره وارد شوید.',
-        code: 'REFRESH_INVALID',
-      });
+
+    // TODO (فاز بعدی): اتصال به سرویس پیامک — فعلاً فقط devCode در development
+    return { expiresInSec: OTP_TTL_MS / 1000, ...(isDev ? { devCode: code } : {}) };
+  }
+
+  /** POST /auth/verifyOtp — تایید کد + ورود/ثبت‌نام خودکار (توکن‌ها را برمی‌گرداند) */
+  async verifyOtp(phone: string, code: string): Promise<{
+    isNewUser: boolean;
+    accessToken: string;
+    refreshToken: string;
+  }> {
+    const latest = await this.prisma.otpCode.findFirst({
+      where: { phone },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latest || latest.expiresAt < new Date()) {
+      throw AppError.badRequest('کد تایید منقضی شده است؛ دوباره درخواست کنید.', 'OTP_EXPIRED');
     }
-    const user = await this.userModel.findById(doc.user_id);
+    if (latest.attempts >= OTP_MAX_ATTEMPTS) {
+      throw AppError.badRequest('تلاش‌های شما بیش از حد مجاز بود؛ کد جدید بگیرید.', 'OTP_LOCKED');
+    }
+
+    if (latest.codeHash !== sha256(`${phone}:${code}`)) {
+      await this.prisma.otpCode.update({
+        where: { id: latest.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw AppError.badRequest('کد تایید اشتباه است.', 'OTP_WRONG');
+    }
+
+    // کد مصرف شد
+    await this.prisma.otpCode.delete({ where: { id: latest.id } }).catch(() => undefined);
+
+    // ورود/ثبت‌نام یکجا — مثل باسکول
+    let user = await this.prisma.user.findUnique({ where: { phone } });
+    let isNewUser = false;
     if (!user) {
-      throw new UnauthorizedException({
-        message: 'کاربر یافت نشد؛ دوباره وارد شوید.',
-        code: 'USER_NOT_FOUND',
+      isNewUser = true;
+      user = await this.prisma.user.create({
+        data: {
+          phone,
+          userName: await this.uniqueUserName(),
+        },
       });
     }
-    // چرخش: قدیمی باطل، جفت جدید صادر
-    doc.revoked = true;
-    await doc.save();
-    return this.issueTokens(user);
+
+    const accessToken = await this.signAccessToken(user.id, user.phone, user.role);
+    const refreshToken = await this.issueRefreshToken(user.id);
+
+    return { isNewUser, accessToken, refreshToken };
+  }
+
+  /** POST /auth/refreshToken — چرخشی: توکن جدید صادر و قبلی باطل می‌شود */
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const tokenHash = sha256(refreshToken);
+    const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+
+    if (!row || row.revokedAt || row.expiresAt < new Date()) {
+      throw AppError.unauthorized('نشست شما منقضی شده است؛ دوباره وارد شوید.');
+    }
+
+    // باطل‌سازی توکن فعلی + صدور جفت جدید (چرخشی)
+    await this.prisma.refreshToken.update({
+      where: { id: row.id },
+      data: { revokedAt: new Date() },
+    });
+    const user = await this.prisma.user.findUnique({ where: { id: row.userId } });
+    if (!user) throw AppError.unauthorized('حساب کاربری یافت نشد.');
+
+    return {
+      accessToken: await this.signAccessToken(user.id, user.phone, user.role),
+      refreshToken: await this.issueRefreshToken(user.id),
+    };
   }
 
   /** POST /auth/logout — ابطال رفرش‌توکن */
   async logout(refreshToken: string): Promise<void> {
-    await this.refreshModel.updateOne(
-      { token_hash: sha256(refreshToken) },
-      { $set: { revoked: true } },
+    await this.prisma.refreshToken.update({
+      where: { tokenHash: sha256(refreshToken) },
+      data: { revokedAt: new Date() },
+    }).catch(() => undefined); // خروج با توکن نامعتبر هم موفق است
+  }
+
+  // ─── داخلی ──────────────────────────────────────────────────────────────────
+
+  private async signAccessToken(userId: string, phone: string, role: string): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: userId, phone, role },
+      { expiresIn: jwtExpiresInSeconds() },
     );
   }
 
-  // ── داخلی ──────────────────────────────────────────────
-
-  private async issueTokens(user: User) {
-    const accessToken = await this.jwt.signAsync({
-      sub: String(user._id),
-      phone: user.phone,
-    });
-    const refreshToken = randomBytes(32).toString('hex');
-    const ttlDays = Number(this.config.get('REFRESH_TOKEN_TTL_DAYS') ?? 30);
-    await this.refreshModel.create({
-      user_id: user._id as Types.ObjectId,
-      token_hash: sha256(refreshToken),
-      expires_at: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000),
-    });
-    return { accessToken, refreshToken, expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '7d' };
+  private async issueRefreshToken(userId: string): Promise<string> {
+    const token = randomBytes(48).toString('base64url');
+    const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000);
+    await this.prisma.refreshToken.create({ data: { tokenHash: sha256(token), userId, expiresAt } });
+    return token;
   }
 
-  private assertRateLimit(phone: string): void {
-    const now = Date.now();
-    const recent = (this.otpRequests.get(phone) ?? []).filter(
-      (t) => now - t < OTP_RATE_WINDOW_MS,
-    );
-    if (recent.length >= OTP_RATE_MAX) {
-      throw new BadRequestException({
-        message: 'درخواست کد بیش از حد مجاز؛ چند دقیقه دیگر تلاش کنید.',
-        code: 'OTP_RATE_LIMITED',
-      });
+  private async uniqueUserName(): Promise<string> {
+    for (let i = 0; i < 5; i++) {
+      const candidate = generateUserName();
+      const exists = await this.prisma.user.findUnique({ where: { userName: candidate } });
+      if (!exists) return candidate;
     }
-    recent.push(now);
-    this.otpRequests.set(phone, recent);
-  }
-
-  /** فیلدهای امن برای پاسخ‌های auth */
-  publicUser(user: User) {
-    return {
-      id: String(user._id),
-      phone: user.phone,
-      user_name: user.user_name ?? null,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      sex: user.sex ?? null,
-      role: user.role,
-      is_verified: user.is_verified,
-      is_buyer: user.is_buyer,
-      is_seller: user.is_seller,
-      wallet_balance: user.wallet_balance,
-      avatar_url: user.avatar_url ?? null,
-      created_at: user.created_at,
-    };
+    return `${generateUserName()}${Date.now().toString(36)}`;
   }
 }

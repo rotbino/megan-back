@@ -1,45 +1,51 @@
-# Megan Backend — ایمچ
+# Megan (iMach) — بک‌اند مارکت‌پلیس B2B عمده‌فروشی
 
-مارکت‌پلیس B2B عمده‌فروشی **ایمچ (iMach)** — کلون Buskool با برند مستقل.
-
-**پشته:** NestJS 11 + Fastify 5 + Mongoose 9 → **MongoDB Atlas** (`megan_online_db`) + ArvanCloud Object Storage (تصاویر)
-
-## معماری
-
-- مستندات کامل و نقشه راه فاز به فاز: **[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)**
-- Swagger (در development): `http://localhost:4000/docs`
-- قرارداد پاسخ یکنواخت: `{ status: true, data, message? }` / `{ status: false, message, code? }`
-- نام‌گذاری اندپوینت‌ها خوانا و فعلی (مثل `getUserByPhone`) — اکثراً POST
-- کش درون‌حافظه با TTL برای داده‌های پایه (قابل تعویض با Redis)
-- احراز: موبایل + OTP ۵ رقمی → JWT دسترسی + رفرش‌توکن چرخشی
+**NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas** — آگهی‌ها عین ساختار باسکول (id عددی،
+فیلدهای snake_case)، مدیریت فایل چندریختی با دکترین imach-back (staging + reaper + replace).
 
 ## اجرا
 
 ```bash
-bun install               # یا npm install
-bun run build             # tsc → dist/
-node dist/main.js         # → http://localhost:4000
-
-# seed داده‌های پایه (دسته‌ها/استان‌ها/شهرها) از APIهای عمومی باسکول
-bun run seed:base-data
+bun install
+bunx prisma generate
+bash scripts/db-push.sh        # اسکیما + ایندکس‌ها (override صریح DATABASE_URL)
+bun run seed:base-data         # ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر از باسکول
+bun run seed:products          # ۲۶ فروشنده + ۶۰ آگهی واقعی + rehost عکس‌ها در آروان
+bun run build
+node dist/main.js              # → http://localhost:4000  |  Swagger: /docs
 ```
 
 ## ساختار
 
 ```
 src/
-  main.ts                 # بوت Fastify + helmet/cors/compress + Swagger + ایندکس‌ها
-  app.module.ts           # اتصال Atlas + ماژول‌ها
-  db-indexes.ts           # ایندکس‌های صریح (منبع حقیقت)
-  common/                 # کش، گارد JWT، فیلتر خطا، قرارداد پاسخ
-  auth/                   # sendOtp / verifyOtp / refreshToken / logout
-  users/                  # getProfile / updateProfile / getUserByPhone
-  categories/             # getAllCategories / getCategoriesByParent (کش)
-  locations/              # getAllProvinces / getCitiesByProvince (کش)
-scripts/
-  fetch-buskool-base-data.mjs   # کراول APIهای عمومی باسکول → JSON
-  seed-base-data.mjs            # اینزرت JSONها در Atlas (upsert)
-  data/                         # خروجی کراول (categories/provinces/cities)
+  common/       env (fail-fast) · PrismaService (گرم‌کردن بوت) · کش تگ‌دار LRU · AppError · فیلتر خطا · گاردها
+  auth/         sendOtp · verifyOtp · refreshToken · logout — OTP هش‌شده + JWT + رفرش چرخشی
+  users/        getProfile · updateProfile · getUserByPhone
+  categories/   getAllCategories · getCategoriesByParent — درخت باسکول (id عددی)
+  locations/    getAllProvinces · getCitiesByProvince
+  uploads/      uploadImage · getFileUrl · deleteImage + ادمین (عروسک/مصرف) — پورت imach-back
+  products/     getProductList · getProductById · createProduct · getMyProducts · getSeller · …
+scripts/        seedها · fetch از باسکول · db-push.sh · db-drop-all.mjs · test-api.mjs
+docs/           IMPLEMENTATION.md — نقشه راه فاز به فاز (زنده)
 ```
 
-> `.env` از نمونه `.env.example` ساخته می‌شود و هرگز commit نمی‌شود.
+## قرارداد پاسخ
+
+```
+موفق:  { "status": true,  "data": {...}, "message": "…" }
+خطا:   { "status": false, "message": "پیام فارسی", "code": "OTP_WRONG" }
+```
+
+اندپوینت‌ها خوانا و فعلی (اکثراً POST) — مستندات کامل در Swagger `/docs`.
+
+## نکته‌های حیاتی
+
+- **id عددی باسکول** برای دسته/استان/شهر/آگهی (Prisma روی مونگو id صریح عددی)؛ id جدید
+  محصولات از جدول `Counter`.
+- **درون‌ریزی مستقیم با درایور خام:** فیلدهای ObjectId (user_id/owner_id) باید ObjectId
+  واقعی باشند نه رشته (seed دارای fixer).
+- **فایل‌ها:** جدول `File` چندریختی — relatedId رشته (ObjectUserId کاربر یا عدد آگهی)؛
+  reaper هر ۶ ساعت stagedهای منقضی را با بایت‌هایشان حذف می‌کند؛ replace اول آپلود
+  می‌کند بعد قبلی را پاک می‌کند.
+- سند کامل: `docs/IMPLEMENTATION.md`

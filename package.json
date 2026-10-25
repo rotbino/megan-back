@@ -1,38 +1,45 @@
 {
   "name": "megan-back",
-  "version": "0.2.0",
-  "description": "Megan (iMach) B2B wholesale marketplace API — NestJS 11 + Fastify 5 + Mongoose (MongoDB Atlas)",
+  "version": "1.0.0",
+  "description": "Megan (iMach) B2B wholesale marketplace API — NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas (Buskool-compatible data, imach-back file-management doctrine)",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
     "dev": "nest start --watch",
-    "seed:base-data": "node scripts/fetch-buskool-base-data.mjs && node scripts/seed-base-data.mjs"
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "seed:base-data": "node scripts/fetch-buskool-base-data.mjs && node scripts/seed-base-data.mjs",
+    "seed:products": "node scripts/seed-products.mjs",
+    "test:api": "node scripts/test-api.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1138.0",
     "@fastify/compress": "^9.2.2",
     "@fastify/cors": "^11.3.1",
     "@fastify/helmet": "^13.2.0",
+    "@fastify/multipart": "^10.1.6",
     "@fastify/static": "^10.1.7",
-    "@nestjs/common": "^11.2.8",
-    "@nestjs/config": "^12.0.1",
-    "@nestjs/core": "^11.2.8",
-    "@nestjs/jwt": "^12.0.3",
-    "@nestjs/mongoose": "^12.0.0",
-    "@nestjs/platform-fastify": "^11.2.8",
-    "@nestjs/swagger": "^12.0.4",
+    "@nestjs/common": "^12.0.3",
+    "@nestjs/core": "^12.0.3",
+    "@nestjs/jwt": "^12.0.2",
+    "@nestjs/platform-fastify": "^12.0.3",
+    "@nestjs/swagger": "^12.0.1",
+    "@nestjs/throttler": "^6.7.0",
+    "@prisma/client": "^6.19.3",
     "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.1",
+    "class-validator": "^0.15.1",
     "dotenv": "^18.0.9",
-    "fastify": "5.11.3",
-    "mongoose": "^9.11.4",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.2",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@nestjs/cli": "^12.0.10",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.7.0"
+    "@nestjs/cli": "^12.0.1",
+    "@types/node": "^24.5.2",
+    "mongodb": "^7.6.0",
+    "prisma": "^6.19.3",
+    "typescript": "^5.9.2"
   }
 }

@@ -1,73 +1,92 @@
 import 'reflect-metadata';
-import dotenv from 'dotenv';
-// .env باید برنده شود حتی اگر متغیری از قبل در محیط تعریف شده باشد
-dotenv.config({ path: '.env', override: true });
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { getConnectionToken } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
+import helmet from '@fastify/helmet';
+import fastifyMultipart from '@fastify/multipart';
+import fastifyCompress from '@fastify/compress';
+import fastifyStatic from '@fastify/static';
+import path from 'node:path';
 import { AppModule } from './app.module';
-import { ensureIndexes } from './db-indexes';
-import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { env, isProd, storage } from './common/config/env';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+
+const API_PREFIX = 'api/v1';
 
 async function bootstrap(): Promise<void> {
-  // Fastify = سرعت بالاتر از Express (انتخاب معماری پروژه)
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    new FastifyAdapter({ trustProxy: true, logger: false }),
-  );
-  const config = app.get(ConfigService);
-
-  // ── پلاگین‌های Fastify: امنیت + CORS + فشرده‌سازی پاسخ (سرعت) ──
-  await app.register(import('@fastify/helmet'), { contentSecurityPolicy: false });
-  const origins = (config.get<string>('CORS_ORIGINS') ?? '*')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  await app.register(import('@fastify/cors'), {
-    origin: origins.includes('*') ? true : origins,
-    credentials: true,
+  const adapter = new FastifyAdapter({
+    trustProxy: true, // پشت reverse proxy
+    // آپلود multipart به فضای بیشتری از MAX_FILE_SIZE نیاز دارد
+    bodyLimit: Math.max(512 * 1024, storage.MAX_FILE_SIZE + 1024 * 1024),
+    logger: isProd
+      ? false
+      : {
+          level: 'warn',
+          redact: {
+            paths: ['req.headers.authorization', 'req.headers.cookie'],
+            censor: '[REDACTED]',
+          },
+        },
   });
-  await app.register(import('@fastify/compress'));
 
-  // ── اعتبارسنجی سراسری ورودی‌ها (DTO با class-validator) ──
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: true, // ورودی ناشناس حذف می‌شود
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
+    logger: isProd ? ['error', 'warn'] : undefined,
+  });
 
-  // ── شکل یکنواخت خطاها ──
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // ── امنیت و پلتفرم ──────────────────────────────────────────────────────────
+  // CORP = cross-origin: عکس‌های عمومی (آروان) از دامنه‌ی دیگری سرو می‌شوند؛
+  // same-origin پیش‌فرضِ helmet آن‌ها را در مرورگر بلاک می‌کند (عکس «شکسته» دیده می‌شد)
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: storage.MAX_FILE_SIZE, files: 1, fields: 10 },
+  });
+  await app.register(fastifyCompress);
 
-  app.enableShutdownHooks();
-
-  // ── ایندکس‌های دیتابیس (idempotent) ──
-  const connection = app.get<Connection>(getConnectionToken());
-  await ensureIndexes(connection);
-
-  // ── مستندات Swagger فقط با SWAGGER_ENABLED=true ──
-  if ((config.get<string>('SWAGGER_ENABLED') ?? 'false') === 'true') {
-    const document = new DocumentBuilder()
-      .setTitle('Megan API — ایمچ')
-      .setDescription('مارکت‌پلیس B2B عمده‌فروشی ایمچ — NestJS + Fastify + Mongoose')
-      .setVersion('0.2')
-      .addBearerAuth()
-      .build();
-    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, document));
+  // درایور local فایل‌ها را مستقیم سرو می‌کند (درایور arvan بی‌اعتناست)
+  if (storage.DRIVER === 'local') {
+    await app.register(fastifyStatic, {
+      root: path.resolve(storage.UPLOAD_PATH),
+      prefix: '/uploads/',
+    });
   }
 
-  const port = Number(config.get('PORT') ?? 4000);
-  const host = config.get<string>('HOST') ?? '0.0.0.0';
-  await app.listen({ port, host });
-  new Logger('Bootstrap').log(
-    `🚀 Megan API (Fastify + Mongoose) → http://${host}:${port} | Swagger: /docs | DB: ${connection.name}`,
+  await app.register(import('@fastify/cors'), {
+    origin: env.CORS_ORIGINS === '*' ? true : env.CORS_ORIGINS.split(',').map((o) => o.trim()),
+    credentials: true,
+  });
+
+  // ── اعتبارسنجی و شکل خطا ────────────────────────────────────────────────────
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // ورودی ناشناس حذف می‌شود
+      transform: true, // تبدیل @Type() برای کوئری‌های عددی
+    }),
   );
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  app.setGlobalPrefix(API_PREFIX);
+  app.enableShutdownHooks();
+
+  // ── مستندات Swagger (در پروداکشن خاموش) ────────────────────────────────────
+  if (env.SWAGGER_ENABLED) {
+    const config = new DocumentBuilder()
+      .setTitle('Megan API — ایمچ')
+      .setDescription('مارکت‌پلیس B2B عمده‌فروشی ایمچ — NestJS + Fastify + Prisma + MongoDB')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+  }
+
+  await app.listen({ port: env.PORT, host: env.HOST });
+  if (!isProd) console.log(`🚀 Megan API (Prisma + Fastify) → http://${env.HOST}:${env.PORT} | Swagger: /docs`);
 }
 
-bootstrap();
+void bootstrap().catch((err) => {
+  console.error('Fatal bootstrap error:', err);
+  process.exit(1);
+});

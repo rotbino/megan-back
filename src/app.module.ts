@@ -1,31 +1,31 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { MongooseModule } from '@nestjs/mongoose';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { CommonModule } from './common/common.module';
 import { HealthController } from './health.controller';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CategoriesModule } from './categories/categories.module';
 import { LocationsModule } from './locations/locations.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { ProductsModule } from './products/products.module';
 
+/**
+ * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
+ * (Prisma + کش). حد نرخ سراسری: ۳۰۰ درخواست/دقیقه/IP (کنترلر auth سخت‌تر).
+ */
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    // اتصال به MongoDB Atlas — ایندکس‌سازی خودکار خاموش (ایندکس‌ها صریحاً در db-indexes.ts ساخته می‌شوند)
-    MongooseModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        uri: config.get<string>('DATABASE_URL'),
-        autoIndex: false,
-      }),
-    }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     CommonModule,
     AuthModule,
     UsersModule,
     CategoriesModule,
     LocationsModule,
+    UploadsModule,
+    ProductsModule,
   ],
-  // HealthController اینجا است تا @InjectConnection بدون import اضافه کار کند
   controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
