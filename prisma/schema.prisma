@@ -35,14 +35,19 @@ model User {
   userName         String?     @unique @map("user_name") // شناسه پروفایل عمومی مثل c34qxnsh
   firstName        String      @map("first_name")
   lastName         String      @map("last_name")
+  sex              String? // «آقا» / «خانم» — مثل باسکول
   role             Role        @default(USER)
   activePakageType PackageType @default(FREE) @map("active_pakage_type") // نگهداری املای باسکول برای مهاجرت (در ایمچ v1 کاربرد ندارد)
   isVerified       Boolean     @default(false) @map("is_verified") // احراز هویت حقیقی/حقوقی
+  isBuyer          Boolean     @default(false) @map("is_buyer")
+  isSeller         Boolean     @default(false) @map("is_seller")
+  walletBalance    Int         @default(0) @map("wallet_balance") // تومان — کیف پول پنل
   avatarUrl        String?     @map("avatar_url")
   businessDesc     String?     @map("business_desc") // «درباره کسب‌وکار» پروفایل
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
+  profile      UserProfile?
   products     Product[]
   buyRequests  BuyRequest[]
   reviewsGiven Review[]      @relation("Reviewer")
@@ -52,9 +57,37 @@ model User {
   chatThreadsB ChatThread[]  @relation("ThreadUserB")
   messages     ChatMessage[]
   ladderOrders LadderOrder[]
+  savedLists   SavedList[] // لیست‌های «نشان شده ها» پنل (CRM کوچک)
+  savedBy      SavedUser[]   @relation("SavedBy") // مواردی که کاربران دیگر این کاربر را نشان کرده‌اند
 
   @@index([activePakageType, isVerified])
   @@map("myusers")
+}
+
+// ─────────────────────────────────────────────────────────────
+// پروفایل پنل — منطبق بر پاسخ user/get_profile باسکول
+// (فیلدهای جدول myuser_profiles باسکول برای مهاجرت ۱:۱)
+// ─────────────────────────────────────────────────────────────
+model UserProfile {
+  id                  Int      @id @default(autoincrement())
+  myuserId            Int      @unique @map("myuser_id")
+  myuser              User     @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  description         String?  @db.Text // «درباره شما» — پنل حداقل ۳ تا ۵ خط می‌خواهد
+  activityDomain      String?  @map("activity_domain")
+  humanResourceCount  Int?     @map("human_resource_count")
+  profilePhoto        String?  @map("profile_photo")
+  publicPhone         String?  @map("public_phone") // تلفن عمومی پروفایل
+  address             String? // «تهران - تهران»
+  postalCode          String?  @map("postal_code")
+  shabaCode           String?  @map("shaba_code")
+  isCompany           Boolean  @default(false) @map("is_company")
+  companyName         String   @default("") @map("company_name")
+  companyRegisterCode String   @default("") @map("company_register_code")
+  confirmed           Boolean  @default(false) // تأیید کارشناسان
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("myuser_profiles")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -125,14 +158,22 @@ model City {
 // Products — جدول باسکول: products (تمام فیلدهای استخراج‌شده از API)
 // ─────────────────────────────────────────────────────────────
 
+enum ProductStatus {
+  PENDING // در انتظار تایید
+  CONFIRMED // تایید شده
+  REJECTED // رد شده
+  DELETED // حذف شده
+}
+
 model Product {
-  id            Int    @id @default(autoincrement())
-  productName   String @map("product_name") // «پسته اکبری20_22»
-  description   String @db.Text
-  stock         Int    @default(0) // موجودی آماده فروش (کیلوگرم/عدد)
-  minSalePrice  Int?   @map("min_sale_price") // کف قیمت هر واحد (تومان) — 3700000
-  minSaleAmount Int    @map("min_sale_amount") // حداقل میزان فروش در هر معامله — 1000
-  unit          String @default("کیلوگرم")
+  id            Int           @id @default(autoincrement())
+  productName   String        @map("product_name") // «پسته اکبری20_22»
+  description   String        @db.Text
+  stock         Int           @default(0) // موجودی آماده فروش (کیلوگرم/عدد)
+  minSalePrice  Int?          @map("min_sale_price") // کف قیمت هر واحد (تومان) — 3700000
+  minSaleAmount Int           @map("min_sale_amount") // حداقل میزان فروش در هر معامله — 1000
+  unit          String        @default("کیلوگرم")
+  status        ProductStatus @default(PENDING) // تب‌های «محصولات من» پنل
 
   // نرمال‌شده مثل باسکول: هم دسته پدر (خشکبار) هم دسته برگ (پسته)
   categoryId    Int      @map("category_id")
@@ -162,6 +203,7 @@ model Product {
   priceRecords PriceHistory[]
   chatThreads  ChatThread[]
   ladderOrders LadderOrder[]
+  features     ProductFeature[] // «جزئیات نهایی» فرم ثبت محصول
 
   // مرتب‌سازی «مرتبط‌ترین» باسکول (sort_by=BM): نردبان‌ها اول
   @@index([subCategoryId, isLadder, updatedAt])
@@ -283,6 +325,78 @@ model Favorite {
 
   @@id([userId, productId])
   @@map("favorites")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ویژگی‌های محصول — مرحله «جزئیات نهایی» ثبت محصول
+// کلیدها ثابت فرانت: بسته‌بندی/کیفیت/رنگ/اندازه یا ابعاد/گواهی کیفی، سلامت/
+// تازگی/نوع فروش/روش نگهداری یا ماندگاری/مزایا نسبت به محصولات مشابه
+// ─────────────────────────────────────────────────────────────
+model ProductFeature {
+  id         Int     @id @default(autoincrement())
+  productId  Int     @map("product_id")
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  featureKey String  @map("feature_key")
+  value      String
+
+  @@unique([productId, featureKey])
+  @@map("product_features")
+}
+
+// ─────────────────────────────────────────────────────────────
+// نشان شده ها — CRM کوچک پیگیری مشتری (مثل باسکول)
+// کاربر پنل خریداران را در لیست‌های نام‌دار نشان می‌کند؛
+// هر مورد وضعیت پیگیری + یادداشت‌های زمان‌دار دارد.
+// پاسخ سرویس: { status, lists: [{ id, name, cnt, saved }] }
+// ─────────────────────────────────────────────────────────────
+enum SavedUserStatus {
+  FOLLOWING // در حال پیگیری
+  NOT_NEEDED // فعلا نیاز نداشت
+  UNRESPONSIVE // پاسخگو نبود
+  OUT_OF_STOCK // موجودی نداشت
+  PRIORITY_HIGH // اولویت زیاد
+  PRIORITY_MEDIUM // اولویت متوسط
+  PRIORITY_LOW // اولویت کم
+}
+
+model SavedList {
+  id        Int      @id @default(autoincrement())
+  myuserId  Int      @map("myuser_id")
+  myuser    User     @relation(fields: [myuserId], references: [id], onDelete: Cascade)
+  name      String // «سیب زمینی»
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  savedUsers SavedUser[]
+
+  @@unique([myuserId, name])
+  @@map("saved_lists")
+}
+
+model SavedUser {
+  id          Int             @id @default(autoincrement())
+  savedListId Int             @map("saved_list_id")
+  savedList   SavedList       @relation(fields: [savedListId], references: [id], onDelete: Cascade)
+  myuserId    Int             @map("saved_myuser_id") // خریدار نشان‌شده
+  myuser      User            @relation("SavedBy", fields: [myuserId], references: [id], onDelete: Cascade)
+  status      SavedUserStatus @default(FOLLOWING)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  notes SavedUserNote[]
+
+  @@unique([savedListId, myuserId])
+  @@map("saved_users")
+}
+
+model SavedUserNote {
+  id          Int       @id @default(autoincrement())
+  savedUserId Int       @map("saved_user_id")
+  savedUser   SavedUser @relation(fields: [savedUserId], references: [id], onDelete: Cascade)
+  text        String    @db.Text // «یادم باشه زنگ بزنم»
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("saved_user_notes")
 }
 
 // تاریخچه قیمت برای نمودار روند (بهبود نسبت به باسکول)
