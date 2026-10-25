@@ -39,15 +39,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
       // پیام‌های ساختاری ValidationPipe → فیلدها جدا می‌شوند
       if (typeof body === 'object' && body !== null && 'message' in (body as Record<string, unknown>)) {
-        const raw = (body as { message?: unknown }).message;
-        const fields = Array.isArray(raw) ? raw : undefined;
-        const humanMsg =
-          typeof raw === 'string' && raw.length > 0 && raw.length < 200
-            ? raw
-            : status === HttpStatus.BAD_REQUEST
-              ? 'اطلاعات ارسالی معتبر نیست.'
-              : 'خطایی رخ داد؛ دوباره تلاش کنید.';
-
         if (status === HttpStatus.TOO_MANY_REQUESTS) {
           reply.code(status).send({
             status: false,
@@ -56,6 +47,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
           });
           return;
         }
+
+        const raw = (body as { message?: unknown }).message;
+        const fields = Array.isArray(raw) ? (raw as string[]) : undefined;
+        // اگر فقط یک خطای اعتبارسنجی هست، همان پیام اصلی شود (UX بهتر)
+        const singleMsg = fields && fields.length === 1 ? fields[0] : null;
+        const humanMsg =
+          singleMsg ??
+          (typeof raw === 'string' && raw.length > 0 && raw.length < 200
+            ? raw
+            : status === HttpStatus.BAD_REQUEST
+              ? 'اطلاعات ارسالی معتبر نیست.'
+              : 'خطایی رخ داد؛ دوباره تلاش کنید.');
 
         // کدهای پایدار برای استثناهای داخلی Nest
         const code =
