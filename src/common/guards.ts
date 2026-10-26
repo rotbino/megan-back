@@ -1,6 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { AppError } from './errors/app-error';
 
 /** کاربر احرازشده — روی request توسط JwtAuthGuard گذاشته می‌شود */
 export interface AuthUser {
@@ -44,17 +43,8 @@ export class JwtAuthGuard implements CanActivate {
   }
 }
 
-/** گارد نقش ادمین — بعد از JwtAuthGuard روی همان route */
-@Injectable()
-export class AdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<FastifyRequestWithUser>();
-    if (request.role !== 'ADMIN') {
-      throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
-    }
-    return true;
-  }
-}
+// گارد نقش ادمینِ توکن‌کاربر (AdminGuard) در فاز A5 حذف شد — همه مسیرهای
+// ادمین حالا زیر admin/* با AdminJwtAuthGuard (کالکشن AdminUser جدا) هستند.
 
 /** تایپ کمکی برای request تزئین‌شده توسط گارد */
 export interface FastifyRequestWithUser {

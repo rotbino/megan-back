@@ -3,7 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString, Length, Max, Min } from 'class-validator';
-import { JwtAuthGuard, AdminGuard } from '../common/guards';
+import { JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -28,20 +28,6 @@ class GetFileUrlDto {
   @IsString()
   @Length(1, 40)
   key!: string;
-}
-
-class DeleteOrphansDto {
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  ids?: string[];
-}
-
-class UsageDto {
-  @IsOptional()
-  @Min(1)
-  @Max(500)
-  limit?: number;
 }
 
 /**
@@ -115,29 +101,6 @@ export class UploadsController {
     return ok(await this.files.remove(user, dto.fileId), 'فایل حذف شد.');
   }
 
-  // ─── ادمین ────────────────────────────────────────────────────────────────
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('listOrphans')
-  @ApiOperation({ summary: 'فایل‌های عروسک (staged منقضی + dangling) — ادمین' })
-  async listOrphans() {
-    return ok(await this.files.listOrphans());
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('deleteOrphans')
-  @ApiOperation({ summary: 'حذف عروسک‌ها (با ids یا همه) — ادمین' })
-  async deleteOrphans(@Body() dto: DeleteOrphansDto) {
-    return ok(await this.files.deleteOrphans(dto.ids));
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('getUsage')
-  @ApiOperation({ summary: 'مصرف ذخیره‌سازی هر کاربر — ادمین' })
-  async getUsage(@Body() dto: UsageDto) {
-    return ok(await this.files.usage(dto.limit ?? 50));
-  }
+  // نگهداشت فایل (عروسک‌ها/مصرف) حالا فقط از مسیر ادمین:
+  // POST /admin/uploads/listOrphans|deleteOrphans|getUsage (AdminJwtAuthGuard — فاز A5)
 }

@@ -26,6 +26,12 @@ async function post(path, body, token) {
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
+async function adminLogin(username = process.env.ADMIN_USER || '09196421264', password = process.env.ADMIN_PASS || 'admin434343') {
+  const r = await post('admin/auth/login', { username, password });
+  if (!r.json?.data?.token) throw new Error('admin login failed: ' + JSON.stringify(r.json).slice(0, 200));
+  return r.json.data.token;
+}
+
 async function login(phone) {
   const s = await post('auth/sendOtp', { phone });
   const v = await post('auth/verifyOtp', { phone, code: s.json?.data?.devCode });
@@ -60,7 +66,7 @@ async function login(phone) {
     description: 'تست چت B8 — توضیحات بلندتر از سی نویسه.',
   }, seller.token);
   const productId = cp.json?.data?.id;
-  await post('products/reviewProduct', { id: productId, approve: true }, admin.token);
+  await post('admin/products/reviewProduct', { id: productId, approve: true }, await adminLogin());
   check('آگهی تأیید شد', !!productId);
 
   // ── ۱) شروع مکالمه ──

@@ -167,7 +167,7 @@ const back = await post('/admin/users/creditWallet', { id: firstRow?.id, amount:
 check('موجودی به حالت اول برگشت', back.json?.data?.balance === bal0);
 
 // ── ۹) reviewVerification — اگر سفارش pending وجود دارد ─────────────────────
-const verificationList = await post('/verification/getVerificationOrders', { status: 'pending' }, userToken);
+const verificationList = await post('/admin/users/getVerificationOrders', { status: 'pending' }, token);
 const verificationListAdmin = await post('/admin/users/getUserList', { verified: false }, token);
 console.log(`   درخواست‌های احراز pending: ${verificationList.json?.data?.total ?? 'n/a (توکن کاربر)'} / کاربران احرازنشده: ${verificationListAdmin.json?.data?.total ?? 0}`);
 // خود تست تأیید/رد در تست مرورگر انجام می‌شود (تغییر وضعیت دیتای واقعی اینجا منطقی نیست)

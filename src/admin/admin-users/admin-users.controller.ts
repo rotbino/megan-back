@@ -8,6 +8,7 @@ import { ok } from '../../common/api-response';
 import {
   CreditWalletDto,
   GetUserListDto,
+  GetVerificationOrdersAdminDto,
   ReviewVerificationAdminDto,
   SetUserActiveDto,
   SetUserRolesDto,
@@ -66,6 +67,12 @@ export class AdminUsersController {
   @ApiOperation({ summary: 'شارژ/کسر دستی کیف پول با دلیل (مثبت=شارژ، منفی=کسر)' })
   async creditWallet(@AdminId() adminId: string, @Body() dto: CreditWalletDto) {
     return ok(await this.users.creditWallet(adminId, dto), 'کیف پول کاربر اصلاح شد.');
+  }
+
+  @Post('getVerificationOrders')
+  @ApiOperation({ summary: 'صف احراز هویت — فیلتر وضعیت + صفحه‌بندی' })
+  async getVerificationOrders(@Body() dto: GetVerificationOrdersAdminDto) {
+    return ok(await this.users.getVerificationOrders(dto));
   }
 
   @Post('reviewVerification')

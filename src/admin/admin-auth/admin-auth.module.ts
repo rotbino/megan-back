@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
 import { AdminJwtAuthGuard } from './admin-jwt.guard';
+import { AdminRolesGuard } from './admin-roles.guard';
 
 /**
  * احراز هویت پنل ادمین — جدایی کامل از AuthModule کاربران:
@@ -16,9 +17,9 @@ import { AdminJwtAuthGuard } from './admin-jwt.guard';
     JwtModule.register({}),
   ],
   controllers: [AdminAuthController],
-  providers: [AdminAuthService, AdminJwtAuthGuard],
+  providers: [AdminAuthService, AdminJwtAuthGuard, AdminRolesGuard],
   // JwtModule هم export می‌شود تا گارد در زیرماژول‌های دیگر (dashboard و…)
   // بتواند JwtService را تزریق کند — مثل الگوی AuthModule کاربران
-  exports: [JwtModule, AdminJwtAuthGuard, AdminAuthService],
+  exports: [JwtModule, AdminJwtAuthGuard, AdminRolesGuard, AdminAuthService],
 })
 export class AdminAuthModule {}

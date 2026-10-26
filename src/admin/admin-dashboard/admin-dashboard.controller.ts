@@ -14,8 +14,14 @@ export class AdminDashboardController {
   constructor(private readonly dashboard: AdminDashboardService) {}
 
   @Post('getStats')
-  @ApiOperation({ summary: 'شمارنده‌های زنده داشبورد مدیریت' })
+  @ApiOperation({ summary: 'شمارنده‌ها + روند ۳۰ روزه + درآمد + صف‌های انتظار' })
   async getStats() {
     return ok(await this.dashboard.getStats());
+  }
+
+  @Post('getRecentActivity')
+  @ApiOperation({ summary: 'آخرین عملیات ادمین‌ها + آخرین ثبت‌نام‌ها (فید داشبورد)' })
+  async getRecentActivity() {
+    return ok(await this.dashboard.getRecentActivity());
   }
 }

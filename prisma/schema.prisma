@@ -140,8 +140,37 @@ model AdminUser {
   isActive     Boolean  @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at")
 
+  /// لاگ عملیات‌های این ادمین (AdminAction — فاز A5)
+  actions      AdminAction[] @relation("AdminActionActor")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+}
+
+/// لاگ عملیات ادمین (فاز A5) — ثبت خودکار هر mutation ادمین توسط
+/// AdminActionInterceptor (کی عملیات را انجام داده، روی چه هدفی، با چه خلاصه‌ای).
+/// فقط شناسه ادمین ذخیره می‌شود؛ نام/نقش هنگام خواندن join می‌شود (اصل نرمال‌سازی).
+model AdminAction {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  adminId   String    @map("admin_id") @db.ObjectId
+  admin     AdminUser @relation("AdminActionActor", fields: [adminId], references: [id])
+
+  /// مسیر عملیات — مثل admin/products/reviewProduct
+  action     String
+  /// نوع هدف — product | user | buy_request | charge_order | base_data | admin
+  targetType String?   @map("target_type")
+  /// شناسه هدف (اگر از body قابل استخراج باشد)
+  targetId   String?   @map("target_id")
+  /// خلاصه body — بدون فیلدهای حساس (رمز…) و رشته‌های بلند
+  payload    Json?
+  /// پیام موفقیت عملیات (از پاسخ یکنواخت API)
+  message    String?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([adminId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([action])
 }
 
 /// اشتراک وب‌پوش مرورگر (B10) — endpoint یکتای هر مرورگر/دستگاه؛

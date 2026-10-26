@@ -8,6 +8,7 @@ import { VerificationService } from '../../verification/verification.service';
 import type {
   CreditWalletDto,
   GetUserListDto,
+  GetVerificationOrdersAdminDto,
   ReviewVerificationAdminDto,
   SetUserActiveDto,
   SetUserRolesDto,
@@ -300,6 +301,15 @@ export class AdminUsersService {
 
     const result = await this.wallet.adjustWallet(adminId, dto.id, dto.amount, dto.reason.trim());
     return { id: dto.id, ...result };
+  }
+
+  /** POST /admin/users/getVerificationOrders — صف احراز هویت (سرویس دامنه B6) */
+  async getVerificationOrders(dto: GetVerificationOrdersAdminDto) {
+    return this.verification.listOrders({
+      status: dto.status,
+      page: dto.page,
+      perPage: dto.perPage,
+    });
   }
 
   /** POST /admin/users/reviewVerification — تأیید/رد مدارک (سرویس دامنه B6) */

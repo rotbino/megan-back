@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { AdminDashboardController } from './admin-dashboard.controller';
 import { AdminDashboardService } from './admin-dashboard.service';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
+import { AdminActionsModule } from '../admin-actions/admin-actions.module';
 
-/** داشبورد مدیریت — آمار زنده (فاز A1: شمارنده‌ها؛ نمودارها در A5) */
+/** داشبورد عملیاتی مدیریت — شمارنده‌ها + روند ۳۰ روزه + درآمد + فعالیت اخیر (A5) */
 @Module({
-  imports: [AdminAuthModule], // گارد ادمین
+  imports: [AdminAuthModule, AdminActionsModule], // گارد ادمین + سرویس لاگ عملیات
   controllers: [AdminDashboardController],
   providers: [AdminDashboardService],
 })

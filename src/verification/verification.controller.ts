@@ -3,8 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { VerificationService } from './verification.service';
-import { GetVerificationOrdersDto, ReviewVerificationDto } from './dto';
-import { AdminGuard, JwtAuthGuard } from '../common/guards';
+import { JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -37,22 +36,6 @@ export class VerificationController {
     return ok(await this.verification.getMy(user.id));
   }
 
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('getVerificationOrders')
-  @ApiOperation({ summary: '(ادمین) صف بررسی درخواست‌های احراز هویت' })
-  async getVerificationOrders(@Body() dto: GetVerificationOrdersDto) {
-    return ok(await this.verification.listOrders(dto));
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('reviewVerification')
-  @ApiOperation({ summary: '(ادمین) تأیید یا رد درخواست با دلیل' })
-  async reviewVerification(@CurrentUser() user: AuthUser, @Body() dto: ReviewVerificationDto) {
-    return ok(
-      await this.verification.review(user, dto),
-      dto.approve ? 'هویت کاربر تأیید شد.' : 'درخواست رد شد.',
-    );
-  }
+  // صف و بازبینی احراز حالا فقط از مسیر ادمین:
+  // POST /admin/users/getVerificationOrders|reviewVerification (AdminJwtAuthGuard — فاز A3/A5)
 }

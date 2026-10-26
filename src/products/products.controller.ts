@@ -9,10 +9,9 @@ import {
   GetProductListDto,
   GetRelatedProductsDto,
   GetSellerDto,
-  ReviewProductDto,
   SearchSuggestionsDto,
 } from './dto';
-import { AdminGuard, JwtAuthGuard } from '../common/guards';
+import { JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -68,16 +67,8 @@ export class ProductsController {
     return ok(await this.products.deleteMyProduct(user, dto.id), 'آگهی حذف شد.');
   }
 
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('reviewProduct')
-  @ApiOperation({ summary: '(ادمین) تأیید یا رد آگهی در انتظار' })
-  async reviewProduct(@Body() dto: ReviewProductDto) {
-    return ok(
-      await this.products.reviewProduct(dto),
-      dto.approve ? 'آگهی تایید شد.' : 'آگهی رد شد.',
-    );
-  }
+  // بازبینی آگهی حالا فقط از مسیر ادمین انجام می‌شود:
+  // POST /admin/products/reviewProduct (AdminJwtAuthGuard — فاز A4)
 
   @Post('getSeller')
   @ApiOperation({ summary: 'پروفایل عمومی فروشنده + آگهی‌های تاییدشده' })

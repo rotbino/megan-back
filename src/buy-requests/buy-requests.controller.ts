@@ -8,9 +8,8 @@ import {
   GetBuyRequestContactDto,
   GetBuyRequestListDto,
   GetMyBuyRequestsDto,
-  ReviewBuyRequestDto,
 } from './dto';
-import { AdminGuard, JwtAuthGuard } from '../common/guards';
+import { JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -77,14 +76,6 @@ export class BuyRequestsController {
     return ok(await this.buyRequests.getSuggestedBuyers(user.id));
   }
 
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('reviewBuyRequest')
-  @ApiOperation({ summary: '(ادمین) تأیید یا رد درخواست خرید' })
-  async reviewBuyRequest(@Body() dto: ReviewBuyRequestDto) {
-    return ok(
-      await this.buyRequests.reviewBuyRequest(dto),
-      dto.approve ? 'درخواست خرید تایید شد.' : 'درخواست رد شد.',
-    );
-  }
+  // بازبینی درخواست حالا فقط از مسیر ادمین انجام می‌شود:
+  // POST /admin/buy-requests/reviewBuyRequest (AdminJwtAuthGuard — فاز A4)
 }

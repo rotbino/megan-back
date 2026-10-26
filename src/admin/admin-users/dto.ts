@@ -108,3 +108,24 @@ export class ReviewVerificationAdminDto {
   @Length(3, 300, { message: 'دلیل رد باید بین ۳ تا ۳۰۰ نویسه باشد.' })
   rejectionReason?: string;
 }
+
+/** POST /admin/users/getVerificationOrders — صف احراز هویت (فاز A5) */
+export class GetVerificationOrdersAdminDto {
+  /** فقط سفارش‌های با این وضعیت */
+  @IsOptional()
+  @IsIn(['pending', 'approved', 'rejected'])
+  status?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  perPage?: number;
+}

@@ -24,6 +24,13 @@ async function post(path, body, token) {
 }
 
 /** ورود OTP → توکن */
+
+async function adminLogin(username = process.env.ADMIN_USER || '09196421264', password = process.env.ADMIN_PASS || 'admin434343') {
+  const r = await post('admin/auth/login', { username, password });
+  if (!r.json?.data?.token) throw new Error('admin login failed: ' + JSON.stringify(r.json).slice(0, 200));
+  return r.json.data.token;
+}
+
 async function login(phone) {
   const s = await post('auth/sendOtp', { phone });
   const code = s.json?.data?.devCode;
@@ -64,7 +71,8 @@ async function makeJpeg(label) {
   // ۰) ورود کاربر عادی + ادمین (ادمین با make-admin ساخته شده)
   const userToken = await login(USER_PHONE);
   const adminToken = await login(ADMIN_PHONE);
-  check('ورود کاربر و ادمین', !!userToken && !!adminToken);
+  const adminJwt = await adminLogin();
+  check('ورود کاربر و ادمین', !!userToken && !!adminJwt);
 
   // ۰.۵) یک آگهی برای تست denorm نشان احراز هویت (کرمان/شهر بابک — زوج واقعی باسکول)
   const cp = await post('products/createProduct', {
@@ -126,22 +134,22 @@ async function makeJpeg(label) {
   check('بدون توکن 401', res4.status === 401);
 
   // ۶) ادمین صف را می‌بیند
-  r = await post('verification/getVerificationOrders', { status: 'pending' }, adminToken);
+  r = await post('admin/users/getVerificationOrders', { status: 'pending' }, adminJwt);
   const items = r.json?.data?.items ?? [];
   check('ادمین سفارش را می‌بیند', items.length === 1, JSON.stringify(r.json).slice(0, 300));
   check('مدارک در صف ادمین', !!items[0]?.docs?.nationalCard?.url && !!items[0]?.docs?.selfie?.url);
   const id = items[0]?.id;
 
-  // ۷) کاربر عادی به صف ادمین دست ندارد
-  r = await post('verification/getVerificationOrders', {}, userToken);
-  check('کاربر عادی 403', r.status === 403);
+  // ۷) توکن کاربر عادی روی مسیر ادمین → 401 (راز جدا + scope=admin)
+  r = await post('admin/users/getVerificationOrders', {}, userToken);
+  check('کاربر عادی روی مسیر ادمین 401', r.status === 401);
 
   // ۸) رد بدون دلیل → خطا
-  r = await post('verification/reviewVerification', { orderId: id, approve: false }, adminToken);
+  r = await post('admin/users/reviewVerification', { orderId: id, approve: false }, adminJwt);
   check('رد بدون دلیل خطا', r.json?.status === false && r.json?.code === 'REASON_REQUIRED');
 
   // ۹) تأیید ادمین → approved + isVerified کاربر
-  r = await post('verification/reviewVerification', { orderId: id, approve: true }, adminToken);
+  r = await post('admin/users/reviewVerification', { orderId: id, approve: true }, adminJwt);
   check('تأیید موفق', r.json?.status === true, JSON.stringify(r.json));
 
   // ۱۰) وضعیت کاربر → approved

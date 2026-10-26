@@ -20,8 +20,8 @@
    DTO با class-validator، پیام‌های فارسی، rate limit ریزتر روی login.
 5. **عملیات ادمین همیشه لاگ می‌شود** — از فاز A5 هر mutation ادمین در
    `AdminAction` (کی/چه/کی/چه-هدفی) ثبت می‌شود؛ فازهای قبل حداقل لاگ pino دارند.
-6. **UI ادمین = زیبا، تخت و سریع** — تم «تامینان» یکدست در کل سیستم: زمینه
-   خاکستری روشن #F5F6F8، کارت‌های سفید با خط ظریف #E9EBEF؛ قرمز ملایم
+6. **UI ادمین = زیبا، تخت و سریع** — تم «تامینان» یکدست در کل سیستم: زمینه سفید خالص
+   #FFFFFF (خواسته مالک — طوسی خوب نشد)، کارت‌های سفید با خط ظریف #E9EBEF؛ قرمز ملایم
    #A62626 فقط در دکمه‌ها/لهجه‌ها — نه پس‌زمینه‌های بزرگ. جداول قابل
    جستجو/فیلتر/صفحه‌بندی؛ فونت وزیرمتن و زبان فارسی، RTL.
 7. **محافظت داده کاربر** — رمز/هش هرگز در پاسخ برنمی‌گردد؛ غیرفعال‌سازی کاربر
@@ -160,21 +160,35 @@ export سرویس خودشان مصرف می‌شوند؛ ادمین منطق د
 > مرورگر: رد آگهی با دلایل + رد درخواست با شمارنده‌های زنده، نردبان هدیه در
 > جزئیات، لینک عمقی sellerId، موبایل ۳۹۰px بدون overflow؛ VLM ۸.۲-۹/۱۰.
 
-**یادداشت A5:** مسیرهای قدیمی ادمینِ توکن‌کاربر (`products/reviewProduct`،
-`buy-requests/reviewBuyRequest`، `wallet/getChargeOrders|reviewChargeOrder` با
-AdminGuard) فعلاً برای سازگاری تست‌های B7-B9 نگه داشته شدند؛ در A5 با لاگ
-`AdminAction` یکدست و حذف می‌شوند (منبع واحد: `admin/*` با AdminJwtAuthGuard).
+**یادداشت A5 (انجام شد):** مسیرهای قدیمی ادمینِ توکن‌کاربر حذف شدند —
+products/reviewProduct، buy-requests/reviewBuyRequest،
+wallet/getChargeOrders|reviewChargeOrder، verification/getVerificationOrders|
+reviewVerification، uploads/listOrphans|deleteOrphans|getUsage و کلاس AdminGuard.
+منبع واحد: admin/* با AdminJwtAuthGuard + لاگ AdminAction (تست‌های B6-B9 به
+مسیرهای ادمین مهاجرت کردند).
 
 ### فاز A5 — داشبورد عملیاتی، لاگ ادمین و مدیریت ادمین‌ها
-- [ ] `getStats` کامل: روند ثبت‌نام ۳۰ روزه، وضعیت آگهی‌ها، درآمد نردبان/شارژ،
-      صف‌های انتظار (احراز/بازبینی/شارژ) + `getRecentActivity`
-- [ ] مدل `AdminAction` — ثبت خودکار هر mutation ادمین (actor/action/target/
-      payload خلاصه)؛ `getAdminActions` قابل فیلتر
-- [ ] مدیریت ادمین‌ها (SUPER_ADMIN): `createAdmin` / `setAdminActive` /
-      `resetAdminPassword` + صفحه `/admin/admins`
-- [ ] سخت‌سازی: OTP/login ادمین روی Redis در مقیاس (اختیاری)، بکاپ پیش‌فرض
+- [x] `getStats` کامل: روند ۳۰ روزه (ثبت‌نام/آگهی/درخواست/درآمد — ۳۰ نقطه)،
+      وضعیت آگهی‌ها، درآمد نردبان/شارژ (کل + ۳۰ روزه)، صف‌های انتظار
+      (احراز/بازبینی/شارژ/نردبان) + `getRecentActivity` (عملیات اخیر + ثبت‌نام‌ها)
+- [x] مدل `AdminAction` — ثبت خودکار هر mutation موفق ادمین توسط
+      `AdminActionInterceptor` (APP_INTERCEPTOR — فقط درخواست‌های احرازشده
+      ادمین؛ payload پاک‌سازی‌شده: رمزها «[حذف شد]»، رشته‌های بلند کوتاه)؛
+      `getAdminActions` قابل فیلتر (ادمین/مسیر/نوع هدف/تاریخ) — رابطه نرمال به
+      AdminUser، نام/نقش join هنگام خواندن
+- [x] مدیریت ادمین‌ها (SUPER_ADMIN — گارد `AdminRolesGuard`):
+      `createAdmin` / `setAdminActive` (قفل فوری — گارد وضعیت زنده؛ گارد خودم و
+      آخرین سوپر) / `resetAdminPassword` + `getAdminList` (بدون هش + شمارش عملیات)
+- [x] یکپارچه‌سازی کامل: همه مسیرهای قدیمی ادمینِ توکن‌کاربر حذف شدند
+      (products/buy-requests/wallet/verification/uploads) + کلاس AdminGuard —
+      منبع واحد admin/* با AdminJwtAuthGuard؛ شارژها و صف احراز به
+      `admin/wallet/*` و `admin/users/getVerificationOrders` منتقل شدند؛
+      نگهداشت فایل به `admin/uploads/*`
+- [x] سخت‌سازی: تغییر رمز خودم از `admin/auth/changePassword` (از A1)؛
+      قفل ورود ۵ غلط/۱۵ دقیقه (از A1)
 - [ ] **فرانت A5:** داشبورد نموداری سبک (SVG بدون کتابخانه سنگین)،
-      `/admin/settings` (تغییر رمز خودم)، `/admin/admins`، `/admin/logs`
+      `/admin/settings` (تغییر رمز خودم)، `/admin/admins`، `/admin/logs`،
+      `/admin/charges` (صف فیش‌ها)
 
 ---
 
@@ -197,5 +211,6 @@ AdminGuard) فعلاً برای سازگاری تست‌های B7-B9 نگه دا
 | A1 — زیرساخت و احراز ادمین | ✅ کامل | 1322317 + 8f99883 |
 | A2 — اطلاعات پایه + اصلاح ساختار داده | ✅ کامل | 33e3270 |
 | A3 — کاربران + تم تامینان | ✅ کامل | bc7efa0 |
-| A4 — آگهی‌ها و درخواست‌ها | ✅ کامل | این کامیت |
-| A5 — داشبورد عملیاتی و لاگ | ⏳ | — |
+| A4 — آگهی‌ها و درخواست‌ها | ✅ کامل | 33be5e2 |
+| A5 — داشبورد عملیاتی و لاگ (بک) | ✅ کامل | این کامیت |
+| A5 — فرانت (نمودار/ادمین‌ها/لاگ/شارژ/تنظیمات) | ⏳ | — |

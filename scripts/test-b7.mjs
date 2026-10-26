@@ -23,6 +23,12 @@ async function post(path, body, token) {
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
+async function adminLogin(username = process.env.ADMIN_USER || '09196421264', password = process.env.ADMIN_PASS || 'admin434343') {
+  const r = await post('admin/auth/login', { username, password });
+  if (!r.json?.data?.token) throw new Error('admin login failed: ' + JSON.stringify(r.json).slice(0, 200));
+  return r.json.data.token;
+}
+
 async function login(phone) {
   const s = await post('auth/sendOtp', { phone });
   const code = s.json?.data?.devCode;
@@ -38,7 +44,8 @@ async function login(phone) {
   const ADMIN_PHONE = '09350001122';
   const me = await login(USER_PHONE);
   const admin = await login(ADMIN_PHONE);
-  check('ورود کاربر و ادمین', !!me.token && !!admin.token);
+  const adminJwt = await adminLogin();
+  check('ورود کاربر و ادمین', !!me.token && !!adminJwt);
 
   // ── ۱) لیست عمومی seed شده ──
   let r = await post('buy-requests/getBuyRequestList', { page: 1, perPage: 12 });
@@ -108,7 +115,7 @@ async function login(phone) {
   check('درخواستهای من ۲تایی pending', r.json?.data?.counts?.pending === 2 && r.json?.data?.items?.length === 2, JSON.stringify(r.json?.data?.counts));
 
   // ── ۶) تأیید ادمین → عمومی ──
-  r = await post('buy-requests/reviewBuyRequest', { id: myReqId, approve: true }, admin.token);
+  r = await post('admin/buy-requests/reviewBuyRequest', { id: myReqId, approve: true }, adminJwt);
   check('تأیید ادمین', r.json?.data?.status === 'confirmed', JSON.stringify(r.json).slice(0, 150));
   r = await post('buy-requests/getBuyRequestList', { s: 'اکبری تست' });
   check('در لیست عمومی ظاهر شد', (r.json?.data?.items ?? []).some((x) => x.id === myReqId));
@@ -121,7 +128,7 @@ async function login(phone) {
     requirementAmount: 7000,
   }, noProd.token);
   const otherReqId = r.json?.data?.id;
-  r = await post('buy-requests/reviewBuyRequest', { id: otherReqId, approve: true }, admin.token);
+  r = await post('admin/buy-requests/reviewBuyRequest', { id: otherReqId, approve: true }, adminJwt);
   check('درخواست کاربر سوم تأیید', r.json?.data?.status === 'confirmed');
 
   // ── ۷) خریداران پیشنهادی — آگهی هم‌دسته با درخواست seed «کربن پوست پسته» ──
@@ -139,7 +146,7 @@ async function login(phone) {
   const productId = r.json?.data?.id;
 
   // آگهی pending است → ادمین تأیید می‌کند
-  r = await post('products/reviewProduct', { id: productId, approve: true }, admin.token);
+  r = await post('admin/products/reviewProduct', { id: productId, approve: true }, adminJwt);
   check('تأیید آگهی توسط ادمین', r.json?.data?.status === 'confirmed', JSON.stringify(r.json).slice(0, 150));
 
   r = await post('buy-requests/getSuggestedBuyers', {}, me.token);

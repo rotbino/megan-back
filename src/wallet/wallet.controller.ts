@@ -3,8 +3,8 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { WalletService } from './wallet.service';
-import { GetChargeOrdersDto, LadderProductDto, ReviewChargeOrderDto } from './dto';
-import { AdminGuard, JwtAuthGuard } from '../common/guards';
+import { LadderProductDto } from './dto';
+import { JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -56,24 +56,6 @@ export class WalletController {
     );
   }
 
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('getChargeOrders')
-  @ApiOperation({ summary: '(ادمین) صف بررسی فیش‌های شارژ کارت‌به‌کارت' })
-  async getChargeOrders(@Body() dto: GetChargeOrdersDto) {
-    return ok(await this.wallet.getChargeOrders(dto));
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @ApiBearerAuth()
-  @Post('reviewChargeOrder')
-  @ApiOperation({ summary: '(ادمین) تأیید (شارژ اعمال می‌شود) یا رد با دلیل' })
-  async reviewChargeOrder(@CurrentUser() user: AuthUser, @Body() dto: ReviewChargeOrderDto) {
-    return ok(
-      await this.wallet.reviewChargeOrder(user, dto),
-      dto.approve
-        ? 'شارژ کیف پول کاربر تأیید و اعمال شد.'
-        : 'سفارش شارژ رد شد.',
-    );
-  }
+  // صف و بازبینی شارژها حالا فقط از مسیر ادمین انجام می‌شود:
+  // POST /admin/wallet/getChargeOrders|reviewChargeOrder (AdminJwtAuthGuard — فاز A5)
 }

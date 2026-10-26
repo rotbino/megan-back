@@ -33,6 +33,13 @@ async function post(path, body, token) {
 }
 
 /** ورود OTP — کد ثابت 1234 */
+
+async function adminLogin(username = process.env.ADMIN_USER || '09196421264', password = process.env.ADMIN_PASS || 'admin434343') {
+  const r = await post('admin/auth/login', { username, password });
+  if (!r.json?.data?.token) throw new Error('admin login failed: ' + JSON.stringify(r.json).slice(0, 200));
+  return r.json.data.token;
+}
+
 async function login(phone, code = '1234') {
   const s = await post('auth/sendOtp', { phone });
   return { devCode: s.json?.data?.devCode, token: (await post('auth/verifyOtp', { phone, code })).json?.data?.accessToken };
@@ -94,7 +101,7 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
     check('پس از کد غلط، کد درست کار می‌کند', ok2.json?.status === true);
   }
 
-  const adminToken = (await login(ADMIN_PHONE)).token;
+  const adminToken = await adminLogin();
   const otherToken = (await login(OTHER_PHONE)).token;
   check('ورود ادمین و کاربر دوم', !!adminToken && !!otherToken);
 
@@ -126,15 +133,15 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
   // ۳) گارد — بدون توکن 401 / کاربر عادی به صف ادمین 403
   const res401 = await fetch(`${BASE}/wallet/getWallet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   check('بدون توکن 401', res401.status === 401);
-  r = await post('wallet/getChargeOrders', {}, userToken);
-  check('کاربر عادی 403', r.status === 403);
+  r = await post('admin/wallet/getChargeOrders', {}, userToken);
+  check('کاربر عادی روی مسیر ادمین 401', r.status === 401);
 
   // ۴) نردبان با آگهی pending → PRODUCT_NOT_CONFIRMED
   r = await post('wallet/ladderProduct', { productId: productA }, userToken);
   check('نردبان روی آگهی pending رد می‌شود', r.json?.code === 'PRODUCT_NOT_CONFIRMED', JSON.stringify(r.json));
 
   // ۵) نردبان آگهی دیگران → forbidden
-  await post('products/reviewProduct', { id: productA, approve: true }, adminToken); // A تأیید
+  await post('admin/products/reviewProduct', { id: productA, approve: true }, adminToken); // A تأیید
   r = await post('wallet/ladderProduct', { productId: productA }, otherToken);
   check('نردبان آگهی دیگران 403', r.status === 403, JSON.stringify(r.json));
 
@@ -157,24 +164,24 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
   check('موجودی هنوز صفر', (await post('wallet/getWallet', {}, userToken)).json?.data?.balance === 0);
 
   // ۹) ادمین — صف + فیش آروان + رد بدون دلیل
-  r = await post('wallet/getChargeOrders', { status: 'pending' }, adminToken);
+  r = await post('admin/wallet/getChargeOrders', { status: 'pending' }, adminToken);
   const mine = (r.json?.data?.items ?? []).find((it) => it.user?.phone === USER_PHONE);
   check('ادمین سفارش را با فیش می‌بیند', !!mine?.receipt?.url && mine.receipt.url.includes('arvanstorage.ir'), JSON.stringify(r.json).slice(0, 300));
-  r = await post('wallet/reviewChargeOrder', { orderId: mine?.id, approve: false }, adminToken);
+  r = await post('admin/wallet/reviewChargeOrder', { orderId: mine?.id, approve: false }, adminToken);
   check('رد بدون دلیل رد می‌شود', r.json?.code === 'REASON_REQUIRED', JSON.stringify(r.json));
 
   // ۱۰) سفارش دوم p100 → رد با دلیل (موجودی نمی‌رود بالا)
   j = await sendReceipt('wallet/createChargeOrder', userToken, 'p100', await makeJpeg('p100'));
   const order2 = j.json?.data?.orderId;
-  r = await post('wallet/reviewChargeOrder', { orderId: order2, approve: false, rejectionReason: 'فیش ناخواناست — دوباره بفرستید.' }, adminToken);
+  r = await post('admin/wallet/reviewChargeOrder', { orderId: order2, approve: false, rejectionReason: 'فیش ناخواناست — دوباره بفرستید.' }, adminToken);
   check('رد با دلیل موفق', r.json?.status === true && r.json?.data?.status === 'rejected', JSON.stringify(r.json));
   check('موجودی پس از رد صفر ماند', (await post('wallet/getWallet', {}, userToken)).json?.data?.balance === 0);
 
   // ۱۱) تأیید p200 → موجودی ۲۲۰هزار + بررسی دوباره → ALREADY_REVIEWED
-  r = await post('wallet/reviewChargeOrder', { orderId: mine?.id, approve: true }, adminToken);
+  r = await post('admin/wallet/reviewChargeOrder', { orderId: mine?.id, approve: true }, adminToken);
   check('تأیید شارژ موفق', r.json?.status === true && r.json?.data?.charged === 220_000, JSON.stringify(r.json));
   check('موجودی ۲۲۰هزار شد', (await post('wallet/getWallet', {}, userToken)).json?.data?.balance === 220_000);
-  r = await post('wallet/reviewChargeOrder', { orderId: mine?.id, approve: true }, adminToken);
+  r = await post('admin/wallet/reviewChargeOrder', { orderId: mine?.id, approve: true }, adminToken);
   check('بررسی دوباره رد می‌شود', r.json?.code === 'ALREADY_REVIEWED', JSON.stringify(r.json));
 
   // ۱۲) نردبان A → موجودی ۱۲۰هزار + انقضای ~۳۰ روز
@@ -186,7 +193,7 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
   check('انقضای ~۳۰ روز', days > 29.9 && days < 30.1, `days=${days.toFixed(2)}`);
 
   // ۱۳) B را بعد از نردبانِ A تأیید می‌کنیم → B جدیدترین است؛ نردبان A باید صدر بگیرد
-  await post('products/reviewProduct', { id: productB, approve: true }, adminToken);
+  await post('admin/products/reviewProduct', { id: productB, approve: true }, adminToken);
   r = await post('products/getProductList', { sort: 'related', perPage: 20 });
   const listIds = (r.json?.data?.items ?? []).map((it) => it.id);
   check('نردبان صدر «مرتبط‌ترین» به‌رغم جدیدتربودن B', listIds[0] === productA, JSON.stringify(listIds.slice(0, 5)));
