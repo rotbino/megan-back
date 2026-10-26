@@ -43,13 +43,16 @@ npm run dev
 - Swagger: `http://localhost:4000/docs`
 - سلامت سرویس: `GET http://localhost:4000/api/v1/health` → `{"status":true,"data":{"db":"up"}}`
 
-تست دستی سریع:
+تست دستی سریع (ساده‌ترین راه: همین آدرس‌ها را در مرورگر باز کنید):
 
 ```powershell
-curl http://localhost:4000/api/v1/health
-curl -X POST http://localhost:4000/api/v1/auth/sendOtp -H "Content-Type: application/json" -d '{\"phone\":\"09123456789\"}'
-# → در development خود کد (devCode) در پاسخ برمی‌گردد
-curl -X POST http://localhost:4000/api/v1/locations/getAllProvinces -H "Content-Type: application/json" -d '{}'
+# PowerShell — تست سلامت و ارسال OTP (کد dev در پاسخ برمی‌گردد)
+Invoke-RestMethod http://localhost:4000/api/v1/health
+Invoke-RestMethod -Method Post http://localhost:4000/api/v1/auth/sendOtp -ContentType 'application/json' -Body '{"phone":"09123456789"}'
+Invoke-RestMethod -Method Post http://localhost:4000/api/v1/locations/getAllProvinces -ContentType 'application/json' -Body '{}'
+
+# در bash/cmd (نه PowerShell):
+curl -X POST http://localhost:4000/api/v1/auth/sendOtp -H 'Content-Type: application/json' -d '{"phone":"09123456789"}'
 ```
 
 ### عیب‌یابی اتصال به Atlas
