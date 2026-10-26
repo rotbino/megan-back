@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { VerificationService } from './verification.service';
@@ -9,6 +10,8 @@ import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
 @ApiTags('verification')
+/** حد نرخ ریزتر از سراسری — مدارک احراز — آپلود و بررسی */
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller('verification')
 export class VerificationController {
   constructor(private readonly verification: VerificationService) {}

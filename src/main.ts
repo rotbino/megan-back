@@ -18,24 +18,35 @@ import { setIo } from './chat/io-holder';
 
 const API_PREFIX = 'api/v1';
 
+/** شناسه درخواست — از پروکسی یا تولیدشده؛ همه لاگ‌های همان درخواست را به هم می‌دوزد */
+function genReqId(req: import('fastify').FastifyRequest): string {
+  const incoming = req.headers['x-request-id'];
+  return (typeof incoming === 'string' && incoming.slice(0, 64)) || `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function bootstrap(): Promise<void> {
   const adapter = new FastifyAdapter({
-    trustProxy: true, // پشت reverse proxy
+    trustProxy: true, // پشت reverse proxy — برای rate limit بر پایه IP واقعی
     // آپلود multipart به فضای بیشتری از MAX_FILE_SIZE نیاز دارد
     bodyLimit: Math.max(512 * 1024, storage.MAX_FILE_SIZE + 1024 * 1024),
-    logger: isProd
-      ? false
-      : {
-          level: 'warn',
-          redact: {
-            paths: ['req.headers.authorization', 'req.headers.cookie'],
-            censor: '[REDACTED]',
-          },
-        },
+    // لاگ ساختاریافته pino — JSON در پروداکشن (قابل جمع‌آوری با Loki/ELK)،
+    // در توسعه فقط هشدارها تا کنسول شلوغ نشود
+    logger: {
+      level: isProd ? 'info' : 'warn',
+      genReqId,
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+        ],
+        censor: '[REDACTED]',
+      },
+    },
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
-    logger: isProd ? ['error', 'warn'] : undefined,
+    // لاگ‌های Nest از طریق فیلتر/سکوت — لاگ HTTP ساختاریافته را pino فستیفای می‌دهد
+    logger: isProd ? false : ['error', 'warn', 'log'],
   });
 
   // ── امنیت و پلتفرم ──────────────────────────────────────────────────────────

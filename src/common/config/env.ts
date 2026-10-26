@@ -38,7 +38,8 @@ export const env = Object.freeze({
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   REFRESH_TOKEN_TTL_DAYS: num('REFRESH_TOKEN_TTL_DAYS', process.env.REFRESH_TOKEN_TTL_DAYS, 30),
   CORS_ORIGINS: process.env.CORS_ORIGINS || '*',
-  SWAGGER_ENABLED: bool(process.env.SWAGGER_ENABLED, true),
+  // سندباکس/توسعه روشن؛ در پروداکشن به‌جز با opt-in صریح خاموش (B11)
+  SWAGGER_ENABLED: bool(process.env.SWAGGER_ENABLED, process.env.NODE_ENV !== 'production'),
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
   VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@imach.ir',

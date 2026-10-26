@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SavedService } from './saved.service';
 import {
@@ -20,6 +21,8 @@ import { ok } from '../common/api-response';
 @ApiTags('saved')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
+/** حد نرخ ریزتر از سراسری — CRM نشان‌شده‌ها — نوشتن مکرر */
+@Throttle({ default: { limit: 60, ttl: 60_000 } })
 @Controller('saved')
 export class SavedController {
   constructor(private readonly saved: SavedService) {}

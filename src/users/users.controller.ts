@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { GetUserByPhoneDto, UpdateProfileDto } from './dto';
@@ -7,6 +8,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ok } from '../common/api-response';
 
 @ApiTags('users')
+/** حد نرخ ریزتر از سراسری — پروفایل — کم‌ترافیک */
+@Throttle({ default: { limit: 60, ttl: 60_000 } })
 @Controller('users')
 export class UsersController {
   constructor(private readonly users: UsersService) {}

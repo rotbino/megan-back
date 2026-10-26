@@ -1,4 +1,5 @@
 import { Body, Controller, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsInt, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -13,6 +14,8 @@ class ParentDto {
 }
 
 @ApiTags('categories')
+/** حد نرخ ریزتر از سراسری — درخت/متادیتا کش‌شده — سبک */
+@Throttle({ default: { limit: 120, ttl: 60_000 } })
 @Controller('categories')
 export class CategoriesController {
   constructor(private readonly categories: CategoriesService) {}

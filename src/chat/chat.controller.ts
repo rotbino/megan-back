@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import {
@@ -16,6 +17,8 @@ import { ok } from '../common/api-response';
 @ApiTags('chat')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
+/** حد نرخ ریزتر از سراسری — گفتگو — پیام‌ها مکرر اما احرازشده */
+@Throttle({ default: { limit: 90, ttl: 60_000 } })
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chat: ChatService) {}

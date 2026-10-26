@@ -1,4 +1,5 @@
 import { Body, Controller, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -18,6 +19,8 @@ class ParentDto {
 }
 
 @ApiTags('locations')
+/** حد نرخ ریزتر از سراسری — استان/شهر — کش‌شده و سبک */
+@Throttle({ default: { limit: 120, ttl: 60_000 } })
 @Controller('locations')
 export class LocationsController {
   constructor(private readonly locations: LocationsService) {}

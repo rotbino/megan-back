@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BuyRequestsService } from './buy-requests.service';
 import {
@@ -15,6 +16,8 @@ import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
 @ApiTags('buy-requests')
+/** حد نرخ ریزتر از سراسری — خواندن لیست/جستجو سبک + ثبت درخواست */
+@Throttle({ default: { limit: 90, ttl: 60_000 } })
 @Controller('buy-requests')
 export class BuyRequestsController {
   constructor(private readonly buyRequests: BuyRequestsService) {}

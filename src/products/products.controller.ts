@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import {
@@ -17,6 +18,8 @@ import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
 @ApiTags('products')
+/** حد نرخ ریزتر از سراسری — لیست/جزئیات + ثبت آگهی */
+@Throttle({ default: { limit: 90, ttl: 60_000 } })
 @Controller('products')
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}

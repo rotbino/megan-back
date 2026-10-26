@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString, Length, Max, Min } from 'class-validator';
@@ -54,6 +55,8 @@ class UsageDto {
  * مستقیم برمی‌گردانند — مرورگر بایت‌ها را مستقیم از آروان می‌گیرد (سریع).
  */
 @ApiTags('uploads')
+/** حد نرخ ریزتر از سراسری — آپلود — سنگین‌ترین مسیر */
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller('uploads')
 export class UploadsController {
   constructor(private readonly files: UploadsService) {}
