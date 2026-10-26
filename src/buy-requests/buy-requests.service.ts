@@ -56,6 +56,16 @@ export interface SuggestedBuyerDto {
 }
 
 /**
+ * نام‌های join‌شده برای نمایش — رکورد BuyRequest فقط شناسه دارد؛
+ * نام دسته/شهر و مشخصات خریدار در لحظه خواندن ساخته می‌شوند.
+ */
+interface NameMaps {
+  users: Map<string, { firstName: string; lastName: string; isVerified: boolean }>;
+  cats: Map<number, string>;
+  cities: Map<number, string>;
+}
+
+/**
  * ─── درخواست‌های خرید (RFQ) — B7 ─────────────────────────────────────────────
  * ساختار عین باسکول: جمله کارت «خریدار {مقدار} {واحد} {دسته} از نوع {نوع} هستم».
  * «نوع کالا» هنگام ثبت به نود PRODUCT_TYPE درخت دسته تبدیل می‌شود (فرزند کاربر-
@@ -80,8 +90,6 @@ export class BuyRequestsService {
     }
 
     // مکان — اختیاری مثل باسکول (خریدار می‌تواند «همه ایران» بماند)
-    let provinceName: string | null = null;
-    let cityName: string | null = null;
     if (dto.provinceId || dto.cityId) {
       if (!dto.provinceId || !dto.cityId) {
         throw AppError.badRequest('استان و شهر را کامل انتخاب کنید.', 'CITY_REQUIRED');
@@ -93,8 +101,9 @@ export class BuyRequestsService {
       }
       const province = await this.locations.getProvinceById(dto.provinceId);
       if (!province) throw AppError.badRequest('استان انتخابی معتبر نیست.', 'BAD_PROVINCE');
-      provinceName = province.province_name;
-      cityName = city.city_name;
+      if (city.is_active === false || province.is_active === false) {
+        throw AppError.badRequest('مکان انتخابی فعلاً غیرفعال است.', 'INACTIVE_LOCATION');
+      }
     }
 
     // «نوع کالا» → نود PRODUCT_TYPE فرزند دسته برگ (idempotent)
@@ -103,12 +112,8 @@ export class BuyRequestsService {
       productTypeId = await this.upsertProductType(dto.subCategoryId, dto.name.trim(), sub.unit, sub.min);
     }
 
-    const userRow = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { firstName: true, lastName: true, isVerified: true },
-    });
-
     const id = await this.nextId();
+    // رکورد نرمال — فقط شناسه‌ها؛ نام‌ها هنگام خواندن join می‌شوند
     const row = await this.prisma.buyRequest.create({
       data: {
         id,
@@ -124,12 +129,6 @@ export class BuyRequestsService {
         hasHistory: dto.hasHistory ?? false,
         status: 'pending',
         userId: user.id,
-        categoryName: sub.category_name,
-        provinceName,
-        cityName,
-        buyerFirstName: userRow?.firstName ?? '',
-        buyerLastName: userRow?.lastName ?? '',
-        buyerIsVerified: userRow?.isVerified ?? false,
       },
     });
     this.cache.invalidateTag('buy-requests');
@@ -184,10 +183,13 @@ export class BuyRequestsService {
 
     const where: Record<string, unknown> = { status: 'confirmed' };
     if (dto.s?.trim()) {
-      // جستجو در «نوع کالا» + نام دسته — عین جستجوی باسکول
-      // (فارسی حروف کوچک/بزرگ ندارد → contains کافی و ایندکس‌پذیر است)
+      // جستجو در «نوع کالا» + نام دسته (resolve از درخت کش‌شده — بدون ستون denorm)
       const q = dto.s.trim();
-      where.OR = [{ name: { contains: q } }, { categoryName: { contains: q } }];
+      const catIds = await this.categories.searchCategoryIds(q);
+      where.OR = [
+        { name: { contains: q } },
+        ...(catIds.length > 0 ? [{ categoryId: { in: catIds } }] : []),
+      ];
     }
     if (dto.provinceId) where.provinceId = dto.provinceId;
 
@@ -198,17 +200,12 @@ export class BuyRequestsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * perPage,
         take: perPage,
-        select: {
-          id: true, name: true, categoryId: true, categoryName: true,
-          requirementAmount: true, unit: true, userId: true,
-          buyerFirstName: true, buyerLastName: true, buyerIsVerified: true,
-          cityName: true, createdAt: true,
-        },
       }),
     ]);
+    const names = await this.hydrateNames(rows);
 
     return {
-      items: rows.map((r) => this.toDto(r)),
+      items: rows.map((r) => this.toDto(r, names)),
       total,
       page,
       pageCount: Math.max(1, Math.ceil(total / perPage)),
@@ -221,14 +218,9 @@ export class BuyRequestsService {
       where: { status: 'confirmed' },
       orderBy: { createdAt: 'desc' },
       take: Math.min(12, Math.max(1, limit)),
-      select: {
-        id: true, name: true, categoryId: true, categoryName: true,
-        requirementAmount: true, unit: true, userId: true,
-        buyerFirstName: true, buyerLastName: true, buyerIsVerified: true,
-        cityName: true, createdAt: true,
-      },
     });
-    return rows.map((r) => this.toDto(r));
+    const names = await this.hydrateNames(rows);
+    return rows.map((r) => this.toDto(r, names));
   }
 
   /** POST /buy-requests/getBuyRequestContact — شماره خریدار (لاگین لازم) */
@@ -277,11 +269,14 @@ export class BuyRequestsService {
     const countMap: Record<string, number> = { confirmed: 0, pending: 0, rejected: 0 };
     for (const g of counts) countMap[g.status] = g._count.id;
 
+    // نام دسته از درخت کش‌شده (denorm حذف شده)
+    const catMap = await this.categories.getNameMap();
+
     return {
       items: rows.map(
         (r): MyBuyRequestDto => ({
           id: r.id,
-          subcategoryName: r.categoryName,
+          subcategoryName: catMap.get(r.categoryId)?.category_name ?? '—',
           productType: r.name ?? '',
           requirementAmount: r.requirementAmount,
           unit: r.unit,
@@ -324,7 +319,7 @@ export class BuyRequestsService {
     });
     if (products.length === 0) return [];
 
-    // دسته‌های پدر برای تشخیص «دسته خواهر»
+    // دسته‌های پدر برای تشخیص «دسته خواهر» + نام‌ها برای join
     const all = await this.categories.getAllCategories();
     const flat = new Map<number, { parent: number | null }>();
     const walk = (nodes: Array<{ id: number; parent_id: number | null; children: unknown[] }>): void => {
@@ -339,13 +334,8 @@ export class BuyRequestsService {
       where: { status: 'confirmed' },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      select: {
-        id: true, name: true, categoryId: true, categoryName: true,
-        requirementAmount: true, unit: true, userId: true,
-        buyerFirstName: true, buyerLastName: true, buyerIsVerified: true,
-        cityName: true, createdAt: true,
-      },
     });
+    const names = await this.hydrateNames(requests);
 
     const out: SuggestedBuyerDto[] = [];
     const seen = new Set<number>(); // یک درخواست فقط یک‌بار (بهترین تطبیق)
@@ -375,7 +365,7 @@ export class BuyRequestsService {
         const base = tier === 'exact' ? 70 : tier === 'same-product' ? 50 : 25;
 
         out.push({
-          buyRequest: this.toDto(req),
+          buyRequest: this.toDto(req, names),
           matchScore: Math.min(99, Math.round(base + volumeScore)),
           tier,
           relatedProduct: product.productName,
@@ -427,32 +417,61 @@ export class BuyRequestsService {
     return counter.seq;
   }
 
-  private toDto(r: {
-    id: number;
-    name: string | null;
-    categoryId: number;
-    categoryName: string;
-    requirementAmount: number;
-    unit: string;
-    userId: string;
-    buyerFirstName: string;
-    buyerLastName: string;
-    buyerIsVerified: boolean;
-    cityName: string | null;
-    createdAt: Date;
-  }): BuyRequestDto {
+  /**
+   * join نام‌ها برای نمایش — کاربران/شهرها کوئری دسته‌ای + درخت کش‌شده دسته‌ها.
+   */
+  private async hydrateNames(rows: Array<{ userId: string; categoryId: number; cityId: number | null }>): Promise<NameMaps> {
+    if (rows.length === 0) {
+      return { users: new Map(), cats: new Map(), cities: new Map() };
+    }
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const cityIds = [...new Set(rows.map((r) => r.cityId).filter((c): c is number => c != null))];
+    const catIds = [...new Set(rows.map((r) => r.categoryId))];
+
+    const [userRows, catMap, locNames] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, firstName: true, lastName: true, isVerified: true },
+      }),
+      this.categories.getNameMap(), // کش‌شده
+      this.locations.getNames([], cityIds),
+    ]);
+
+    return {
+      users: new Map(
+        userRows.map((u) => [u.id, { firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified }]),
+      ),
+      cats: new Map(catIds.map((id) => [id, catMap.get(id)?.category_name ?? '—'])),
+      cities: locNames.cities,
+    };
+  }
+
+  private toDto(
+    r: {
+      id: number;
+      name: string | null;
+      categoryId: number;
+      requirementAmount: number;
+      unit: string;
+      userId: string;
+      cityId: number | null;
+      createdAt: Date;
+    },
+    names: NameMaps,
+  ): BuyRequestDto {
+    const buyer = names.users.get(r.userId);
     return {
       id: r.id,
       name: r.name,
       categoryId: r.categoryId,
-      subcategoryName: r.categoryName,
+      subcategoryName: names.cats.get(r.categoryId) ?? '—',
       requirementAmount: r.requirementAmount,
       unit: r.unit,
       myuserId: r.userId,
-      firstName: r.buyerFirstName,
-      lastName: r.buyerLastName,
-      city: r.cityName ?? '—',
-      isVerified: r.buyerIsVerified,
+      firstName: buyer?.firstName ?? '—',
+      lastName: buyer?.lastName ?? '—',
+      city: (r.cityId != null ? names.cities.get(r.cityId) : undefined) ?? '—',
+      isVerified: buyer?.isVerified ?? false,
       createdAt: r.createdAt,
     };
   }

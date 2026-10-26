@@ -29,14 +29,14 @@ export class LocationsService {
     return Number.isFinite(n) ? n : null;
   }
 
-  /** POST /locations/getAllProvinces — ۳۱ استان (کش‌شده) */
+  /** POST /locations/getAllProvinces — ۳۱ استان فعال (کش‌شده) */
   async getAllProvinces() {
     return this.cache.wrap(
       'locations:provinces',
       { ttlMs: 10 * TTL.MINUTE, tags: ['base', 'locations'] },
       async () => {
         const list = await this.prisma.location.findMany({
-          where: { type: 'province' },
+          where: { type: 'province', isActive: true },
           orderBy: { name: 'asc' },
         });
         return list.map((p) => ({
@@ -63,6 +63,7 @@ export class LocationsService {
         const list = await this.prisma.location.findMany({
           where: {
             type: 'city',
+            isActive: true,
             ...(provinceId != null ? { parentId: this.key('province', provinceId) } : {}),
           },
           orderBy: { name: 'asc' },
@@ -113,7 +114,7 @@ export class LocationsService {
     return this.prisma.location.findUnique({ where: { id: key } });
   }
 
-  /** یافتن شهر با id عددی باسکول — برای denorm هنگام ثبت محصول/درخواست خرید */
+  /** یافتن شهر با id عددی باسکول — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
   async getCityById(buskolId: number) {
     const hit = await this.prisma.location.findUnique({
       where: { id: this.key('city', buskolId) },
@@ -123,15 +124,43 @@ export class LocationsService {
       id: hit.buskolId,
       province_id: this.parentBuskolId(hit.parentId),
       city_name: hit.name,
+      is_active: hit.isActive,
     };
   }
 
-  /** یافتن استان با id عددی باسکول — برای denorm هنگام ثبت محصول/درخواست خرید */
+  /** یافتن استان با id عددی باسکول — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
   async getProvinceById(buskolId: number) {
     const hit = await this.prisma.location.findUnique({
       where: { id: this.key('province', buskolId) },
     });
     if (!hit || hit.type !== 'province') return null;
-    return { id: hit.buskolId, province_name: hit.name };
+    return { id: hit.buskolId, province_name: hit.name, is_active: hit.isActive };
+  }
+
+  /**
+   * نام‌های مکان برای join هنگام خواندن آگهی/درخواست —
+   * یک کوئری برای همه استان‌ها و شهرهای درخواستی (denorm حذف شده).
+   */
+  async getNames(provinceIds: number[], cityIds: number[]) {
+    const provs = new Map<number, string>();
+    const cities = new Map<number, string>();
+    const hasP = provinceIds.length > 0;
+    const hasC = cityIds.length > 0;
+    if (!hasP && !hasC) return { provinces: provs, cities };
+
+    const rows = await this.prisma.location.findMany({
+      where: {
+        OR: [
+          ...(hasP ? [{ type: 'province', buskolId: { in: provinceIds } }] : []),
+          ...(hasC ? [{ type: 'city', buskolId: { in: cityIds } }] : []),
+        ],
+      },
+      select: { type: true, buskolId: true, name: true },
+    });
+    for (const r of rows) {
+      if (r.type === 'province') provs.set(r.buskolId, r.name);
+      else if (r.type === 'city') cities.set(r.buskolId, r.name);
+    }
+    return { provinces: provs, cities };
   }
 }

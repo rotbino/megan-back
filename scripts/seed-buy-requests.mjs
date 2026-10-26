@@ -43,23 +43,8 @@ for (const row of cityRows) {
   if (!cityByName.has(row.name)) cityByName.set(row.name, row);
 }
 const provinceKeys = [...new Set(cityRows.map((r) => r.parent_id).filter(Boolean))];
-const provinceRows = await db
-  .collection('Location')
-  .find({ type: 'province', _id: { $in: provinceKeys } })
-  .project({ name: 1 })
-  .toArray();
-const provinceName = new Map(provinceRows.map((p) => [p._id, p.name]));
 // «province:4» → 4
 const provinceNum = (key) => Number(key?.split(':')[1]);
-
-// ── نام دسته‌ها برای denorm ────────────────────────────────────────────────
-const categoryIds = [...new Set(buyads.map((b) => b.category_id))];
-const categoryRows = await db
-  .collection('Category')
-  .find({ _id: { $in: categoryIds } })
-  .project({ category_name: 1 })
-  .toArray();
-const categoryName = new Map(categoryRows.map((c) => [c._id, c.category_name]));
 
 // ── خریداران: upsert با user_name یکتا ─────────────────────────────────────
 const usersById = new Map(); // buskool myuser_id → ObjectId
@@ -97,10 +82,10 @@ for (const b of buyads) {
 console.log(`✔ buyers: ${usersById.size} کاربر (${userUpserts} جدید)`);
 
 // ── درخواست‌ها: upsert با id باسکول ─────────────────────────────────────────
+// رکورد نرمال — فقط شناسه‌ها؛ نام‌ها هنگام خواندن با join ساخته می‌شوند
 let inserted = 0;
 for (const b of buyads) {
   const city = b.city ? cityByName.get(b.city) : null;
-  const cat = categoryName.get(b.category_id) ?? '';
   const doc = {
     _id: b.id,
     name: b.name ?? null,
@@ -116,12 +101,6 @@ for (const b of buyads) {
     status: 'confirmed', // روی باسکول زنده است
     rejection_reason: null,
     user_id: usersById.get(b.myuser_id),
-    category_name: cat,
-    province_name: city ? provinceName.get(city.parent_id) ?? null : null,
-    city_name: b.city ?? null,
-    buyer_first_name: b.first_name ?? '',
-    buyer_last_name: b.last_name ?? '',
-    buyer_is_verified: !!b.is_verified,
     created_at: new Date(b.created_at?.replace(' ', 'T') ?? Date.now()),
     updated_at: new Date(b.updated_at?.replace(' ', 'T') ?? Date.now()),
   };

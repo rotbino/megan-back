@@ -182,14 +182,10 @@ async function main() {
         slug: `خرید-عمده-${(m.product_name ?? '').trim()}-${m.id}`,
         description: (m.description ?? '').trim(),
         category_id: m.category_id,
-        category_name: m.category_name,
         sub_category_id: m.sub_category_id,
-        sub_category_name: m.sub_category_name,
         unit: m.unit ?? 'کیلوگرم',
         province_id: m.province_id,
-        province_name: (m.province_name ?? '').trim(),
         city_id: m.city_id,
-        city_name: (m.city_name ?? '').trim(),
         stock: m.stock ?? 0,
         min_sale_amount: m.min_sale_amount ?? 0,
         min_sale_price: m.min_sale_price ?? 0,
@@ -202,10 +198,6 @@ async function main() {
         is_old: !!m.is_old,
         view_count: Math.floor(Math.random() * 900) + 100,
         user_id: userId,
-        seller_user_name: u.user_name,
-        seller_first_name: u.first_name ?? '',
-        seller_last_name: u.last_name ?? '',
-        seller_is_verified: !!u.is_verified,
         created_at: new Date(),
         updated_at: m.updated_at ? new Date(m.updated_at.replace(' ', 'T') + 'Z') : new Date(),
       };
@@ -216,13 +208,12 @@ async function main() {
 
   // پرکردن دسته پدر برای آگهی‌هایی که مستقیم زیر ریشه‌اند
   const catById = new Map();
-  (await db.collection('Category').find({}).project({ _id: 1, parent_id: 1, category_name: 1 }).toArray())
+  (await db.collection('Category').find({}).project({ _id: 1, parent_id: 1 }).toArray())
     .forEach((c) => catById.set(c._id, c));
 
   for (const { row } of productRows) {
     if (catById.has(row.sub_category_id) && catById.get(row.sub_category_id).parent_id != null) {
       row.category_id = catById.get(row.sub_category_id).parent_id;
-      row.category_name = catById.get(row.category_id)?.category_name ?? row.category_name;
     }
     await db.collection('Product').updateOne({ _id: row._id }, { $set: row }, { upsert: true });
   }

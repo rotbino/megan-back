@@ -71,10 +71,7 @@ export class ChatService {
   async startThread(user: AuthUser, dto: StartThreadDto): Promise<ThreadDto> {
     const product = await this.prisma.product.findUnique({
       where: { id: dto.productId },
-      select: {
-        id: true, productName: true, status: true, userId: true,
-        sellerUserName: true, sellerFirstName: true, sellerLastName: true,
-      },
+      select: { id: true, productName: true, status: true, userId: true },
     });
     if (!product || product.status !== 'confirmed') {
       throw AppError.notFound('محصول یافت نشد.');

@@ -197,7 +197,7 @@ model Category {
 /// عدد خام باسکول در buskolId حفظ می‌شود و در API ها همان id عددی برمی‌گردد؛
 /// آگهی‌ها/درخواست‌ها به همان اعداد خام اشاره می‌کنند (بدون تغییر).
 model Location {
-  /// کلید یکتای سراسری — «province:4» | «city:230» | «region:…»
+  /// کلید یکتای سراسری — «province:4» | «city:230» | «region:…"
   id        String  @id @map("_id")
   /// id عددی باسکول در نوع خودش — یکتا فقط با هم type
   buskolId  Int     @map("buskool_id")
@@ -210,6 +210,9 @@ model Location {
   enName    String? @map("en_name")
   latitude  Float?
   longitude Float?
+  /// فعال/غیرفعال (A2) — مکان غیرفعال از لیست‌های عمومی پنهان می‌شود و
+  /// ثبت آگهی/درخواست جدید روی آن ممکن نیست؛ آگهی‌های قدیمی نامشان را همچنان resolve می‌کنند
+  isActive  Boolean @default(true) @map("is_active")
 
   @@unique([type, buskolId])
   @@index([type, parentId])
@@ -302,15 +305,10 @@ model Product {
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("ProductOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  // ── denorm نمایشی (لیست بدون join — عین باسکول) ──
-  categoryName    String @map("category_name")
-  subCategoryName String @map("sub_category_name")
-  provinceName    String @map("province_name")
-  cityName        String @map("city_name")
-  sellerUserName  String @map("seller_user_name")
-  sellerFirstName String @map("seller_first_name")
-  sellerLastName  String @map("seller_last_name")
-  sellerIsVerified Boolean @default(false) @map("seller_is_verified")
+  // ⚠️ ساختار درست داده: هیچ مشخصات کاربر/نام نمایشی داخل رکورد تکرار نمی‌شود.
+  // رابطه یک‌به‌چند User↔Product فقط با user_id برقرار است؛ نام فروشنده/دسته/
+  // مکان در لحظه خواندن با join (Prisma include + کش‌های base) ساخته می‌شود.
+  // (فقط «unit» عمداً می‌ماند: اسنپ‌شات واحدِ آگهی در لحظه ثبت — جزو داده‌ی خود آگهی است.)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -364,14 +362,8 @@ model BuyRequest {
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("BuyRequestOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  // ── denorm نمایشی (لیست عمومی بدون join — عین باسول) ──
-  /// نام دسته برگ — باسکول: subcategory_name
-  categoryName      String  @map("category_name")
-  provinceName      String? @map("province_name")
-  cityName          String? @map("city_name")
-  buyerFirstName    String  @default("") @map("buyer_first_name")
-  buyerLastName     String  @default("") @map("buyer_last_name")
-  buyerIsVerified   Boolean @default(false) @map("buyer_is_verified")
+  // ⚠️ ساختار درست داده: نام دسته/مکان و مشخصات خریدار در رکورد نیست —
+  // در لحظه خواندن با join (درخت دسته کش‌شده + کالکشن Location + User) ساخته می‌شود.
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

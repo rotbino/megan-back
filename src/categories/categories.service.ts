@@ -104,6 +104,37 @@ export class CategoriesService {
     return ids;
   }
 
+  /**
+   * نقشه نام دسته‌ها — برای join هنگام خواندن آگهی/درخواست
+   * (denorm حذف شده؛ نام همیشه از همین کش تازه می‌آید).
+   */
+  async getNameMap(): Promise<Map<number, CategoryNode>> {
+    const all = await this.getAllCategories(); // کش‌شده
+    const map = new Map<number, CategoryNode>();
+    const walk = (nodes: CategoryNode[]): void => {
+      for (const n of nodes) {
+        map.set(n.id, n);
+        walk(n.children);
+      }
+    };
+    walk(all);
+    return map;
+  }
+
+  /**
+   * id دسته‌هایی که نامشان عبارت جستجو را دارد — جایگزین جستجوی ستون denorm؛
+   * از درخت کش‌شده، بدون کوئری اضافه.
+   */
+  searchCategoryIds(q: string): Promise<number[]> {
+    return this.getNameMap().then((map) => {
+      const ids: number[] = [];
+      for (const node of map.values()) {
+        if (node.category_name.includes(q)) ids.push(node.id);
+      }
+      return ids;
+    });
+  }
+
   private toDto(c: {
     id: number;
     categoryName: string;

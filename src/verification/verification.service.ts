@@ -31,7 +31,7 @@ export interface MyVerificationDto {
  * ─── احراز هویت اسناد (B6) ───────────────────────────────────────────────────
  * فلو عین باسکول: کاربر کارت ملی + سلفی را در پنل بارگذاری می‌کند →
  * «مدارک شما در حال بررسی است» → ادمین تأیید/رد می‌کند → نشان
- * «احراز هویت» روی آگهی‌ها و پروفایل (isVerified + denorm sellerIsVerified).
+ * «احراز هویت» روی پروفایل و آگهی‌ها (isVerified کاربر — هنگام خواندن join می‌شود).
  *
  * مدارک در «یک» درخواست multipart ارسال می‌شوند (تراکنش کاربر اتمیک):
  * سفارش ساخته می‌شود، هر دو مدرک از طریق UploadsService با replace=true
@@ -223,7 +223,7 @@ export class VerificationService {
     }
 
     if (dto.approve) {
-      // تأیید: کاربر + denorm همه آگهی‌هایش (نشان «احراز هویت» روی کارت‌ها)
+      // تأیید: isVerified کاربر — نشان روی کارت‌ها هنگام خواندن با join ساخته می‌شود
       const [updated] = await this.prisma.$transaction([
         this.prisma.verificationOrder.update({
           where: { id: order.id },
@@ -237,12 +237,8 @@ export class VerificationService {
           where: { id: order.userId },
           data: { isVerified: true },
         }),
-        this.prisma.product.updateMany({
-          where: { userId: order.userId },
-          data: { sellerIsVerified: true },
-        }),
       ]);
-      // آگهی‌های کش‌شده فوراً تازه شوند
+      // آگهی‌های کش‌شده فوراً تازه شوند (نام فروشنده join است)
       this.cache.invalidateTag('products');
       return { id: updated.id, status: updated.status };
     }

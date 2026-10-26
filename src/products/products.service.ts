@@ -59,38 +59,22 @@ export interface ProductDto {
 const fmtDate = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '';
 
-type ProductRow = {
-  id: number;
-  productName: string;
-  slug: string;
-  description: string;
-  stock: number;
-  minSalePrice: number;
-  minSaleAmount: number;
-  unit: string;
-  categoryId: number;
-  categoryName: string;
-  subCategoryId: number;
-  subCategoryName: string;
-  provinceId: number;
-  provinceName: string;
-  cityId: number;
-  cityName: string;
-  userId: string;
-  sellerUserName: string;
-  sellerFirstName: string;
-  sellerLastName: string;
-  sellerIsVerified: boolean;
-  isLadder: boolean;
-  hasVideo: boolean;
-  isOld: boolean;
-  viewCount: number;
-  status: string;
-  features: unknown;
-  rejectionReasons: unknown;
-  createdAt: Date;
-  updatedAt: Date;
-  ladderExpiresAt: Date | null;
+/**
+ * نام‌های join‌شده برای نمایش — رکورد Product فقط شناسه دارد (رابطه یک‌به‌چند
+ * User↔Product با user_id)؛ این نام‌ها در لحظه خواندن ساخته می‌شوند.
+ */
+interface NameMaps {
+  users: Map<string, { userName: string; firstName: string; lastName: string; isVerified: boolean }>;
+  cats: Map<number, string>;
+  provs: Map<number, string>;
+  cities: Map<number, string>;
+}
+
+const EMPTY_MAPS: NameMaps = {
+  users: new Map(),
+  cats: new Map(),
+  provs: new Map(),
+  cities: new Map(),
 };
 
 @Injectable()
@@ -131,13 +115,15 @@ export class ProductsService {
           ];
         }
 
-        // جستجو — روی نام محصول و نام دسته (مثل باسکول)؛ فارسی case ندارد
+        // جستجو — نام محصول + نام دسته (resolve از درخت کش‌شده، بدون ستون denorm)
         const s = dto.s?.trim();
         if (s) {
-          const textMatch = [
+          const catIds = await this.categories.searchCategoryIds(s);
+          const textMatch: Prisma.ProductWhereInput[] = [
             { productName: { contains: s } },
-            { subCategoryName: { contains: s } },
-            { categoryName: { contains: s } },
+            ...(catIds.length > 0
+              ? [{ subCategoryId: { in: catIds } }, { categoryId: { in: catIds } }]
+              : []),
           ];
           if (where.OR) {
             // دسته + جستجو همزمان → AND داخلی
@@ -175,8 +161,9 @@ export class ProductsService {
 
         const pageCount = Math.max(1, Math.ceil(total / pageSize));
         const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
+        const names = await this.hydrateNames(rows);
         return {
-          items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [])),
+          items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
           total,
           page,
           pageCount,
@@ -202,7 +189,8 @@ export class ProductsService {
           .update({ where: { id }, data: { viewCount: { increment: 1 } } })
           .catch(() => undefined);
         const gallery = await this.uploads.galleryMap([id]);
-        return this.toDto(p, gallery.get(id) ?? []);
+        const names = await this.hydrateNames([p]);
+        return this.toDto(p, gallery.get(id) ?? [], names);
       },
     );
   }
@@ -214,8 +202,11 @@ export class ProductsService {
       orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
       take: limit,
     });
-    const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
-    return rows.map((r) => this.toDto(r, gallery.get(r.id) ?? []));
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(rows.map((r) => r.id)),
+      this.hydrateNames(rows),
+    ]);
+    return rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names));
   }
 
   // ─── ثبت (ویزارد) ──────────────────────────────────────────────────────────
@@ -233,7 +224,7 @@ export class ProductsService {
       );
     }
 
-    // denorm از کش — بدون join
+    // اعتبارسنجی ارجاع‌ها — دسته/استان/شهر باید فعال باشند
     const sub = await this.categories.getCategoryById(dto.subCategoryId);
     if (!sub || sub.kind !== 'CATEGORY') {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
@@ -243,20 +234,20 @@ export class ProductsService {
     if (city.province_id !== dto.provinceId) {
       throw AppError.badRequest('شهر به استان انتخابی تعلق ندارد.', 'CITY_PROVINCE_MISMATCH');
     }
+    if (city.is_active === false) {
+      throw AppError.badRequest('شهر انتخابی فعلاً غیرفعال است.', 'INACTIVE_LOCATION');
+    }
     const province = await this.locations.getProvinceById(dto.provinceId);
     if (!province) throw AppError.badRequest('استان انتخابی معتبر نیست.', 'BAD_PROVINCE');
-
-    const userRow = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
-    });
-    if (!userRow) throw AppError.notFound('کاربر یافت نشد.');
+    if (province.is_active === false) {
+      throw AppError.badRequest('استان انتخابی فعلاً غیرفعال است.', 'INACTIVE_LOCATION');
+    }
 
     const id = await this.nextProductId();
     const parent = sub.parent_id != null ? await this.categories.getCategoryById(sub.parent_id) : null;
     const categoryId = parent?.id ?? sub.id;
-    const categoryName = parent?.category_name ?? sub.category_name;
 
+    // رکورد نرمال — فقط شناسه‌ها؛ نام‌ها هنگام خواندن join می‌شوند
     const product = await this.prisma.product.create({
       data: {
         id,
@@ -264,24 +255,16 @@ export class ProductsService {
         slug: `خرید-عمده-${dto.productName.trim()}-${id}`,
         description: dto.description.trim(),
         categoryId,
-        categoryName,
         subCategoryId: sub.id,
-        subCategoryName: sub.category_name,
-        unit: sub.unit || 'کیلوگرم',
+        unit: sub.unit || 'کیلوگرم', // اسنپ‌شات واحدِ آگهی (جزو داده خود آگهی)
         provinceId: province.id,
-        provinceName: province.province_name,
         cityId: city.id,
-        cityName: city.city_name,
         stock: dto.stock,
         minSaleAmount: dto.minSaleAmount,
         minSalePrice: dto.minSalePrice,
         features: (dto.features ?? []) as unknown as object,
         status: 'pending',
         userId: user.id,
-        sellerUserName: userRow.userName,
-        sellerFirstName: userRow.firstName,
-        sellerLastName: userRow.lastName,
-        sellerIsVerified: userRow.isVerified,
       },
     });
 
@@ -303,9 +286,12 @@ export class ProductsService {
     for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
     counts.deleted = deletedCount;
 
-    const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(rows.map((r) => r.id)),
+      this.hydrateNames(rows),
+    ]);
     return {
-      items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [])),
+      items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
       counts,
       capacity: PRODUCT_CAPACITY,
     };
@@ -360,7 +346,10 @@ export class ProductsService {
       orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
       take: 48,
     });
-    const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(rows.map((r) => r.id)),
+      this.hydrateNames(rows),
+    ]);
 
     const avatarFile = await this.prisma.file.findFirst({
       where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'avatar' },
@@ -380,7 +369,7 @@ export class ProductsService {
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
         createdAt: fmtDate(seller.createdAt),
       },
-      products: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [])),
+      products: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
     };
   }
 
@@ -426,10 +415,67 @@ export class ProductsService {
     return counter.seq;
   }
 
-  /** نگاشت ردیف DB → DTO فرانت (camelCase) + عکس‌ها از جدول File */
+  /**
+   * join نام‌ها برای نمایش — سه کوئری دسته‌ای (کاربران/لوکیشن‌ها + درخت کش‌شده دسته‌ها).
+   * چون خروجی لیست/جزئیات کش می‌شود، این join فقط روی cache-miss اجرا می‌شود.
+   */
+  private async hydrateNames(rows: Array<{ userId: string; categoryId: number; subCategoryId: number; provinceId: number; cityId: number }>): Promise<NameMaps> {
+    if (rows.length === 0) return EMPTY_MAPS;
+
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const provinceIds = [...new Set(rows.map((r) => r.provinceId))];
+    const cityIds = [...new Set(rows.map((r) => r.cityId))];
+    const catIds = [...new Set(rows.flatMap((r) => [r.categoryId, r.subCategoryId]))];
+
+    const [userRows, catMap, locNames] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
+      }),
+      this.categories.getNameMap(), // کش‌شده
+      this.locations.getNames(provinceIds, cityIds),
+    ]);
+
+    const users = new Map(
+      userRows.map((u) => [
+        u.id,
+        { userName: u.userName, firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified },
+      ]),
+    );
+    const cats = new Map<number, string>();
+    for (const id of catIds) cats.set(id, catMap.get(id)?.category_name ?? '—');
+
+    return { users, cats, provs: locNames.provinces, cities: locNames.cities };
+  }
+
+  /** نگاشت ردیف DB → DTO فرانت (camelCase) + عکس‌ها از جدول File + نام‌های join‌شده */
   private toDto(
-    p: ProductRow,
+    p: {
+      id: number;
+      productName: string;
+      slug: string;
+      description: string;
+      stock: number;
+      minSalePrice: number;
+      minSaleAmount: number;
+      unit: string;
+      categoryId: number;
+      subCategoryId: number;
+      provinceId: number;
+      cityId: number;
+      userId: string;
+      isLadder: boolean;
+      hasVideo: boolean;
+      isOld: boolean;
+      viewCount: number;
+      status: string;
+      features: unknown;
+      rejectionReasons: unknown;
+      createdAt: Date;
+      updatedAt: Date;
+    },
     gallery: Array<{ url: string; thumbUrl: string | null }>,
+    names: NameMaps,
   ): ProductDto {
     const photos = gallery.map((f) => f.url);
     const photoThumbs = gallery.map((f) => f.thumbUrl ?? f.url);
@@ -439,6 +485,8 @@ export class ProductsService {
     const rejectionReasons = Array.isArray(p.rejectionReasons)
       ? (p.rejectionReasons as string[])
       : [];
+    const seller = names.users.get(p.userId);
+    const UNKNOWN = '—';
 
     return {
       id: p.id,
@@ -450,21 +498,21 @@ export class ProductsService {
       minSaleAmount: p.minSaleAmount,
       unit: p.unit,
       categoryId: p.categoryId,
-      categoryName: p.categoryName,
+      categoryName: names.cats.get(p.categoryId) ?? UNKNOWN,
       subCategoryId: p.subCategoryId,
-      subCategoryName: p.subCategoryName,
+      subCategoryName: names.cats.get(p.subCategoryId) ?? UNKNOWN,
       provinceId: p.provinceId,
-      provinceName: p.provinceName,
+      provinceName: names.provs.get(p.provinceId) ?? UNKNOWN,
       cityId: p.cityId,
-      cityName: p.cityName,
+      cityName: names.cities.get(p.cityId) ?? UNKNOWN,
       myuserId: p.userId,
       seller: {
         id: p.userId,
-        userName: p.sellerUserName,
-        firstName: p.sellerFirstName,
-        lastName: p.sellerLastName,
+        userName: seller?.userName ?? UNKNOWN,
+        firstName: seller?.firstName ?? UNKNOWN,
+        lastName: seller?.lastName ?? UNKNOWN,
         activePakageType: 0,
-        isVerified: p.sellerIsVerified,
+        isVerified: seller?.isVerified ?? false,
       },
       isLadder: p.isLadder,
       isElevated: false, // بدون فروشنده ویژه در ایمچ
