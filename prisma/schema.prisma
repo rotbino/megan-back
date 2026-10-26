@@ -44,6 +44,9 @@ model User {
   walletBalance Int     @default(0) @map("wallet_balance") // تومان
   avatarUrl    String? @map("avatar_url")
   businessDesc String? @map("business_desc")
+  /// مکان پیش‌فرض کاربر — ثبت‌نام/فرم‌ها با آن پیش‌پر می‌شوند (id عددی باسکول)
+  provinceId   Int?    @map("province_id")
+  cityId       Int?    @map("city_id")
   /// پروفایل کسب‌وکار embedded — فیلدهای myuser_profiles باسکول
   profile    Json?
 

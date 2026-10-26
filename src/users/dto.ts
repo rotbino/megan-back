@@ -1,4 +1,5 @@
-import { IsBoolean, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -10,6 +11,17 @@ export class UpdateProfileDto {
   @IsString()
   @Length(1, 60)
   last_name?: string;
+
+  /** مکان پیش‌فرض کاربر — id عددی باسکول (null = پاک‌کردن) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  province_id?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  city_id?: number | null;
 
   /** «آقا» / «خانم» — مثل باسکول */
   @IsOptional()

@@ -7,6 +7,19 @@ import { UpdateProfileDto } from './dto';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** نام استان/شهر از id عددی باسکول — کوئری‌های ایندکس‌دار سبک */
+  private async locationNames(provinceId: number | null, cityId: number | null) {
+    const [province, city] = await Promise.all([
+      provinceId == null
+        ? null
+        : this.prisma.location.findUnique({ where: { id: `province:${provinceId}` } }),
+      cityId == null
+        ? null
+        : this.prisma.location.findUnique({ where: { id: `city:${cityId}` } }),
+    ]);
+    return { provinceName: province?.name ?? null, cityName: city?.name ?? null };
+  }
+
   /** POST /users/getProfile — پروفایل کامل کاربر جاری (احرازشده) */
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -15,6 +28,7 @@ export class UsersService {
     const productCount = await this.prisma.product.count({
       where: { userId, status: { in: ['confirmed', 'pending'] } },
     });
+    const { provinceName, cityName } = await this.locationNames(user.provinceId, user.cityId);
 
     return {
       user: {
@@ -31,6 +45,10 @@ export class UsersService {
         wallet_balance: user.walletBalance,
         avatar_url: user.avatarUrl,
         business_desc: user.businessDesc,
+        province_id: user.provinceId,
+        city_id: user.cityId,
+        province: provinceName,
+        city: cityName,
         product_count: productCount,
         created_at: user.createdAt,
         updated_at: user.updatedAt,
@@ -41,6 +59,9 @@ export class UsersService {
 
   /** POST /users/updateProfile — ویرایش فیلدهای مجاز */
   async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const current = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!current) throw AppError.notFound('کاربر یافت نشد.');
+
     const update: Record<string, unknown> = {};
 
     if (dto.first_name !== undefined) update.firstName = dto.first_name.trim();
@@ -51,13 +72,49 @@ export class UsersService {
     if (dto.business_desc !== undefined) update.businessDesc = dto.business_desc.trim();
     if (dto.avatar_url !== undefined) update.avatarUrl = dto.avatar_url;
 
+    // ─── مکان پیش‌فرض (استان/شهر) — اعتبارسنجی درخت لوکیشن ───
+    if (dto.province_id !== undefined) {
+      if (dto.province_id === null) {
+        update.provinceId = null;
+        update.cityId = null; // بدون استان، شهر هم معنی ندارد
+      } else {
+        const province = await this.prisma.location.findUnique({
+          where: { id: `province:${dto.province_id}` },
+        });
+        if (!province || province.type !== 'province') {
+          throw AppError.badRequest('استان انتخابی معتبر نیست.', 'BAD_PROVINCE');
+        }
+        update.provinceId = dto.province_id;
+        // استان عوض شده و شهر جدید نیامده → شهر قبلی دیگر معتبر نیست
+        if (dto.city_id === undefined && current.cityId != null && current.provinceId !== dto.province_id) {
+          update.cityId = null;
+        }
+      }
+    }
+    if (dto.city_id !== undefined) {
+      if (dto.city_id === null) {
+        update.cityId = null;
+      } else {
+        const city = await this.prisma.location.findUnique({ where: { id: `city:${dto.city_id}` } });
+        if (!city || city.type !== 'city') {
+          throw AppError.badRequest('شهر انتخابی معتبر نیست.', 'BAD_CITY');
+        }
+        const effectiveProvince =
+          (update.provinceId as number | null | undefined) ?? current.provinceId;
+        if (effectiveProvince == null || city.parentId !== `province:${effectiveProvince}`) {
+          throw AppError.badRequest('شهر به استان انتخابی تعلق ندارد.', 'CITY_PROVINCE_MISMATCH');
+        }
+        update.cityId = dto.city_id;
+        // شهر آمده و استان نیامده → استان والد را خودکار ست کن (UX فرم‌ها)
+        if (dto.province_id === undefined && current.provinceId == null) {
+          update.provinceId = Number(city.parentId.split(':')[1]);
+        }
+      }
+    }
+
     // پروفایل کسب‌وکار embedded — merge با مقادیر موجود (نه جایگزینی کامل)
     if (dto.profile !== undefined) {
-      const existing = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { profile: true },
-      });
-      update.profile = { ...((existing?.profile as object) ?? {}), ...dto.profile };
+      update.profile = { ...((current.profile as object) ?? {}), ...dto.profile };
     }
 
     await this.prisma.user.update({ where: { id: userId }, data: update });
