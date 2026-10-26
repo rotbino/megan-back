@@ -44,6 +44,13 @@ export const env = Object.freeze({
   VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@imach.ir',
 });
 
+/**
+ * کد ثابت OTP — تا وقتی پنل پیامکی نداریم (خواسته مالک: «فعلا کد 1234»).
+ * مقدار غیرخالی → همیشه همان کد صادر می‌شود؛ با رسیدن پنل پیامک، این کلید را
+ * از .env خالی/حذف کنید تا کد تصادفی ۴ رقمی واقعی صادر شود. هیچ جریان دیگری عوض نمی‌شود.
+ */
+export const OTP_FIXED_CODE = (process.env.OTP_FIXED_CODE || '').trim();
+
 export const isProd = env.NODE_ENV === 'production';
 export const isDev = !isProd;
 
@@ -76,3 +83,10 @@ export const storage = Object.freeze({
 
 /** فایل‌های staged (relatedId=null) قدیمی‌تر از این — توسط reaper حذف می‌شوند. */
 export const FILES_STAGING_TTL_DAYS = num('FILES_STAGING_TTL_DAYS', process.env.FILES_STAGING_TTL_DAYS, 7);
+
+// ─── Wallet (B9) ─────────────────────────────────────────────────────────────
+// کارت واریز کارت‌به‌کارت و مالکش — نمایشی در UI شارژ؛ با کارت واقعی فقط .env عوض می‌شود.
+export const wallet = Object.freeze({
+  CARD_NUMBER: process.env.WALLET_CARD_NUMBER || '6037-9975-1234-5678',
+  CARD_OWNER: process.env.WALLET_CARD_OWNER || 'شرکت بازارگاه ایمچ',
+});

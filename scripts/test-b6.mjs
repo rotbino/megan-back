@@ -169,6 +169,9 @@ async function makeJpeg(label) {
   const j5 = await res5.json();
   check('ارسال پس از تأیید رد می‌شود', j5.status === false && j5.code === 'ALREADY_VERIFIED', JSON.stringify(j5));
 
+  // پاک‌سازی خود آزمایش — آگهی تست حذف نرم (شمارش‌های سوئیت R دست‌نخورده می‌ماند)
+  await post('products/deleteMyProduct', { id: cp.json?.data?.id }, userToken);
+
   console.log(`\nنتیجه: ${pass} پاس / ${fail} خطا`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => {

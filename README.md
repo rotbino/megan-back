@@ -46,9 +46,10 @@ npm run dev
 تست دستی سریع (ساده‌ترین راه: همین آدرس‌ها را در مرورگر باز کنید):
 
 ```powershell
-# PowerShell — تست سلامت و ارسال OTP (کد dev در پاسخ برمی‌گردد)
+# PowerShell — تست سلامت و ارسال OTP (کد ثابت فعلاً 1234 — از OTP_FIXED_CODE)
 Invoke-RestMethod http://localhost:4000/api/v1/health
 Invoke-RestMethod -Method Post http://localhost:4000/api/v1/auth/sendOtp -ContentType 'application/json' -Body '{"phone":"09123456789"}'
+Invoke-RestMethod -Method Post http://localhost:4000/api/v1/auth/verifyOtp -ContentType 'application/json' -Body '{"phone":"09123456789","code":"1234"}'
 Invoke-RestMethod -Method Post http://localhost:4000/api/v1/locations/getAllProvinces -ContentType 'application/json' -Body '{}'
 
 # در bash/cmd (نه PowerShell):
@@ -83,6 +84,7 @@ src/
   buy-requests/ درخواست‌های خرید + CRM نشان‌شده‌ها
   verification/ احراز هویت اسناد (کارت ملی + سلفی)
   chat/         گفتوگوها — REST + WebSocket (socket.io)
+  wallet/       کیف پول و نردبان — شارژ کارت‌به‌کارت + نردبان ماهانه (B9)
 scripts/        seedها · db-push.mjs (کراس‌پلتفرم) · test-*.mjs (تست سرتاسری)
 docs/           IMPLEMENTATION.md — نقشه راه فاز به فاز (زنده)
 prisma/         schema.prisma — لوکیشن درختی واحد + File چندریختی + آگهی‌های باسکول

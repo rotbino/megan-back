@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
-import { env, isDev, jwtExpiresInSeconds } from '../common/config/env';
+import { env, isDev, jwtExpiresInSeconds, OTP_FIXED_CODE } from '../common/config/env';
 
 const OTP_TTL_MS = 2 * 60 * 1000; // عمر کد: ۲ دقیقه
 const OTP_MAX_ATTEMPTS = 5;
@@ -53,7 +53,9 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
   // ─── OTP ────────────────────────────────────────────────────────────────────
 
-  /** POST /auth/sendOtp — ارسال کد ۵ رقمی؛ rate limit ۳ کد در ۱۰ دقیقه */
+  /** POST /auth/sendOtp — ارسال کد ۴ رقمی؛ rate limit ۳ کد در ۱۰ دقیقه.
+   *  OTP_FIXED_CODE (env) غیرخالی باشد همان کد صادر می‌شود (فعلاً 1234 —
+   *  تا خرید پنل پیامک؛ بعداً خالی شود تا کد تصادفی واقعی برود). */
   async sendOtp(phone: string): Promise<{ devCode?: string; expiresInSec: number }> {
     // سقف ارسال برای هر شماره
     const since = new Date(Date.now() - OTP_RATE_WINDOW_MS);
@@ -65,14 +67,15 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const code = String(randomInt(10000, 99999));
+    const code = OTP_FIXED_CODE || String(randomInt(1000, 10000));
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     await this.prisma.otpCode.create({
       data: { phone, codeHash: sha256(`${phone}:${code}`), expiresAt },
     });
 
-    // TODO (فاز بعدی): اتصال به سرویس پیامک — فعلاً فقط devCode در development
+    // TODO (پنل پیامک): OTP_FIXED_CODE از .env خالی شود → کد تصادفی ۴ رقمی + ارسال پیامک.
+    // فعلاً کد ثابت 1234 صادر می‌شود و در development همان کد در پاسخ هم برمی‌گردد (devCode).
     return { expiresInSec: OTP_TTL_MS / 1000, ...(isDev ? { devCode: code } : {}) };
   }
 

@@ -13,6 +13,7 @@ import { VerificationModule } from './verification/verification.module';
 import { BuyRequestsModule } from './buy-requests/buy-requests.module';
 import { SavedModule } from './saved/saved.module';
 import { ChatModule } from './chat/chat.module';
+import { WalletModule } from './wallet/wallet.module';
 
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
@@ -32,6 +33,7 @@ import { ChatModule } from './chat/chat.module';
     BuyRequestsModule,
     SavedModule,
     ChatModule,
+    WalletModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

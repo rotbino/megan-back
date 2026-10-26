@@ -157,6 +157,9 @@ async function login(phone) {
   buyerSocket.close();
   badSocket.close();
 
+  // پاک‌سازی خود آزمایش — آگهی تست حذف نرم (شمارش‌های سوئیت R دست‌نخورده می‌ماند)
+  await post('products/deleteMyProduct', { id: productId }, seller.token);
+
   console.log(`\nنتیجه: ${pass} پاس / ${fail} خطا`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => {

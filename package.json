@@ -15,7 +15,8 @@
     "seed:buy-requests": "node scripts/seed-buy-requests.mjs",
     "seed:products": "node scripts/seed-products.mjs",
     "make-admin": "node scripts/make-admin.mjs",
-    "test:api": "node scripts/test-api.mjs"
+    "test:api": "node scripts/test-api.mjs",
+    "test:b9": "node scripts/test-b9.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1138.0",

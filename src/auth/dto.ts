@@ -12,7 +12,7 @@ export class VerifyOtpDto {
   phone!: string;
 
   @IsString()
-  @Matches(/^\d{5}$/, { message: 'کد تایید ۵ رقمی است.' })
+  @Matches(/^\d{4}$/, { message: 'کد تایید ۴ رقمی است.' })
   code!: string;
 }
 

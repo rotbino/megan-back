@@ -42,8 +42,8 @@ async function main() {
   show('sendOtp → devCode در development', (send.status === 201 || send.status === 200) && !!devCode, `devCode=${devCode}`);
   show('sendOtp پیام فارسی', send.json?.message === 'کد تایید ارسال شد.');
 
-  // ── verifyOtp غلط ──
-  const wrong = await post('/auth/verifyOtp', { phone: PHONE, code: '00000' });
+  // ── verifyOtp غلط (۴ رقمی — عین فرمت کد واقعی) ──
+  const wrong = await post('/auth/verifyOtp', { phone: PHONE, code: '0000' });
   show('verifyOtp کد غلط → 400 OTP_WRONG', wrong.status === 400 && wrong.json?.code === 'OTP_WRONG');
 
   // ── verifyOtp درست ──

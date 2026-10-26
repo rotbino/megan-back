@@ -52,6 +52,8 @@ model User {
   refreshTokens RefreshToken[]
   verificationOrders VerificationOrder[] @relation("VerificationOwner")
   buyRequests  BuyRequest[]   @relation("BuyRequestOwner")
+  chargeOrders ChargeOrder[]  @relation("ChargeOrderOwner")
+  ladderOrders LadderOrder[]  @relation("LadderOrderOwner")
   savedLists   SavedList[]    @relation("SavedListOwner")
   savedTargets SavedUser[]    @relation("SavedTarget")
   chatThreadsAsSeller ChatThread[] @relation("ChatThreadSeller")
@@ -270,6 +272,7 @@ model Product {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   chatThreads  ChatThread[]  @relation("ChatThreadProduct")
+  ladderOrders LadderOrder[] @relation("LadderProduct")
 
   /// سورت «مرتبط‌ترین» = نردبان اول، بعد جدیدترین
   @@index([status, isLadder, updatedAt(sort: Desc)])
@@ -387,6 +390,66 @@ model SavedUserNote {
 }
 
 // ─── چت و پیام‌ها (B8) ───────────────────────────────────────────────────────
+
+// ─── کیف پول و نردبان (B9) ───────────────────────────────────────────────────
+
+/// سفارش شارژ کیف پول — کارت‌به‌کارت (جایگزین درگاه پرداخت): کاربر یکی از ۳
+/// پکیج را به کارت ایمچ واریز می‌کند و تصویر فیش را می‌فرستد؛ ادمین تأیید/رد
+/// می‌کند و شارژ (با احتساب درصد اضافه) به موجودی اضافه می‌شود.
+/// فیش در جدول File (relatedModel=ChargeOrder, fieldKey=receipt) — دکترین
+/// ضد-فایل-سرگردان imach-back: اسلات تک‌فایلی با replace + جبران در خطا.
+model ChargeOrder {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @map("user_id") @db.ObjectId
+  user      User     @relation("ChargeOrderOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// کلید پکیج — p100 | p200 | p400
+  packageKey   String  @map("package_key")
+  /// مبلغ واریزی کارت‌به‌کارت (تومان)
+  amount       Int
+  /// درصد شارژ اضافه (۰ | ۱۰ | ۲۰)
+  bonusPercent Int     @map("bonus_percent")
+  /// اعتبار افزوده به کیف پول پس از تأیید (با احتساب شارژ اضافه)
+  charge       Int
+
+  /// pending | approved | rejected
+  status         String   @default("pending")
+  rejectionReason String? @map("rejection_reason")
+  /// کاربر ادمین بررسی‌کننده
+  reviewedBy String?   @map("reviewed_by") @db.ObjectId
+  reviewedAt DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// نردبان آگهی — تنها قابلیت تبلیغاتی مگان (۱۰۰هزار تومان/ماه؛ بدون VIP و
+/// «فروشنده ویژه» — خواسته مالک). هزینه لحظه خرید از کیف پول کسر می‌شود؛
+/// is_ladder + ladder_expires_at روی خود آگهی denorm می‌شوند و سورت
+/// «مرتبط‌ترین» نردبان‌های زنده را صدر می‌گذارد. تمدید = امتداد از انقضای
+/// فعلی. انقضا با فیلتر زنده لیست + reaper دوره‌ای ماژول wallet غیرفعال می‌شود.
+model LadderOrder {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  productId Int
+  product   Product  @relation("LadderProduct", fields: [productId], references: [id])
+  userId    String   @map("user_id") @db.ObjectId
+  user      User     @relation("LadderOrderOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// مبلغ پرداختی از کیف پول (تومان) — ثابت ۱۰۰هزار
+  amount    Int
+  startsAt  DateTime @map("starts_at")
+  expiresAt DateTime @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([productId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
 
 /// مکالمه روی آگهی — خریدار ↔ فروشنده برای یک محصول مشخص (عین باسکول).
 /// یک مکالمه به‌ازای هر خریدار روی هر آگهی؛ فروشنده = مالک آگهی (denorm).

@@ -27,7 +27,7 @@ import type { AuthUser } from '../common/guards';
 import { buildStorage, type StorageDriver } from './storage';
 
 /** مدل‌هایی که فایل تزئین می‌کند — کلاینت نمی‌تواند دیگری بسازد. */
-export const RELATED_MODELS = ['User', 'Product', 'Verification'] as const;
+export const RELATED_MODELS = ['User', 'Product', 'Verification', 'ChargeOrder'] as const;
 export type RelatedModel = (typeof RELATED_MODELS)[number];
 
 /** ObjectIdهای ارسالی کلاینت قبل از لمس Prisma اعتبارسنجی می‌شوند (۲۴hex → 404 تمیز) */
@@ -48,6 +48,7 @@ const MODEL_FOLDER: Record<RelatedModel, string> = {
   User: 'users',
   Product: 'products',
   Verification: 'verifications',
+  ChargeOrder: 'charge-orders',
 };
 
 const MIME_EXT: Record<string, string> = {
@@ -212,6 +213,19 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         select: { userId: true },
       });
       if (!order) throw AppError.notFound('درخواست یافت نشد.');
+      if (order.userId !== user.id && user.role !== 'ADMIN') {
+        throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
+      }
+      return order;
+    }
+    // ChargeOrder — فیش واریزی کارت‌به‌کارت؛ id آبجکت، فقط مالک سفارش
+    if (model === 'ChargeOrder') {
+      if (!OID_RE.test(modelId)) throw AppError.notFound('سفارش شارژ یافت نشد.');
+      const order = await this.prisma.chargeOrder.findUnique({
+        where: { id: modelId },
+        select: { userId: true },
+      });
+      if (!order) throw AppError.notFound('سفارش شارژ یافت نشد.');
       if (order.userId !== user.id && user.role !== 'ADMIN') {
         throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
       }
