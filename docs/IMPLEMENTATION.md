@@ -209,7 +209,13 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   ادمین `reviewBuyRequest` + `reviewProduct` (تأیید/رد آگهی) / CRM نشان‌شده‌ها:
   SavedList/SavedUser/SavedUserNote با ۱۰ اندپوینت (لیست/نام/حذف/نشان/وضعیت ۷گانه/
   یادداشت/انتقال). تست سرتاسری ۴۴/۴۴ + تست مرورگر کامل.
-- [ ] **B8 — چت و پیام‌ها:** مکالمه روی آگهی (WebSocket) + لیست + خوانده‌شدن.
+- [x] **B8 — چت و پیام‌ها:** ChatThread/ChatMessage (یکتا به‌ازای خریدار×آگهی؛ denorm
+  lastMessageAt). REST: `startThread` (idempotent) / `sendMessage` / `getThreadMessages`
+  (باز کردن = خواندن + رویداد تیک) / `markThreadRead` / `getConversations` (unread گروهی)
+  / `getThread`. WebSocket: fastify-socket.io روی همان پورت؛ handshake با JWT → اتاق
+  `user:{id}`؛ رویدادهای `chat:newMessage` / `chat:read`؛ تنزل تدریجی به REST.
+  ⚠️ درس Prisma+Mongo: فیلتر `field: null` فقط null صریح را می‌گیرد نه فیلد غایب —
+  create باید readAt: null صریح بنویسد. تست ۲۵/۲۵ + مرورگر (push زنده بدون ریلود).
 - [ ] **B9 — کیف پول و نردبان:** شارژ کارت‌به‌کارت (۳ پکیج + فیش → ChargeOrder → تأیید ادمین) +
   نردبان ماهانه ۱۰۰هزار از کیف پول + `is_ladder` denorm + انقضای خودکار.
 - [ ] **B10 — وب‌پوش:** subscription با VAPID + نوتیف (پیام/قیمت/انقضا).
@@ -305,4 +311,5 @@ curl -X POST http://localhost:4000/api/v1/products/getProductList -H 'Content-Ty
 | F1 اتصال فرانت به بک | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | B6 احراز هویت اسناد | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B7 درخواست‌های خرید + CRM | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
+| B8 چت و پیام‌ها | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B0–B3 (نسخه Mongoose) | 🗑 منسوخ — با R0–R5 جایگزین شد | — |

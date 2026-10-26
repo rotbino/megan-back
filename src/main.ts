@@ -7,10 +7,14 @@ import helmet from '@fastify/helmet';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyCompress from '@fastify/compress';
 import fastifyStatic from '@fastify/static';
+import fastifyIO from 'fastify-socket.io';
 import path from 'node:path';
 import { AppModule } from './app.module';
+import { ChatModule } from './chat/chat.module';
+import { ChatService } from './chat/chat.service';
 import { env, isProd, storage } from './common/config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { setIo } from './chat/io-holder';
 
 const API_PREFIX = 'api/v1';
 
@@ -47,6 +51,16 @@ async function bootstrap(): Promise<void> {
     limits: { fileSize: storage.MAX_FILE_SIZE, files: 2, fields: 10 },
   });
   await app.register(fastifyCompress);
+
+  // ── چت لحظه‌ای (B8): socket.io روی همان پورت Fastify ───────────────────
+  // احراز هویت handshake با توکن JWT (query: token — سوکت‌ها هدر سفارشی
+  // راحت نمی‌فرستند)؛ کاربر به اتاق شخصی‌اش user:{id} می‌پیوندد.
+  await app.register(fastifyIO, {
+    cors: {
+      origin: env.CORS_ORIGINS === '*' ? true : env.CORS_ORIGINS.split(',').map((o) => o.trim()),
+      credentials: true,
+    },
+  });
 
   // درایور local فایل‌ها را مستقیم سرو می‌کند (درایور arvan بی‌اعتناست)
   if (storage.DRIVER === 'local') {
@@ -85,6 +99,32 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.listen({ port: env.PORT, host: env.HOST });
+
+  // اتصال io به نگهدارنده + منطق handshake — بعد از listen (سرور آماده است)
+  // (fastify-socket.io نمونه io را روی instance تزئین می‌کند — typing ندارد)
+  const fastify = app.getHttpAdapter().getInstance() as
+    import('fastify').FastifyInstance & { io?: import('socket.io').Server };
+  if (fastify?.io) {
+    setIo(fastify.io);
+    const chat = app.select(ChatModule).get(ChatService, { strict: false });
+    const io = fastify.io;
+    io.on('connection', async (socket) => {
+      const token =
+        (socket.handshake.auth?.token as string | undefined) ??
+        (socket.handshake.query?.token as string | undefined) ??
+        (socket.handshake.headers?.authorization?.startsWith('Bearer ')
+          ? socket.handshake.headers.authorization.slice(7)
+          : undefined);
+      const userId = token ? await chat.verifySocketToken(token) : null;
+      if (!userId) {
+        socket.disconnect(true);
+        return;
+      }
+      socket.data.userId = userId;
+      await socket.join(`user:${userId}`);
+    });
+  }
+
   if (!isProd) console.log(`🚀 Megan API (Prisma + Fastify) → http://${env.HOST}:${env.PORT} | Swagger: /docs`);
 }
 

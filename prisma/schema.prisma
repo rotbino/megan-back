@@ -54,6 +54,8 @@ model User {
   buyRequests  BuyRequest[]   @relation("BuyRequestOwner")
   savedLists   SavedList[]    @relation("SavedListOwner")
   savedTargets SavedUser[]    @relation("SavedTarget")
+  chatThreadsAsSeller ChatThread[] @relation("ChatThreadSeller")
+  chatThreadsAsBuyer  ChatThread[] @relation("ChatThreadBuyer")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -256,6 +258,8 @@ model Product {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  chatThreads  ChatThread[]  @relation("ChatThreadProduct")
+
   /// سورت «مرتبط‌ترین» = نردبان اول، بعد جدیدترین
   @@index([status, isLadder, updatedAt(sort: Desc)])
   @@index([subCategoryId, status])
@@ -369,4 +373,48 @@ model SavedUserNote {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([savedUserId, createdAt(sort: Desc)])
+}
+
+// ─── چت و پیام‌ها (B8) ───────────────────────────────────────────────────────
+
+/// مکالمه روی آگهی — خریدار ↔ فروشنده برای یک محصول مشخص (عین باسکول).
+/// یک مکالمه به‌ازای هر خریدار روی هر آگهی؛ فروشنده = مالک آگهی (denorm).
+model ChatThread {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  productId Int
+  product   Product  @relation("ChatThreadProduct", fields: [productId], references: [id])
+
+  sellerId  String   @map("seller_id") @db.ObjectId
+  seller    User     @relation("ChatThreadSeller", fields: [sellerId], references: [id])
+  buyerId   String   @map("buyer_id") @db.ObjectId
+  buyer     User     @relation("ChatThreadBuyer", fields: [buyerId], references: [id])
+
+  /// برای سورت لیست مکالمات بدون join آخرین پیام
+  lastMessageAt DateTime? @map("last_message_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages ChatMessage[]
+
+  @@unique([productId, buyerId])
+  @@index([sellerId, lastMessageAt(sort: Desc)])
+  @@index([buyerId, lastMessageAt(sort: Desc)])
+}
+
+/// پیام — متن ساده در v1 (بدون فایل)؛ خوانده‌شدن با readAt
+model ChatMessage {
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  threadId  String     @map("thread_id") @db.ObjectId
+  thread    ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  /// فرستنده — عضو مکالمه اعتبارسنجی می‌شود
+  senderId  String     @map("sender_id") @db.ObjectId
+  text      String
+  readAt    DateTime?  @map("read_at")
+
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  @@index([threadId, createdAt(sort: Desc)])
+  @@index([threadId, readAt])
 }
