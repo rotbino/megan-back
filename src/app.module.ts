@@ -15,6 +15,7 @@ import { SavedModule } from './saved/saved.module';
 import { ChatModule } from './chat/chat.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PushModule } from './push/push.module';
+import { AdminModule } from './admin/admin.module';
 
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
@@ -36,6 +37,7 @@ import { PushModule } from './push/push.module';
     ChatModule,
     WalletModule,
     PushModule,
+    AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

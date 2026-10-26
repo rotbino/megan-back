@@ -52,6 +52,22 @@ export const env = Object.freeze({
  */
 export const OTP_FIXED_CODE = (process.env.OTP_FIXED_CODE || '').trim();
 
+// ─── پنل ادمین (فاز A1 — جدایی کامل از احراز کاربر عادی) ────────────────────
+export const adminEnv = Object.freeze({
+  /** راز JWT ادمین — جدا از کاربران؛ خالی → از JWT_SECRET مشتق می‌شود */
+  JWT_SECRET: process.env.ADMIN_JWT_SECRET || '',
+  /** عمر توکن ادمین — کوتاه؛ بدون refresh، انقضا = ورود مجدد */
+  JWT_EXPIRES_IN: process.env.ADMIN_JWT_EXPIRES_IN || '12h',
+  /** بوت‌استرپ ادمین پیش‌فرض — فقط اگر وجود نداشته باشد ساخته می‌شود */
+  DEFAULT_USERNAME: process.env.ADMIN_DEFAULT_USERNAME || '09196421264',
+  DEFAULT_PASSWORD: process.env.ADMIN_DEFAULT_PASSWORD || 'admin434343',
+});
+
+/** راز مؤثر JWT ادمین — جدا از راز کاربران (حتی بدون env صریح) */
+export function adminJwtSecret(): string {
+  return adminEnv.JWT_SECRET || `${env.JWT_SECRET}:admin-scope`;
+}
+
 export const isProd = env.NODE_ENV === 'production';
 export const isDev = !isProd;
 

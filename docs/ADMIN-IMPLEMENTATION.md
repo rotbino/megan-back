@@ -51,18 +51,22 @@ export سرویس خودشان مصرف می‌شوند؛ ادمین منطق د
 ## ۲. فازهای پیاده‌سازی (حداکثر ۵ فاز)
 
 ### فاز A1 — زیرساخت و احراز هویت ادمین
-- [ ] مدل `AdminUser` (username/passwordHash/name/role/isActive/lastLoginAt) — **اضافه شد**
-- [ ] `src/common/password.ts` — scrypt هش/وریفای مشترک با رمز پنل کاربر — **اضافه شد**
-- [ ] `src/admin/admin-auth/` — `POST /admin/auth/login` (username+password →
+- [x] مدل `AdminUser` (username/passwordHash/name/role/isActive/lastLoginAt) — **اضافه شد**
+- [x] `src/common/password.ts` — scrypt هش/وریفای مشترک با رمز پنل کاربر — **اضافه شد**
+- [x] `src/admin/admin-auth/` — `POST /admin/auth/login` (username+password →
       JWT ادعای `scope:'admin'`؛ قفل ۵ غلط/۱۵ دقیقه) / `POST /admin/auth/logout` /
       `POST /admin/auth/me` / `POST /admin/auth/changePassword` (رمز فعلی الزامی)
-- [ ] `AdminJwtAuthGuard` — راز جدا + scope + isActive زنده از DB
-- [ ] بوت‌استرپ ادمین پیش‌فرض (env یا 09196421264/admin434343)
-- [ ] `src/admin/admin-dashboard/getStats` — شمارنده‌های زنده: کاربران،
+- [x] `AdminJwtAuthGuard` — راز جدا + scope + isActive زنده از DB
+- [x] بوت‌استرپ ادمین پیش‌فرض (env یا 09196421264/admin434343)
+- [x] `src/admin/admin-dashboard/getStats` — شمارنده‌های زنده: کاربران،
       فروشندگان، آگهی‌ها به تفکیک وضعیت، درخواست‌های خرید، پیام‌ها، کیف پول
-- [ ] **فرانت A1:** `src/app/admin/login` (فرم نام کاربری+رمز) + پوسته داشبورد
+- [x] **فرانت A1:** `src/app/admin/login` (فرم نام کاربری+رمز) + پوسته داشبورد
       (سایدبار تیره، تاپ‌بار، خروج) + صفحه داشبورد با کارت‌های آماری زنده —
-      `src/lib/admin/api.ts` با توکن جدا (`imach:admin-tokens`)، noindex کامل
+      `src/lib/admin/api.ts` با توکن جدا (`imach:admin-token`)، noindex کامل
+
+> تست A1: `scripts/test-admin-a1.mjs` — ۱۲/۱۲ موفق (شامل تست منفی امنیتی:
+> توکن کاربر عادی روی admin/* رد شد). مرورگر: ورود → داشبورد زنده (دیتای
+> واقعی Atlas) → تغییر رمز → خروج → ورود مجدد؛ موبایل ۳۹۰px بدون overflow.
 
 ### فاز A2 — مدیریت اطلاعات پایه (دسته‌بندی‌ها و مکان‌ها)
 - [ ] `src/admin/admin-base-data/` — CRUD درخت دسته: `upsertCategory` /
@@ -123,7 +127,7 @@ export سرویس خودشان مصرف می‌شوند؛ ادمین منطق د
 
 | فاز | وضعیت | commit |
 |---|---|---|
-| A1 — زیرساخت و احراز ادمین | 🔨 در حال اجرا | — |
+| A1 — زیرساخت و احراز ادمین | ✅ کامل | 1322317 + فاز A1 |
 | A2 — اطلاعات پایه | ⏳ | — |
 | A3 — کاربران | ⏳ | — |
 | A4 — آگهی‌ها و درخواست‌ها | ⏳ | — |
