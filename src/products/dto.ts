@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsOptional, IsString, Length, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** ویژگی مرحله «جزئیات نهایی» ویزارد */
@@ -145,4 +145,21 @@ export class SearchSuggestionsDto {
   @IsString()
   @Length(1, 60)
   typedText!: string;
+}
+
+/** POST /products/reviewProduct (ادمین) — تأیید/رد آگهی در انتظار */
+export class ReviewProductDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  @IsBoolean()
+  approve!: boolean;
+
+  /** دلایل رد — عین جعبه باسکول (آرایه) */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  rejectionReasons?: string[];
 }

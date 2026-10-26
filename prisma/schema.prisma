@@ -51,6 +51,9 @@ model User {
   products     Product[]      @relation("ProductOwner")
   refreshTokens RefreshToken[]
   verificationOrders VerificationOrder[] @relation("VerificationOwner")
+  buyRequests  BuyRequest[]   @relation("BuyRequestOwner")
+  savedLists   SavedList[]    @relation("SavedListOwner")
+  savedTargets SavedUser[]    @relation("SavedTarget")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -259,4 +262,111 @@ model Product {
   @@index([provinceId, cityId, status])
   @@index([userId, status])
   @@index([slug])
+}
+
+// ─── درخواست‌های خرید (RFQ) — عین ساختار get_buyAd_list باسکول ───────────────
+
+/// درخواست خرید — جمله کارت باسکول: «خریدار {requirementAmount} {unit}
+/// {categoryName} از نوع {name} هستم». ⚠️ نام‌گذاری عین باسکول:
+///   name = «نوع محصول» (پاجوش پیارم) — به‌زودی به نود PRODUCT_TYPE ارجاع
+///   categoryId = دسته برگ (نهال) — در پاسخ باسکول subcategory_name
+model BuyRequest {
+  /// id عددی باسکول برای seed؛ Counter برای درخواست‌های جدید
+  id                Int     @id @map("_id")
+  /// «نوع محصول» مثل: پاجوش پیارم — در باسکول nullable
+  name              String?
+  description       String?
+
+  /// دسته برگ (بهداشت شخصی=1035)
+  categoryId        Int     @map("category_id")
+  /// نود PRODUCT_TYPE Categories در صورت انتخاب از پیشنهادها
+  productTypeId     Int?    @map("product_type_id")
+
+  /// میزان نیازمندی (۶۰۰ عدد / ۱۰٬۰۰۰ کیلوگرم)
+  requirementAmount Int     @map("requirement_amount")
+  /// واحد سفارش — از واحد دسته
+  unit              String  @default("کیلوگرم")
+
+  provinceId        Int?    @map("province_id")
+  cityId            Int?    @map("city_id")
+
+  /// هدف: price_and_buy (قیمت + خرید) | price_only (فقط اطلاع از قیمت)
+  goal              String  @default("price_and_buy")
+  /// سابقه خرید عمده این کالا از قبل
+  hasHistory        Boolean @default(false) @map("has_history")
+
+  /// pending | confirmed | rejected | deleted — تب‌های «درخواستهای من»
+  status            String  @default("pending")
+  rejectionReason   String? @map("rejection_reason")
+
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("BuyRequestOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── denorm نمایشی (لیست عمومی بدون join — عین باسول) ──
+  /// نام دسته برگ — باسکول: subcategory_name
+  categoryName      String  @map("category_name")
+  provinceName      String? @map("province_name")
+  cityName          String? @map("city_name")
+  buyerFirstName    String  @default("") @map("buyer_first_name")
+  buyerLastName     String  @default("") @map("buyer_last_name")
+  buyerIsVerified   Boolean @default(false) @map("buyer_is_verified")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([categoryId, status])
+  @@index([userId, status])
+}
+
+// ─── CRM نشان‌شده‌ها — عین پنل باسکول (SavedList/SavedUser/Note) ────────────
+
+/// لیست نشان‌شده‌ها — نام آزاد مثل «سیب زمینی»؛ یکتا به‌ازای کاربر
+model SavedList {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("SavedListOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  savedUsers SavedUser[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, name])
+}
+
+/// خریدار نشان‌شده در یک لیست — وضعیت ۷گانه CRM باسکول
+model SavedUser {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  savedListId String    @map("saved_list_id") @db.ObjectId
+  savedList   SavedList @relation(fields: [savedListId], references: [id], onDelete: Cascade)
+
+  /// خریدار نشان‌شده
+  targetUserId String @map("target_user_id") @db.ObjectId
+  targetUser   User   @relation("SavedTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  /// following | not_needed | unresponsive | out_of_stock |
+  /// priority_high | priority_medium | priority_low
+  status      String  @default("following")
+  notes       SavedUserNote[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([savedListId, targetUserId])
+  @@index([targetUserId])
+}
+
+/// یادداشت زمان‌دار روی خریدار نشان‌شده — «یادم باشه زنگ بزنم»
+model SavedUserNote {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  savedUserId String    @map("saved_user_id") @db.ObjectId
+  savedUser   SavedUser @relation(fields: [savedUserId], references: [id], onDelete: Cascade)
+
+  text        String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([savedUserId, createdAt(sort: Desc)])
 }

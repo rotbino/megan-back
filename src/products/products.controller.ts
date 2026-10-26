@@ -8,9 +8,10 @@ import {
   GetProductListDto,
   GetRelatedProductsDto,
   GetSellerDto,
+  ReviewProductDto,
   SearchSuggestionsDto,
 } from './dto';
-import { JwtAuthGuard } from '../common/guards';
+import { AdminGuard, JwtAuthGuard } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
@@ -62,6 +63,17 @@ export class ProductsController {
   @ApiOperation({ summary: 'حذف نرم آگهی (تب «حذف شده») — عین باسکول' })
   async deleteMyProduct(@CurrentUser() user: AuthUser, @Body() dto: DeleteMyProductDto) {
     return ok(await this.products.deleteMyProduct(user, dto.id), 'آگهی حذف شد.');
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiBearerAuth()
+  @Post('reviewProduct')
+  @ApiOperation({ summary: '(ادمین) تأیید یا رد آگهی در انتظار' })
+  async reviewProduct(@Body() dto: ReviewProductDto) {
+    return ok(
+      await this.products.reviewProduct(dto),
+      dto.approve ? 'آگهی تایید شد.' : 'آگهی رد شد.',
+    );
   }
 
   @Post('getSeller')

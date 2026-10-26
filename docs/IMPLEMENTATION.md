@@ -200,7 +200,15 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   `getVerificationOrders` + `reviewVerification` (تأیید → isVerified + denorm
   sellerIsVerified همه آگهی‌ها + ابطال کش؛ رد → دلیل برای کاربر) + `make-admin.mjs`.
   تست سرتاسری ۱۸/۱۸ + تست مرورگر (هر ۴ حالت UI: none/pending/approved/rejected).
-- [ ] **B7 — درخواست‌های خرید (RFQ):** ثبت با «نوع کالا» + لیست عمومی + پیشنهادی‌ها + CRM نشان‌شده‌ها.
+- [x] **B7 — درخواست‌های خرید (RFQ):** seed ۶۰ درخواست واقعی + ۵۳ خریدار باسکول
+  (`seed-buy-requests.mjs` idempotent). `createBuyRequest` (ویزارد، «نوع کالا» → نود
+  PRODUCT_TYPE با Counter ۹۰۰هزار، idempotent) / `getBuyRequestList` (جستجو contains
+  + فیلتر استان + صفحه‌بندی) / `getLatestBuyRequests` / `getMyBuyRequests` (+شمارنده) /
+  `deleteMyBuyRequest` / `getBuyRequestContact` (Lead-gen — لاگین لازم) /
+  `getSuggestedBuyers` (سه سطح تطبیق exact/same-product/near-category + امتیاز حجم) /
+  ادمین `reviewBuyRequest` + `reviewProduct` (تأیید/رد آگهی) / CRM نشان‌شده‌ها:
+  SavedList/SavedUser/SavedUserNote با ۱۰ اندپوینت (لیست/نام/حذف/نشان/وضعیت ۷گانه/
+  یادداشت/انتقال). تست سرتاسری ۴۴/۴۴ + تست مرورگر کامل.
 - [ ] **B8 — چت و پیام‌ها:** مکالمه روی آگهی (WebSocket) + لیست + خوانده‌شدن.
 - [ ] **B9 — کیف پول و نردبان:** شارژ کارت‌به‌کارت (۳ پکیج + فیش → ChargeOrder → تأیید ادمین) +
   نردبان ماهانه ۱۰۰هزار از کیف پول + `is_ladder` denorm + انقضای خودکار.
@@ -296,4 +304,5 @@ curl -X POST http://localhost:4000/api/v1/products/getProductList -H 'Content-Ty
 | R5 seed محصولات باسکول | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | F1 اتصال فرانت به بک | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | B6 احراز هویت اسناد | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
+| B7 درخواست‌های خرید + CRM | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B0–B3 (نسخه Mongoose) | 🗑 منسوخ — با R0–R5 جایگزین شد | — |

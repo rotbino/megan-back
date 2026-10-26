@@ -311,6 +311,28 @@ export class ProductsService {
     };
   }
 
+
+  /** POST /products/reviewProduct (ادمین) — تأیید/رد آگهی در انتظار تایید */
+  async reviewProduct(dto: { id: number; approve: boolean; rejectionReasons?: string[] }) {
+    const p = await this.prisma.product.findUnique({ where: { id: dto.id } });
+    if (!p) throw AppError.notFound('محصول یافت نشد.');
+    if (p.status !== 'pending') {
+      throw AppError.conflict('این آگهی قبلاً بررسی شده است.', 'ALREADY_REVIEWED');
+    }
+    if (!dto.approve && (!dto.rejectionReasons || dto.rejectionReasons.length === 0)) {
+      throw AppError.badRequest('دلیل (یا دلایل) رد شدن را وارد کنید.', 'REASON_REQUIRED');
+    }
+    const updated = await this.prisma.product.update({
+      where: { id: dto.id },
+      data: dto.approve
+        ? { status: 'confirmed' }
+        : { status: 'rejected', rejectionReasons: dto.rejectionReasons },
+    });
+    this.cache.invalidateTag('products');
+    this.cache.invalidateTag(`product:${dto.id}`);
+    return { id: updated.id, status: updated.status };
+  }
+
   /** POST /products/deleteMyProduct — حذف نرم (تب «حذف شده» عین باسکول) */
   async deleteMyProduct(user: AuthUser, id: number) {
     const p = await this.prisma.product.findUnique({ where: { id } });
