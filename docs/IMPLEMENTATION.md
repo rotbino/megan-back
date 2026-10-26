@@ -195,7 +195,11 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   `getSeller` / `searchSuggestions`.
 - [x] **R5 — seed محصولات باسکول:** ۲۶ فروشنده + ۶۰ آگهی واقعی + rehost عکس‌ها در آروان
   (اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + immutable) + Counter + fixer ObjectId.
-- [ ] **B6 — احراز هویت اسناد:** کارت ملی + سلفی → جریان تأیید ادمین (relatedModel=Verification).
+- [x] **B6 — احراز هویت اسناد:** `submitVerification` (multipart اتمیک: کارت ملی + سلفی
+  در یک درخواست، جبران کامل در خطا) / `getMyVerification` / ادمین:
+  `getVerificationOrders` + `reviewVerification` (تأیید → isVerified + denorm
+  sellerIsVerified همه آگهی‌ها + ابطال کش؛ رد → دلیل برای کاربر) + `make-admin.mjs`.
+  تست سرتاسری ۱۸/۱۸ + تست مرورگر (هر ۴ حالت UI: none/pending/approved/rejected).
 - [ ] **B7 — درخواست‌های خرید (RFQ):** ثبت با «نوع کالا» + لیست عمومی + پیشنهادی‌ها + CRM نشان‌شده‌ها.
 - [ ] **B8 — چت و پیام‌ها:** مکالمه روی آگهی (WebSocket) + لیست + خوانده‌شدن.
 - [ ] **B9 — کیف پول و نردبان:** شارژ کارت‌به‌کارت (۳ پکیج + فیش → ChargeOrder → تأیید ادمین) +
@@ -291,4 +295,5 @@ curl -X POST http://localhost:4000/api/v1/products/getProductList -H 'Content-Ty
 | R4 محصولات | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | R5 seed محصولات باسکول | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | F1 اتصال فرانت به بک | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
+| B6 احراز هویت اسناد | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B0–B3 (نسخه Mongoose) | 🗑 منسوخ — با R0–R5 جایگزین شد | — |

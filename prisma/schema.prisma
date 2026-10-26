@@ -50,9 +50,32 @@ model User {
   files        File[]         @relation("FileOwner")
   products     Product[]      @relation("ProductOwner")
   refreshTokens RefreshToken[]
+  verificationOrders VerificationOrder[] @relation("VerificationOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+}
+
+/// درخواست احراز هویت اسناد — کارت ملی + سلفی؛ بررسی و تأیید توسط ادمین.
+/// مدارک از جدول File (relatedModel=Verification, fieldKey=nationalCard|selfie)
+/// به سفارش می‌چسبند — دکترین ضد-فایل-سرگردان imach-back (بخش ۵ سند).
+model VerificationOrder {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @map("user_id") @db.ObjectId
+  user      User     @relation("VerificationOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// pending | approved | rejected
+  status         String   @default("pending")
+  rejectionReason String? @map("rejection_reason")
+  /// کاربر ادمین بررسی‌کننده
+  reviewedBy String?   @map("reviewed_by") @db.ObjectId
+  reviewedAt DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, status])
+  @@index([status, createdAt(sort: Desc)])
 }
 
 /// کد OTP — هش sha256، عمر ۲ دقیقه، پاک‌سازی دوره‌ای توسط reaper

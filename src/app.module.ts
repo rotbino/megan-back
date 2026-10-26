@@ -9,6 +9,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { LocationsModule } from './locations/locations.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ProductsModule } from './products/products.module';
+import { VerificationModule } from './verification/verification.module';
 
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
@@ -24,6 +25,7 @@ import { ProductsModule } from './products/products.module';
     LocationsModule,
     UploadsModule,
     ProductsModule,
+    VerificationModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -42,7 +42,9 @@ async function bootstrap(): Promise<void> {
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
   await app.register(fastifyMultipart, {
-    limits: { fileSize: storage.MAX_FILE_SIZE, files: 1, fields: 10 },
+    // files:2 برای مدارک احراز هویت (کارت ملی + سلفی در یک درخواست)؛
+    // سرویس‌های تک‌فایلی پارت اضافه را خودشان می‌بلعند (readMultipart)
+    limits: { fileSize: storage.MAX_FILE_SIZE, files: 2, fields: 10 },
   });
   await app.register(fastifyCompress);
 

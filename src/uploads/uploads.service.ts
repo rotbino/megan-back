@@ -27,7 +27,7 @@ import type { AuthUser } from '../common/guards';
 import { buildStorage, type StorageDriver } from './storage';
 
 /** مدل‌هایی که فایل تزئین می‌کند — کلاینت نمی‌تواند دیگری بسازد. */
-export const RELATED_MODELS = ['User', 'Product'] as const;
+export const RELATED_MODELS = ['User', 'Product', 'Verification'] as const;
 export type RelatedModel = (typeof RELATED_MODELS)[number];
 
 /** ObjectIdهای ارسالی کلاینت قبل از لمس Prisma اعتبارسنجی می‌شوند (۲۴hex → 404 تمیز) */
@@ -43,10 +43,11 @@ const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as c
 /** حداقل حجم معنادار تصویر (قاعده باسکول: ۲۰KB) */
 const MIN_IMAGE_BYTES = 20 * 1024;
 
-/** نام پوشه‌های درست — «products» نه «products» (جمع ساده‌انگارانه) */
+/** نام پوشه‌های درست — «users» نه «user» (جمع ساده‌انگارانه) */
 const MODEL_FOLDER: Record<RelatedModel, string> = {
   User: 'users',
   Product: 'products',
+  Verification: 'verifications',
 };
 
 const MIME_EXT: Record<string, string> = {
@@ -203,6 +204,19 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       }
       return { id: modelId };
     }
+    // Verification — id آبجکت؛ فقط مالک سفارش
+    if (model === 'Verification') {
+      if (!OID_RE.test(modelId)) throw AppError.notFound('درخواست یافت نشد.');
+      const order = await this.prisma.verificationOrder.findUnique({
+        where: { id: modelId },
+        select: { userId: true },
+      });
+      if (!order) throw AppError.notFound('درخواست یافت نشد.');
+      if (order.userId !== user.id && user.role !== 'ADMIN') {
+        throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
+      }
+      return order;
+    }
     // Product — id عددی؛ فقط مالک
     if (!/^\d+$/.test(modelId)) throw AppError.notFound('محصول یافت نشد.');
     const product = await this.prisma.product.findUnique({
@@ -261,6 +275,55 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw AppError.badRequest('فایل ارسال نشده است.', 'NOT_MULTIPART');
     }
     return { fields, file };
+  }
+
+  /**
+   * پارس multipart چندفایلی — فایل‌ها با نام فیلدشان جمع می‌شوند
+   * (nationalCard، selfie، …). فقط فیلدهای خواسته‌شده پذیرفته می‌شوند تا
+   * کلاینت نتواند اسلات‌های ناشناس بسازد؛ فایل ناشناس ببلعیده می‌شود.
+   */
+  async readMultipartMulti(
+    req: FastifyRequest,
+    acceptedFields: string[],
+  ): Promise<{
+    fields: Record<string, string>;
+    files: Map<string, { buffer: Buffer; mimetype: string; filename: string }>;
+  }> {
+    const fastifyReq = req as FastifyRequest & {
+      parts: (opts?: unknown) => AsyncIterable<MultipartPart>;
+      isMultipart: () => boolean;
+    };
+    if (!fastifyReq.isMultipart()) {
+      throw AppError.badRequest('فایل ارسال نشده است.', 'NOT_MULTIPART');
+    }
+
+    const fields: Record<string, string> = {};
+    const files = new Map<string, { buffer: Buffer; mimetype: string; filename: string }>();
+    try {
+      for await (const part of fastifyReq.parts()) {
+        if (part.type === 'file') {
+          if (part.fieldname && acceptedFields.includes(part.fieldname)) {
+            if (files.has(part.fieldname)) {
+              // تکراری — ببلع
+              await part.toBuffer().catch(() => undefined);
+              continue;
+            }
+            files.set(part.fieldname, {
+              buffer: await part.toBuffer(),
+              mimetype: part.mimetype ?? 'application/octet-stream',
+              filename: part.filename ?? 'file',
+            });
+          } else {
+            await part.toBuffer().catch(() => undefined);
+          }
+        } else if (typeof part.value === 'string') {
+          fields[part.fieldname ?? ''] = part.value;
+        }
+      }
+    } catch {
+      throw AppError.badRequest('آپلود ناقص بود — دوباره تلاش کنید.', 'MULTIPART_TRUNCATED');
+    }
+    return { fields, files };
   }
 
   async upload(
