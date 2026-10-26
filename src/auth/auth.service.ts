@@ -3,12 +3,18 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
+import { hashPassword, verifyPassword } from '../common/password';
 import { env, isDev, jwtExpiresInSeconds, OTP_FIXED_CODE } from '../common/config/env';
 
 const OTP_TTL_MS = 2 * 60 * 1000; // عمر کد: ۲ دقیقه
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_RATE_LIMIT = 3; // حداکثر ۳ کد در ۱۰ دقیقه برای هر شماره
 const OTP_RATE_WINDOW_MS = 10 * 60 * 1000;
+
+// قفل موقت ورود رمزدار — ۵ رمز اشتباه در ۱۵ دقیقه → ۱۵ دقیقه قفل شماره
+const LOGIN_FAIL_LIMIT = 5;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
 
 const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
 
@@ -22,6 +28,8 @@ function generateUserName(): string {
 @Injectable()
 export class AuthService implements OnModuleInit, OnModuleDestroy {
   private reaperTimer: NodeJS.Timeout | null = null;
+  /** شمارنده رمز اشتباه هر شماره (درون‌حافظه — با Redis در مقیاس بعدی) */
+  private loginFails = new Map<string, { count: number; firstAt: number; lockedUntil?: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -51,11 +59,91 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── OTP ────────────────────────────────────────────────────────────────────
+  // ─── ورود سشن (بدون پیامک) ──────────────────────────────────────────────
+
+  /** POST /auth/login — ورود/ثبت‌نام فقط با شماره موبایل (روش سشن).
+   *
+   * تا وقتی کاربر برای پنلش رمز عبور تعیین نکرده باشد، ورود بدون رمز مثل
+   * دفعه اول ممکن است؛ پس از تعیین رمز (بنر قرمز پنل) رمز الزامی می‌شود.
+   * ساختار OTP (sendOtp/verifyOtp) دست‌نخورده مانده تا با رسیدن پنل پیامک،
+   * فقط همین متد از فرانت کنار برود — چیز دیگری عوض نمی‌شود. */
+  async loginWithSession(
+    phone: string,
+    password?: string,
+  ): Promise<{
+    isNewUser: boolean;
+    hasPassword: boolean;
+    accessToken: string;
+    refreshToken: string;
+  }> {
+    if (this.loginLocked(phone)) {
+      throw AppError.badRequest(
+        'تلاش‌های ورود بیش از حد مجاز بود؛ ۱۵ دقیقه دیگر دوباره تلاش کنید.',
+        'LOGIN_LOCKED',
+      );
+    }
+
+    let user = await this.prisma.user.findUnique({ where: { phone } });
+    let isNewUser = false;
+
+    if (!user) {
+      // ثبت‌نام خودکار — مثل جریان OTP قبلی
+      isNewUser = true;
+      user = await this.prisma.user.create({
+        data: { phone, userName: await this.uniqueUserName() },
+      });
+    } else if (user.passwordHash) {
+      if (!password) {
+        throw AppError.badRequest(
+          'برای این شماره رمز عبور تعیین شده است؛ رمز عبور خود را وارد کنید.',
+          'PASSWORD_REQUIRED',
+        );
+      }
+      if (!(await verifyPassword(user.passwordHash, password))) {
+        this.registerLoginFail(phone);
+        throw AppError.badRequest('رمز عبور اشتباه است.', 'PASSWORD_WRONG');
+      }
+    }
+
+    this.clearLoginFails(phone);
+
+    return {
+      isNewUser,
+      hasPassword: Boolean(user.passwordHash),
+      accessToken: await this.signAccessToken(user.id, user.phone, user.role),
+      refreshToken: await this.issueRefreshToken(user.id),
+    };
+  }
+
+  /** POST /auth/setPassword — تعیین/تغییر رمز پنل (کاربر احرازشده).
+   *  اولین تعیین بدون رمز فعلی؛ تغییرهای بعدی نیازمند رمز فعلی. */
+  async setPassword(
+    userId: string,
+    password: string,
+    currentPassword?: string,
+  ): Promise<{ hasPassword: true }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw AppError.notFound('کاربر یافت نشد.');
+
+    if (user.passwordHash) {
+      if (!currentPassword || !(await verifyPassword(user.passwordHash, currentPassword))) {
+        throw AppError.badRequest('رمز عبور فعلی اشتباه است.', 'PASSWORD_WRONG');
+      }
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await hashPassword(password) },
+    });
+    return { hasPassword: true };
+  }
+
+  // ─── OTP (پنل پیامک — ساختار برای آینده) ──────────────────────────────────
 
   /** POST /auth/sendOtp — ارسال کد ۴ رقمی؛ rate limit ۳ کد در ۱۰ دقیقه.
    *  OTP_FIXED_CODE (env) غیرخالی باشد همان کد صادر می‌شود (فعلاً 1234 —
-   *  تا خرید پنل پیامک؛ بعداً خالی شود تا کد تصادفی واقعی برود). */
+   *  تا خرید پنل پیامک؛ بعداً خالی شود تا کد تصادفی واقعی برود).
+   *  تا آن زمان فرانت از /auth/login (روش سشن) استفاده می‌کند. */
   async sendOtp(phone: string): Promise<{ devCode?: string; expiresInSec: number }> {
     // سقف ارسال برای هر شماره
     const since = new Date(Date.now() - OTP_RATE_WINDOW_MS);
@@ -159,6 +247,27 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── داخلی ──────────────────────────────────────────────────────────────────
+
+  private loginLocked(phone: string): boolean {
+    const fail = this.loginFails.get(phone);
+    return Boolean(fail?.lockedUntil && fail.lockedUntil > Date.now());
+  }
+
+  private registerLoginFail(phone: string): void {
+    const now = Date.now();
+    const fail = this.loginFails.get(phone) ?? { count: 0, firstAt: now };
+    if (now - fail.firstAt > LOGIN_FAIL_WINDOW_MS) {
+      fail.count = 0;
+      fail.firstAt = now;
+    }
+    fail.count += 1;
+    if (fail.count >= LOGIN_FAIL_LIMIT) fail.lockedUntil = now + LOGIN_LOCK_MS;
+    this.loginFails.set(phone, fail);
+  }
+
+  private clearLoginFails(phone: string): void {
+    this.loginFails.delete(phone);
+  }
 
   private async signAccessToken(userId: string, phone: string, role: string): Promise<string> {
     return this.jwt.signAsync(

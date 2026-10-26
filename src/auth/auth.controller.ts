@@ -1,8 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { RefreshTokenDto, SendOtpDto, VerifyOtpDto } from './dto';
+import { LoginDto, RefreshTokenDto, SendOtpDto, SetPasswordDto, VerifyOtpDto } from './dto';
+import { JwtAuthGuard } from '../common/guards';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ok } from '../common/api-response';
 
 const AUTH_THROTTLE = { default: { limit: 15, ttl: 60_000 } }; // سخت‌تر از حد سراسری
@@ -11,6 +13,26 @@ const AUTH_THROTTLE = { default: { limit: 15, ttl: 60_000 } }; // سخت‌تر 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+
+  @Throttle(AUTH_THROTTLE)
+  @Post('login')
+  @ApiOperation({
+    summary:
+      'ورود/ثبت‌نام فقط با شماره موبایل (روش سشن — بدون پیامک). اگر رمز پنل تعیین شده باشد، رمز الزامی است.',
+  })
+  async login(@Body() dto: LoginDto) {
+    return ok(await this.auth.loginWithSession(dto.phone, dto.password), 'خوش آمدید!');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('setPassword')
+  @ApiOperation({ summary: 'تعیین/تغییر رمز عبور پنل (اولین بار بدون رمز فعلی)' })
+  async setPassword(@CurrentUser() user: { id: string }, @Body() dto: SetPasswordDto) {
+    return ok(await this.auth.setPassword(user.id, dto.password, dto.currentPassword), 'رمز عبور پنل شما تعیین شد.');
+  }
+
+  // ── OTP — ساختار برای پنل پیامک آینده (فعلاً فرانت از login استفاده می‌کند) ──
 
   @Throttle(AUTH_THROTTLE)
   @Post('sendOtp')

@@ -28,8 +28,11 @@ datasource db {
 
 model User {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  /// شماره موبایل — تنها راه ورود (OTP)
+  /// شماره موبایل — تنها راه ورود (روش سشن؛ OTP برای آینده پنل پیامک)
   phone     String   @unique
+  /// رمز عبور اختیاری پنل — تا تعیین نشود، ورود فقط با موبایل ممکن است
+  /// (scrypt؛ خالی = کاربر هنوز رمز تعیین نکرده — بنر قرمز پنل فعال می‌ماند)
+  passwordHash String? @map("password_hash")
   /// شناسه عمومی پروفایل مثل باسکول (wbrstu2g1) — هنگام ثبت‌نام تولید می‌شود
   userName  String   @unique @map("user_name")
   firstName String   @default("") @map("first_name")
@@ -116,6 +119,24 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// کاربر پنل ادمین — جدایی کامل از User عادی (فولدر src/admin در API و
+/// src/app/admin در فرانت). ورود با نام کاربری + رمز (scrypt).
+/// SUPER_ADMIN می‌تواند ادمین بسازد/غیرفعال کند (فاز A5).
+model AdminUser {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// نام کاربری ورود پنل ادمین — می‌تواند شماره موبایل باشد
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  name         String   @default("مدیر سیستم")
+  /// SUPER_ADMIN | ADMIN (نقش‌های ریزتر در فازهای بعد)
+  role         String   @default("ADMIN")
+  isActive     Boolean  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 }
 
 /// اشتراک وب‌پوش مرورگر (B10) — endpoint یکتای هر مرورگر/دستگاه؛

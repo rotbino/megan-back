@@ -39,6 +39,8 @@ export class UsersService {
         last_name: user.lastName,
         sex: user.sex,
         role: user.role,
+        /// فرانت با این پرچم بنر قرمز «رمز عبور تعیین کنید» را نشان می‌دهد
+        has_password: Boolean(user.passwordHash),
         is_verified: user.isVerified,
         is_buyer: user.isBuyer,
         is_seller: user.isSeller,
