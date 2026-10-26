@@ -44,6 +44,10 @@ model User {
   isVerified   Boolean @default(false) @map("is_verified")
   isBuyer      Boolean @default(true) @map("is_buyer")
   isSeller     Boolean @default(false) @map("is_seller")
+  /// غیرفعال توسط ادمین (A3) — ورود مسدود و محتوا از لیست‌های عمومی پنهان
+  /// می‌شود؛ داده‌ها حذف نمی‌شوند (حذف نرم، نه سخت)
+  isActive     Boolean  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
   walletBalance Int     @default(0) @map("wallet_balance") // تومان
   avatarUrl    String? @map("avatar_url")
   businessDesc String? @map("business_desc")
@@ -65,6 +69,7 @@ model User {
   chatThreadsAsSeller ChatThread[] @relation("ChatThreadSeller")
   chatThreadsAsBuyer  ChatThread[] @relation("ChatThreadBuyer")
   pushSubscriptions  PushSubscription[] @relation("PushOwner")
+  walletAdjustments  WalletAdjustment[] @relation("WalletAdjustmentOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -459,6 +464,28 @@ model ChargeOrder {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// اصلاح دستی کیف پول توسط ادمین (فاز A3) — شارژ یا کسر با دلیل.
+/// در تاریخچه تراکنش‌های کاربر با عنوان «اصلاح کیف پول» دیده می‌شود؛
+/// موجودیت بعدیِ ثبت (balanceAfter) مرور حساب را ممکن می‌کند.
+model WalletAdjustment {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("WalletAdjustmentOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// مثبت = شارژ دستی؛ منفی = کسر (تومان)
+  amount    Int
+  /// دلیل — به کاربر نمایش داده می‌شود
+  reason    String
+  /// کاربر ادمین انجام‌دهنده
+  adminId   String @map("admin_id") @db.ObjectId
+  /// موجودی پس از اعمال — برای مرور حساب
+  balanceAfter Int @map("balance_after")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
   @@index([userId, createdAt(sort: Desc)])
 }
 

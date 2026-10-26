@@ -90,19 +90,28 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       // ثبت‌نام خودکار — مثل جریان OTP قبلی
       isNewUser = true;
       user = await this.prisma.user.create({
-        data: { phone, userName: await this.uniqueUserName() },
+        data: { phone, userName: await this.uniqueUserName(), lastLoginAt: new Date() },
       });
-    } else if (user.passwordHash) {
-      if (!password) {
-        throw AppError.badRequest(
-          'برای این شماره رمز عبور تعیین شده است؛ رمز عبور خود را وارد کنید.',
-          'PASSWORD_REQUIRED',
-        );
+    } else {
+      // کاربر غیرفعال (A3) — ورود مسدود؛ داده‌ها حذف نشده‌اند
+      if (!user.isActive) {
+        throw AppError.forbidden('این حساب توسط پشتیبانی غیرفعال شده است؛ با پشتیبانی ایمچ تماس بگیرید.');
       }
-      if (!(await verifyPassword(user.passwordHash, password))) {
-        this.registerLoginFail(phone);
-        throw AppError.badRequest('رمز عبور اشتباه است.', 'PASSWORD_WRONG');
+      if (user.passwordHash) {
+        if (!password) {
+          throw AppError.badRequest(
+            'برای این شماره رمز عبور تعیین شده است؛ رمز عبور خود را وارد کنید.',
+            'PASSWORD_REQUIRED',
+          );
+        }
+        if (!(await verifyPassword(user.passwordHash, password))) {
+          this.registerLoginFail(phone);
+          throw AppError.badRequest('رمز عبور اشتباه است.', 'PASSWORD_WRONG');
+        }
       }
+      await this.prisma.user
+        .update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+        .catch(() => undefined);
     }
 
     this.clearLoginFails(phone);
@@ -205,8 +214,16 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
         data: {
           phone,
           userName: await this.uniqueUserName(),
+          lastLoginAt: new Date(),
         },
       });
+    } else {
+      if (!user.isActive) {
+        throw AppError.forbidden('این حساب توسط پشتیبانی غیرفعال شده است؛ با پشتیبانی ایمچ تماس بگیرید.');
+      }
+      await this.prisma.user
+        .update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+        .catch(() => undefined);
     }
 
     const accessToken = await this.signAccessToken(user.id, user.phone, user.role);
@@ -231,6 +248,10 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     });
     const user = await this.prisma.user.findUnique({ where: { id: row.userId } });
     if (!user) throw AppError.unauthorized('حساب کاربری یافت نشد.');
+    // غیرفعال‌شدن کاربر (A3) — نشست‌های باز هم باید بمیرند
+    if (!user.isActive) {
+      throw AppError.unauthorized('حساب کاربری غیرفعال است.');
+    }
 
     return {
       accessToken: await this.signAccessToken(user.id, user.phone, user.role),

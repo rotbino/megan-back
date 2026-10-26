@@ -19,6 +19,8 @@ export interface VerificationDocDto {
 }
 
 export interface MyVerificationDto {
+  /** ObjectId سفارش — برای فراخوانی reviewVerification ادمین (A3) */
+  orderId?: string | null;
   /** none | pending | approved | rejected */
   status: string;
   submittedAt?: Date;
@@ -103,7 +105,7 @@ export class VerificationService {
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
-    if (!order) return { status: 'none', docs: {} };
+    if (!order) return { orderId: null, status: 'none', docs: {} };
 
     const rows = await this.prisma.file.findMany({
       where: { relatedModel: 'Verification', relatedId: order.id },
@@ -124,6 +126,7 @@ export class VerificationService {
     }
 
     return {
+      orderId: order.id,
       status: order.status,
       submittedAt: order.createdAt,
       reviewedAt: order.reviewedAt,

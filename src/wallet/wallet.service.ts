@@ -108,9 +108,9 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** POST /wallet/getWalletTransactions — شارژها + نردبان‌ها، یکجا و مرتب */
+  /** POST /wallet/getWalletTransactions — شارژها + نردبان‌ها + اصلاح‌های ادمین، یکجا و مرتب */
   async getWalletTransactions(userId: string): Promise<{ items: WalletTransactionDto[] }> {
-    const [charges, ladders] = await Promise.all([
+    const [charges, ladders, adjustments] = await Promise.all([
       this.prisma.chargeOrder.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
@@ -121,6 +121,11 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         orderBy: { createdAt: 'desc' },
         take: TRANSACTIONS_LIMIT,
         select: { id: true, productId: true, amount: true, createdAt: true },
+      }),
+      this.prisma.walletAdjustment.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: TRANSACTIONS_LIMIT,
       }),
     ]);
 
@@ -153,6 +158,14 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         incoming: false,
         pendingAdmin: false,
         at: l.createdAt,
+      })),
+      ...adjustments.map((a) => ({
+        id: `adjust:${a.id}`,
+        title: `اصلاح کیف پول — ${a.reason}`,
+        amount: Math.abs(a.amount),
+        incoming: a.amount > 0,
+        pendingAdmin: false,
+        at: a.createdAt,
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
@@ -289,6 +302,57 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       isLadder: true,
       ladderExpiresAt: expiresAt,
       balance: after?.walletBalance ?? me.walletBalance - LADDER_MONTHLY_PRICE,
+    };
+  }
+
+  // ─── ادمین: شارژ/کسر دستی (A3) ─────────────────────────────────────────
+
+  /**
+   * اصلاح دستی کیف پول توسط ادمین — شارژ (مثبت) یا کسر (منفی) با دلیل.
+   * گارد شرطی اتمیک برای کسر (موجودی منفی نمی‌شود) + رکورد WalletAdjustment
+   * با موجودیت نهایی برای مرور حساب؛ در تاریخچه کاربر با عنوان «اصلاح کیف پول» دیده می‌شود.
+   */
+  async adjustWallet(
+    adminId: string,
+    userId: string,
+    amount: number,
+    reason: string,
+  ): Promise<{ balance: number; adjustment: { id: string; amount: number; reason: string } }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, walletBalance: true },
+    });
+    if (!user) throw AppError.notFound('کاربر یافت نشد.');
+
+    if (amount < 0 && user.walletBalance + amount < 0) {
+      throw AppError.badRequest(
+        `موجودی کاربر برای این کسر کافی نیست (موجودی فعلی: ${user.walletBalance.toLocaleString('fa-IR')} تومان).`,
+        'WALLET_INSUFFICIENT',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // کسر با گارد اتمیک (P2025 → همزمانی)؛ شارژ بی‌قید
+      const updated = await tx.user.update({
+        where:
+          amount < 0
+            ? { id: userId, walletBalance: { gte: -amount } }
+            : { id: userId },
+        data: { walletBalance: { increment: amount } },
+      });
+      const adjustment = await tx.walletAdjustment.create({
+        data: { userId, amount, reason, adminId, balanceAfter: updated.walletBalance },
+      });
+      return { balance: updated.walletBalance, adjustment };
+    });
+
+    return {
+      balance: result.balance,
+      adjustment: {
+        id: result.adjustment.id,
+        amount: result.adjustment.amount,
+        reason: result.adjustment.reason,
+      },
     };
   }
 

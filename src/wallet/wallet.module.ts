@@ -9,5 +9,6 @@ import { UploadsModule } from '../uploads/uploads.module';
   imports: [AuthModule, UploadsModule], // گارد JWT/ادمین + سرویس فایل برای فیش‌ها
   controllers: [WalletController],
   providers: [WalletService],
+  exports: [WalletService], // مصرف توسط admin-users (A3) — منطق دامنه کپی نمی‌شود
 })
 export class WalletModule {}

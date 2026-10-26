@@ -9,5 +9,6 @@ import { UploadsModule } from '../uploads/uploads.module';
   imports: [AuthModule, UploadsModule], // گارد JWT/ادمین + سرویس فایل برای مدارک
   controllers: [VerificationController],
   providers: [VerificationService],
+  exports: [VerificationService], // مصرف توسط admin-users (A3)
 })
 export class VerificationModule {}

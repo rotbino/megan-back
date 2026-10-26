@@ -103,7 +103,7 @@ export class ProductsService {
       `products:list:${JSON.stringify(dto)}`,
       { ttlMs: TTL.SHORT, tags: ['products'] },
       async () => {
-        const where: Prisma.ProductWhereInput = { status: 'confirmed' };
+        const where: Prisma.ProductWhereInput = { status: 'confirmed', user: { isActive: true } };
 
         // فیلتر دسته — خودش + درخت فرزندان
         if (dto.categorySlug) {
@@ -180,8 +180,10 @@ export class ProductsService {
       `product:${id}`,
       { ttlMs: TTL.MINUTE, tags: ['products', `product:${id}`] },
       async () => {
-        const p = await this.prisma.product.findUnique({ where: { id } });
-        if (!p || p.status !== 'confirmed') {
+        const p = await this.prisma.product.findFirst({
+          where: { id, status: 'confirmed', user: { isActive: true } },
+        });
+        if (!p) {
           throw AppError.notFound('محصول یافت نشد.');
         }
         // شمارش بازدید — fire-and-forget؛ پاسخ با مقدار فعلی
@@ -198,7 +200,7 @@ export class ProductsService {
   /** POST /products/getRelatedProducts — هم‌دسته (عین باسکول) */
   async getRelatedProducts(subCategoryId: number, excludeId: number, limit = 6) {
     const rows = await this.prisma.product.findMany({
-      where: { subCategoryId, status: 'confirmed', id: { not: excludeId } },
+      where: { subCategoryId, status: 'confirmed', id: { not: excludeId }, user: { isActive: true } },
       orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
       take: limit,
     });
@@ -339,7 +341,7 @@ export class ProductsService {
   /** POST /products/getSeller — پروفایل کسب‌وکار + آگهی‌های تاییدشده */
   async getSeller(userName: string) {
     const seller = await this.prisma.user.findUnique({ where: { userName } });
-    if (!seller) throw AppError.notFound('فروشنده یافت نشد.');
+    if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
 
     const rows = await this.prisma.product.findMany({
       where: { userId: seller.id, status: 'confirmed' },
@@ -384,7 +386,7 @@ export class ProductsService {
     const [cats, prods] = await Promise.all([
       this.categories.getAllCategories(), // کش‌شده
       this.prisma.product.findMany({
-        where: { status: 'confirmed', productName: { contains: q } },
+        where: { status: 'confirmed', productName: { contains: q }, user: { isActive: true } },
         select: { productName: true, viewCount: true },
         orderBy: { viewCount: 'desc' },
         take: 8,
