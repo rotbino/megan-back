@@ -54,29 +54,50 @@ async function main() {
   }));
   console.log(`✔ categories: ${categories.length} سند (${catNew} جدید)`);
 
-  // ── استان‌ها ──
+  // ── لوکیشن‌ها — درخت واحد (استان + شهر در یک کالکشن با type) ──
+  // کلید _id ترکیبی است («province:4» / «city:230») چون id های عددی باسکولِ
+  // استان و شهر از دو فضای جدا هستند و برخورد دارند (شهر ۴ ≠ استان ۴).
+  // عدد خام باسکول در buskool_id ذخیره می‌شود — API همان عدد را برمی‌گرداند.
+  // (بخشِ جدا از upsertAll چون فیلتر _id باید همان کلید ترکیبی باشد)
   const provinces = readJson('provinces.json');
-  const provNew = await upsertAll(db, 'Province', provinces, (p) => ({
-    _id: p.id,
-    province_name: (p.province_name ?? '').trim(),
-    province_en_name: p.province_en_name ?? null,
-    country_id: p.country_id ?? 1,
-    latitude: p.latitude != null ? Number(p.latitude) : null,
-    longitude: p.longitude != null ? Number(p.longitude) : null,
+  const provOps = provinces.map((p) => ({
+    replaceOne: {
+      filter: { _id: `province:${p.id}` },
+      replacement: {
+        _id: `province:${p.id}`,
+        buskool_id: p.id,
+        type: 'province',
+        parent_id: null,
+        name: (p.province_name ?? '').trim(),
+        en_name: p.province_en_name ?? null,
+        latitude: p.latitude != null ? Number(p.latitude) : null,
+        longitude: p.longitude != null ? Number(p.longitude) : null,
+      },
+      upsert: true,
+    },
   }));
-  console.log(`✔ provinces: ${provinces.length} سند (${provNew} جدید)`);
+  const provRes = await db.collection('Location').bulkWrite(provOps, { ordered: false });
+  console.log(`✔ provinces → Location(type=province): ${provinces.length} سند (${provRes.upsertedCount ?? 0} جدید)`);
 
-  // ── شهرها (trim نام‌ها) ──
   const cities = readJson('cities.json');
-  const cityNew = await upsertAll(db, 'City', cities, (c) => ({
-    _id: c.id,
-    province_id: c.province_id,
-    city_name: (c.city_name ?? '').trim(),
-    city_en_name: c.city_en_name ?? null,
-    latitude: c.latitude != null ? Number(c.latitude) : null,
-    longitude: c.longitude != null ? Number(c.longitude) : null,
+  const cityOps = cities.map((c) => ({
+    replaceOne: {
+      filter: { _id: `city:${c.id}` },
+      replacement: {
+        _id: `city:${c.id}`,
+        buskool_id: c.id,
+        type: 'city',
+        parent_id: `province:${c.province_id}`,
+        name: (c.city_name ?? '').trim(),
+        en_name: c.city_en_name ?? null,
+        latitude: c.latitude != null ? Number(c.latitude) : null,
+        longitude: c.longitude != null ? Number(c.longitude) : null,
+      },
+      upsert: true,
+    },
   }));
-  console.log(`✔ cities: ${cities.length} سند (${cityNew} جدید)`);
+  const cityRes = await db.collection('Location').bulkWrite(cityOps, { ordered: false });
+  console.log(`✔ cities → Location(type=city): ${cities.length} سند (${cityRes.upsertedCount ?? 0} جدید)`);
 
   await client.close();
   console.log('✅ seed داده‌های پایه کامل شد.');

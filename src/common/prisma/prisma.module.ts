@@ -19,7 +19,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     try {
       await Promise.all([
         this.category.findMany({ select: { id: true }, take: 1 }),
-        this.city.findMany({ select: { id: true }, take: 1 }),
+        this.location.findMany({ select: { id: true }, take: 1 }),
         this.product.findMany({ select: { id: true }, take: 1 }),
         this.user.findMany({ select: { id: true }, take: 1 }),
         this.file.findMany({ select: { id: true }, take: 1 }),

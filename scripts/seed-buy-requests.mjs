@@ -28,26 +28,29 @@ const client = new MongoClient(DATABASE_URL);
 await client.connect();
 const db = client.db();
 
-// ── نقشه شهرها (نام → City با استان) ────────────────────────────────────────
+// ── نقشه شهرها (نام → گره Location نوع شهر با استان) ─────────────────────────
+// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام باسکول در buskool_id.
 const buyads = JSON.parse(readFileSync(SOURCE, 'utf8'));
 const cityNames = [...new Set(buyads.map((b) => b.city).filter(Boolean))];
 const cityRows = await db
-  .collection('City')
-  .find({ city_name: { $in: cityNames } })
-  .project({ city_name: 1, province_id: 1 })
+  .collection('Location')
+  .find({ type: 'city', name: { $in: cityNames } })
+  .project({ buskool_id: 1, parent_id: 1 })
   .toArray();
 // نام تکراری بین استان‌ها → اولین استان (دقت seed کافی است)
 const cityByName = new Map();
 for (const row of cityRows) {
-  if (!cityByName.has(row.city_name)) cityByName.set(row.city_name, row);
+  if (!cityByName.has(row.name)) cityByName.set(row.name, row);
 }
-const provinceIds = [...new Set(cityRows.map((r) => r.province_id))];
+const provinceKeys = [...new Set(cityRows.map((r) => r.parent_id).filter(Boolean))];
 const provinceRows = await db
-  .collection('Province')
-  .find({ _id: { $in: provinceIds } })
-  .project({ province_name: 1 })
+  .collection('Location')
+  .find({ type: 'province', _id: { $in: provinceKeys } })
+  .project({ name: 1 })
   .toArray();
-const provinceName = new Map(provinceRows.map((p) => [p._id, p.province_name]));
+const provinceName = new Map(provinceRows.map((p) => [p._id, p.name]));
+// «province:4» → 4
+const provinceNum = (key) => Number(key?.split(':')[1]);
 
 // ── نام دسته‌ها برای denorm ────────────────────────────────────────────────
 const categoryIds = [...new Set(buyads.map((b) => b.category_id))];
@@ -106,15 +109,15 @@ for (const b of buyads) {
     product_type_id: null,
     requirement_amount: b.requirement_amount,
     unit: b.unit ?? 'کیلوگرم',
-    province_id: city?.province_id ?? null,
-    city_id: city?._id ?? null,
+    province_id: city ? provinceNum(city.parent_id) : null,
+    city_id: city?.buskool_id ?? null,
     goal: 'price_and_buy',
     has_history: false,
     status: 'confirmed', // روی باسکول زنده است
     rejection_reason: null,
     user_id: usersById.get(b.myuser_id),
     category_name: cat,
-    province_name: city ? provinceName.get(city.province_id) ?? null : null,
+    province_name: city ? provinceName.get(city.parent_id) ?? null : null,
     city_name: b.city ?? null,
     buyer_first_name: b.first_name ?? '',
     buyer_last_name: b.last_name ?? '',

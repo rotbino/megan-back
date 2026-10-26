@@ -88,8 +88,8 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 - User/OtpCode/RefreshToken/File با ObjectId عادی.
 - ⚠️ **درج مستقیم با درایور خام**: فیلدهای ObjectId (مثل `user_id`/`owner_id`) باید
   به‌صورت ObjectId واقعی نوشته شوند نه رشته — seed دارای fixer است.
-- ایندکس‌ها در خود اسکیمای Prisma (`@@index`) — با `scripts/db-push.sh` (override
-  صریح DATABASE_URL چون سندباکس متغیر پیش‌فرض دارد).
+- ایندکس‌ها در خود اسکیمای Prisma (`@@index`) — با `npm run db:push` (`scripts/db-push.mjs`،
+  کراس‌پلتفرم node، override صریح DATABASE_URL برای محیط‌هایی که از قبل ست دارند).
 - حذف نرم با `status: DELETED` — سابقه تجاری حفظ می‌شود.
 - TTL ایندکس در Prisma پشتیبانی نمی‌شود → پاک‌سازی با reaper دوره‌ای.
 
@@ -132,12 +132,13 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 | اسکریپت | کار |
 |---|---|
 | `scripts/fetch-buskool-base-data.mjs` | کراول `POST /get_category_list` (BFS کل درخت) + `POST /location/get_location_info` → JSON خام در `scripts/data/` |
-| `scripts/seed-base-data.mjs` | آپسرت ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر با `_id` عددی باسکول (trim نام شهرها) |
+| `scripts/seed-base-data.mjs` | آپسرت ۶۹۵ دسته + ۵۰۵ لوکیشن (۳۱ استان + ۴۷۴ شهر) در کالکشن درخت واحد `Location` با کلید ترکیبی «province:4»/«city:230» (trim نام شهرها) |
 | `scripts/seed-products.mjs` | ۲۶ فروشنده واقعی + ۶۰ آگهی واقعی (id باسکول) + **rehost عکس‌ها از CDN باسکول به باکت آروان** (پاین‌لاین sharp: اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + هدر immutable) + Counter؛ `--skip-photos` → URL باسکول می‌ماند |
 | `scripts/db-drop-all.mjs` | پاک‌سازی کامل (شروع تازه) |
-| `scripts/db-push.sh` | `prisma db push` با override صریح DATABASE_URL |
+| `scripts/db-push.mjs` | `prisma db push` کراس‌پلتفرم (node) با override صریح DATABASE_URL |
+| `scripts/test-locations.mjs` | تست صحت درخت لوکیشن واحد (۱۰ چک: برخورد id ها، والد-فرزند، یکتایی) |
 
-- اجرا: `bun run seed:base-data` سپس `bun run seed:products`
+- اجرا: `npm run seed:base-data` سپس `npm run seed:products` (یا bun/yarn — اسکریپت‌ها همه node خالص‌اند)
 - اجرای مجدد هر seed ایمن است (upsert + ردشدن rehostهای موجود + fixer ObjectId).
 - منبع محصولات: `/home/z/my-project/scripts/buskool-data/products.json` (۶۰ آگهی واقعی ۵ کالا).
 
@@ -216,6 +217,15 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   `user:{id}`؛ رویدادهای `chat:newMessage` / `chat:read`؛ تنزل تدریجی به REST.
   ⚠️ درس Prisma+Mongo: فیلتر `field: null` فقط null صریح را می‌گیرد نه فیلد غایب —
   create باید readAt: null صریح بنویسد. تست ۲۵/۲۵ + مرورگر (push زنده بدون ریلود).
+- [x] **L1 — لوکیشن درختی واحد (بازطراحی مالک):** حذف دو جدول Province/City → یک
+  کالکشن `Location` با `type` (province/city/region/neighborhood…) + `parentId`
+  خودارجاع. ⚠️ کشف مهم: id های عددی باسکولِ استان و شهر از دو فضای جدا هستند و
+  برخورد دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان) → کلید یکتای درخت رشتهٔ ترکیبی
+  «province:4»/«city:230» + `buskolId` عددی + `@@unique([type, buskolId])`.
+  API ها همان id عددی خام باسکول را برمی‌گردانند (فرانت و آگهی‌های موجود بدون
+  تغییر). اندپوینت عمومی جدید `getLocationsByParent` (کلید والد → فرزندان) برای
+  سطح‌های آینده (منطقه/محله) بدون مهاجرت. seed+drop+reseed اجرا شد؛ تست
+  test-locations ۱۰/۱۰ + کل سوئیت‌های R (۳۲) B6 (۱۸) B7 (۴۴) B8 (۲۵) پاس.
 - [ ] **B9 — کیف پول و نردبان:** شارژ کارت‌به‌کارت (۳ پکیج + فیش → ChargeOrder → تأیید ادمین) +
   نردبان ماهانه ۱۰۰هزار از کیف پول + `is_ladder` denorm + انقضای خودکار.
 - [ ] **B10 — وب‌پوش:** subscription با VAPID + نوتیف (پیام/قیمت/انقضا).
@@ -266,6 +276,7 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
 | `DATABASE_URL` | رشته اتصال MongoDB Atlas |
 | `JWT_SECRET` / `JWT_EXPIRES_IN` / `REFRESH_TOKEN_TTL_DAYS` | توکن‌ها |
 | `CORS_ORIGINS` / `SWAGGER_ENABLED` | CORS و مستندات |
+| `PRISMA_ENGINES_MIRROR` | آینه دانلود موتورهای Prisma — رفع ECONNRESET در ایران |
 | `STORAGE_DRIVER` | `arvan` (پیش‌فرض) | `local` |
 | `MAX_FILE_SIZE` / `FILES_STAGING_TTL_DAYS` / `UPLOAD_PATH` / `PUBLIC_BASE_URL` | فایل‌ها |
 | `ARVAN_ENDPOINT` / `ARVAN_REGION` / `ARVAN_ACCESS_KEY` / `ARVAN_SECRET_KEY` / `ARVAN_BUCKET_NAME` | Object Storage |
@@ -277,14 +288,15 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
 
 ## ۱۰. اجرا و تست
 
-```bash
-# بک‌اند (از ریپو)
-cd repos/megan-back
-bun install && bunx prisma generate
-bash scripts/db-push.sh            # ایندکس‌ها + اسکیما
-bun run seed:base-data             # ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر
-bun run seed:products              # ۲۶ فروشنده + ۶۰ آگهی + rehost عکس‌ها
-bun run build && node dist/main.js # → http://localhost:4000 (Swagger: /docs)
+```powershell
+# بک‌اند — روی ویندوز/لینوکس/مک (npm یا yarn؛ جزئیات کامل در README)
+cd megan-back
+npm install
+npm run db:generate        # prisma generate (آینه ایران در .env)
+npm run db:push             # ایندکس‌ها + اسکیما (node خالص، کراس‌پلتفرم)
+npm run seed:base-data      # ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر (درخت واحد)
+npm run seed:products       # ۲۶ فروشنده + ۶۰ آگهی + rehost عکس‌ها (اختیاری — دیتای Atlas از قبل هست)
+npm run dev                 # → http://localhost:4000/api/v1 (Swagger: /docs)
 
 # تست دستی
 curl http://localhost:4000/api/v1/health
@@ -312,4 +324,5 @@ curl -X POST http://localhost:4000/api/v1/products/getProductList -H 'Content-Ty
 | B6 احراز هویت اسناد | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B7 درخواست‌های خرید + CRM | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B8 چت و پیام‌ها | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
+| L1 لوکیشن درختی واحد | ✅ انجام شد — بازطراحی مالک + رفع اجرای ویندوز/آینه پرایسما | ۱۴۰۵/۰۸/۰۵ |
 | B0–B3 (نسخه Mongoose) | 🗑 منسوخ — با R0–R5 جایگزین شد | — |

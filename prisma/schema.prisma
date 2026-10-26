@@ -139,24 +139,35 @@ model Category {
   @@index([slug])
 }
 
-model Province {
-  id            Int     @id @map("_id") // اصفهان=4
-  provinceName  String  @map("province_name")
-  provinceEnName String? @map("province_en_name")
-  countryId     Int     @default(1) @map("country_id")
-  latitude      Float?
-  longitude     Float?
-}
+/// ─── لوکیشن درختی واحد ───────────────────────────────────────────────────────
+/// به‌جای دو جدول جداگانهٔ استان/شهر، یک کالکشن واحد با ساختار درختی:
+///   province ← city ← region ← neighborhood …
+/// «فقط یک جدول لوکیشن که فقط تایپش متفاوت باشه» — خواستهٔ مالک؛ سطح‌های
+/// آینده (منطقه/محله) بدون مهاجرت، فقط با type جدید + parent_id اضافه می‌شوند.
+///
+/// ⚠️ چرا id رشتهٔ ترکیبی است؟ چون id های عددی باسکول در دو فضای جدا هستند و
+/// برخورد عددی دارند (شهر ۴ = بستان‌آبادِ آذربایجان شرقی، استان ۴ = اصفهان) —
+/// یعنی «عدد + نوع» با هم یکتا هستند. کلید یکتا: «province:4» / «city:230».
+/// عدد خام باسکول در buskolId حفظ می‌شود و در API ها همان id عددی برمی‌گردد؛
+/// آگهی‌ها/درخواست‌ها به همان اعداد خام اشاره می‌کنند (بدون تغییر).
+model Location {
+  /// کلید یکتای سراسری — «province:4» | «city:230» | «region:…»
+  id        String  @id @map("_id")
+  /// id عددی باسکول در نوع خودش — یکتا فقط با هم type
+  buskolId  Int     @map("buskool_id")
+  /// province | city | region | neighborhood
+  type      String
+  /// کلید گره والد («province:4») — null یعنی ریشه (استان)
+  parentId  String? @map("parent_id")
+  /// نام فارسی
+  name      String
+  enName    String? @map("en_name")
+  latitude  Float?
+  longitude Float?
 
-model City {
-  id          Int     @id @map("_id") // شهر بابک=230
-  provinceId  Int     @map("province_id")
-  cityName    String  @map("city_name")
-  cityEnName  String? @map("city_en_name")
-  latitude    Float?
-  longitude   Float?
-
-  @@index([provinceId, cityName])
+  @@unique([type, buskolId])
+  @@index([type, parentId])
+  @@index([type, name])
 }
 
 // ─── Files (دکترین imach-back) ───────────────────────────────────────────────

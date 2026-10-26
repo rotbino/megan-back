@@ -9,9 +9,12 @@
     "start": "node dist/main.js",
     "dev": "nest start --watch",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "seed:base-data": "node scripts/fetch-buskool-base-data.mjs && node scripts/seed-base-data.mjs",
+    "db:push": "node scripts/db-push.mjs",
+    "fetch:base-data": "node scripts/fetch-buskool-base-data.mjs",
+    "seed:base-data": "node scripts/seed-base-data.mjs",
+    "seed:buy-requests": "node scripts/seed-buy-requests.mjs",
     "seed:products": "node scripts/seed-products.mjs",
+    "make-admin": "node scripts/make-admin.mjs",
     "test:api": "node scripts/test-api.mjs"
   },
   "dependencies": {
