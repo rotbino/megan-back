@@ -3,7 +3,8 @@ import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
 import { JwtService } from '@nestjs/jwt';
 import type { AuthUser } from '../common/guards';
-import { CHAT_EVENTS, emitToUser } from './io-holder';
+import { CHAT_EVENTS, emitToUser, isUserOnline } from './io-holder';
+import { PushService } from '../push/push.service';
 import { GetThreadMessagesDto, SendMessageDto, StartThreadDto } from './dto';
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
@@ -49,6 +50,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly push: PushService,
   ) {}
 
   // ─── اتصال WS ──────────────────────────────────────────────────────────────
@@ -139,6 +141,19 @@ export class ChatService {
       senderName: senderName || 'کاربر ایمچ',
       productName: undefined,
     });
+
+    // گیرنده آنلاین نیست (سوکت وصل نیست) → اعلان سیستمی وب‌پوش (B10)
+    if (!isUserOnline(receiverId)) {
+      const preview =
+        dto.text.trim().length > 90 ? `${dto.text.trim().slice(0, 90)}…` : dto.text.trim();
+      void this.push
+        .sendToUser(receiverId, {
+          title: `پیام جدید از ${senderName || 'کاربر ایمچ'}`,
+          body: preview,
+          url: '/panel/messages',
+        })
+        .catch(() => undefined); // آتش‌وفراموش — اعلان هرگز ارسال پیام را نمی‌شکند
+    }
 
     return this.toMessageDto(message);
   }

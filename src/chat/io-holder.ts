@@ -7,6 +7,8 @@
 
 type ServerLike = {
   to: (room: string) => { emit: (event: string, payload: unknown) => void };
+  /** ساختار socket.io برای بررسی حضور آنلاین — اختیاری چون نمونه تزئین‌شده است */
+  sockets?: { adapter?: { rooms?: Map<string, Set<unknown>> } };
 };
 
 let io: ServerLike | null = null;
@@ -33,5 +35,15 @@ export function emitToUser(userId: string, event: string, payload: unknown): voi
     io?.to(`user:${userId}`).emit(event, payload);
   } catch {
     /* WS هرگز نباید مسیر REST را بشکند */
+  }
+}
+
+/** کاربر الان با سوکت وصل است؟ (برای تصمیم وب‌پوش — آفلاین‌ها اعلان می‌گیرند) */
+export function isUserOnline(userId: string): boolean {
+  try {
+    const room = io?.sockets?.adapter?.rooms?.get(`user:${userId}`);
+    return Boolean(room && room.size > 0);
+  } catch {
+    return false;
   }
 }

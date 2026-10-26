@@ -14,6 +14,7 @@ import { BuyRequestsModule } from './buy-requests/buy-requests.module';
 import { SavedModule } from './saved/saved.module';
 import { ChatModule } from './chat/chat.module';
 import { WalletModule } from './wallet/wallet.module';
+import { PushModule } from './push/push.module';
 
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
@@ -34,6 +35,7 @@ import { WalletModule } from './wallet/wallet.module';
     SavedModule,
     ChatModule,
     WalletModule,
+    PushModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
