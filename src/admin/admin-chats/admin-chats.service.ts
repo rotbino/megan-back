@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AppError } from '../../common/errors/app-error';
+import { USER_SELECT, toUserCard, UserCard } from '../user-card';
 import type { GetThreadListDto } from './dto';
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
@@ -13,48 +14,6 @@ const OID_RE = /^[0-9a-fA-F]{24}$/;
  * (هزاران مکالمه) کاملاً کافی است؛ اگر روزی بزرگ شد → aggregation خام.
  */
 const AWAITING_SCAN_CAP = 2000;
-
-/** نام نمایشی: نام کامل → username → موبایل (کاربران seed اغلب بی‌نام‌اند) */
-function displayName(u: { firstName: string; lastName: string; userName: string; phone: string }): string {
-  const full = `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim();
-  return full || u.userName || u.phone;
-}
-
-export interface UserCard {
-  id: string;
-  firstName: string;
-  lastName: string;
-  userName: string;
-  phone: string;
-  displayName: string;
-  isActive: boolean;
-  isVerified: boolean;
-  lastLoginAt: Date | null;
-}
-
-const USER_SELECT = {
-  id: true,
-  firstName: true,
-  lastName: true,
-  userName: true,
-  phone: true,
-  isActive: true,
-  isVerified: true,
-  lastLoginAt: true,
-} as const;
-
-function toUserCard(u: {
-  id: string;
-  firstName: string;
-  lastName: string;
-  userName: string;
-  phone: string;
-  isActive: boolean;
-  isVerified: boolean;
-  lastLoginAt: Date | null;
-}): UserCard {
-  return { ...u, displayName: displayName(u) };
-}
 
 export interface AdminThreadRow {
   id: string;

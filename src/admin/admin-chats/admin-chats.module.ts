@@ -14,5 +14,6 @@ import { AdminChatsService } from './admin-chats.service';
   imports: [AdminAuthModule],
   controllers: [AdminChatsController],
   providers: [AdminChatsService],
+  exports: [AdminChatsService], // داشبورد ادمین برای آمار چت‌ها
 })
 export class AdminChatsModule {}

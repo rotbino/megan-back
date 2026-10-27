@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AdminActionsService } from '../admin-actions/admin-actions.service';
+import { AdminChatsService } from '../admin-chats/admin-chats.service';
+import { AdminCallsService } from '../admin-calls/admin-calls.service';
 
 /** شماره روز در کلید YYYY-MM-DD (UTC) — برای نمودار روند */
 function dayKey(d: Date): string {
@@ -22,6 +24,8 @@ export class AdminDashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly actions: AdminActionsService,
+    private readonly chatsStats: AdminChatsService,
+    private readonly callsStats: AdminCallsService,
   ) {}
 
   /**
@@ -158,6 +162,11 @@ export class AdminDashboardService {
       },
       // روند ۳۰ روزه — برای نمودار داشبورد
       trends: revenue,
+      // چت‌ها و تماس‌ها (A6) — سنجه‌های روزانه ادمین:
+      // پیام خوانده‌نشده برای فروشنده‌ای آمده؟ (awaitingSellerReply)
+      // چند تماس امروز ثبت شده؟ (calls.today)
+      chats: await this.chatsStats.getChatStats(),
+      calls: await this.callsStats.getCallStats(),
     };
   }
 

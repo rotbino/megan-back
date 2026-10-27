@@ -12,6 +12,7 @@ import { AdminWalletModule } from './admin-wallet/admin-wallet.module';
 import { AdminAdminsModule } from './admin-admins/admin-admins.module';
 import { AdminUploadsModule } from './admin-uploads/admin-uploads.module';
 import { AdminChatsModule } from './admin-chats/admin-chats.module';
+import { AdminCallsModule } from './admin-calls/admin-calls.module';
 
 /**
  * ریشه پنل ادمین — تمام کد ادمین بک‌اند فقط در همین فولدر زندگی می‌کند
@@ -34,6 +35,7 @@ import { AdminChatsModule } from './admin-chats/admin-chats.module';
     AdminAdminsModule,
     AdminUploadsModule,
     AdminChatsModule,
+    AdminCallsModule,
   ],
   providers: [
     // ثبت خودکار لاگ عملیات ادمین — سراسری ولی فقط برای درخواست‌های ادمین

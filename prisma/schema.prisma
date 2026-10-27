@@ -68,6 +68,10 @@ model User {
   savedTargets SavedUser[]    @relation("SavedTarget")
   chatThreadsAsSeller ChatThread[] @relation("ChatThreadSeller")
   chatThreadsAsBuyer  ChatThread[] @relation("ChatThreadBuyer")
+  /// گزارش تماس — تماس‌گیرنده (شماره طرف را دیده/زنگ زده)
+  callsMade     CallLog[]      @relation("CallCaller")
+  /// گزارش تماس — دریافت‌کننده (صاحب شماره)
+  callsReceived CallLog[]      @relation("CallCallee")
   pushSubscriptions  PushSubscription[] @relation("PushOwner")
   walletAdjustments  WalletAdjustment[] @relation("WalletAdjustmentOwner")
 
@@ -349,6 +353,7 @@ model Product {
 
   chatThreads  ChatThread[]  @relation("ChatThreadProduct")
   ladderOrders LadderOrder[] @relation("LadderProduct")
+  callLogs     CallLog[]     @relation("CallLogProduct")
 
   /// سورت «مرتبط‌ترین» = نردبان اول، بعد جدیدترین
   @@index([status, isLadder, updatedAt(sort: Desc)])
@@ -583,4 +588,32 @@ model ChatMessage {
 
   @@index([threadId, createdAt(sort: Desc)])
   @@index([threadId, readAt])
+}
+
+/// گزارش تماس کاربر-به-کاربر (A6).
+/// چرا: در مدل MVP ایمچ کاربران را خودمان در دیتابیس می‌ریزیم؛ خریدار
+/// شماره فروشنده را می‌بیند و بیرون سایت زنگ می‌زند. تنها سیگنال قابل
+/// ثبتِ وب، لحظه‌ی «آشکارسازی شماره» است — همان لحظه ثبت می‌شود تا
+/// ادمین بداند چه کسی با چه کسی در حال معامله است و حجم تماس‌ها چقدر است.
+model CallLog {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// تماس‌گیرنده — کسی که شماره را دید
+  callerId String @map("caller_id") @db.ObjectId
+  caller   User   @relation("CallCaller", fields: [callerId], references: [id])
+
+  /// دریافت‌کننده — صاحب شماره
+  calleeId String @map("callee_id") @db.ObjectId
+  callee   User   @relation("CallCallee", fields: [calleeId], references: [id])
+
+  /// زمینه آشکارسازی شماره — صفحه آگهی / پروفایل / چت
+  source    String   @default("product") // product | profile | chat
+  productId Int?     @map("product_id")
+  product   Product? @relation("CallLogProduct", fields: [productId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([calleeId, createdAt(sort: Desc)])
+  @@index([callerId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
 }
