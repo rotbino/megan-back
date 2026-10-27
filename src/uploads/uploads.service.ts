@@ -40,8 +40,17 @@ function oidOr404(id: string | null | undefined): string {
 /** قواعد تصویر باسکول: jpeg/jpg/png — به‌علاوه webp برای آینده */
 const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const;
 
-/** حداقل حجم معنادار تصویر (قاعده باسکول: ۲۰KB) */
-const MIN_IMAGE_BYTES = 20 * 1024;
+/**
+ * حداقل حجم معنادار تصویر.
+ * باسکول ۲۰KB بود، اما بهینه‌سازی سمت کلاینت (canvas ≤‌۱۲۰۰px/۵۰۰KB) تصاویر
+ * تمیز (پس‌زمینه ساده/عکس‌های کاتالوگی) را گاهی زیر ۲۰KB می‌برد و رد کردنشان
+ * یعنی گم‌شدن بی‌صدای تصویر آگهی کاربر. کف ۴KB کافی است زباله‌ها را بگیرد؛
+ * اعتبارسنجی واقعی ابعاد (≥۲۰۰px پس از پردازش sharp) جداگانه انجام می‌شود.
+ */
+const MIN_IMAGE_BYTES = 4 * 1024;
+
+/** حداقل عرض معنادار پس از پردازش — عکس‌های ریز/آیکون‌وار رد می‌شوند */
+const MIN_IMAGE_WIDTH = 200;
 
 /** نام پوشه‌های درست — «users» نه «user» (جمع ساده‌انگارانه) */
 const MODEL_FOLDER: Record<RelatedModel, string> = {
@@ -384,7 +393,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (file.buffer.length < MIN_IMAGE_BYTES) {
-      throw AppError.badRequest('حجم تصویر باید حداقل ۲۰ کیلوبایت باشد.', 'FILE_TOO_SMALL');
+      throw AppError.badRequest('حجم تصویر بسیار کم است.', 'FILE_TOO_SMALL');
     }
     if (!(ALLOWED_MIME as readonly string[]).includes(file.mimetype)) {
       throw AppError.badRequest('این نوع فایل پشتیبانی نمی‌شود.', 'FILE_TYPE_NOT_ALLOWED');
@@ -394,6 +403,14 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     await this.resolveTarget(user, input.model, modelId);
 
     const processed = await this.processFile(file.buffer, file.mimetype);
+    // ابعاد واقعی (پس از decode با sharp) — عکس‌های ریز/زباله رد می‌شوند؛
+    // width=0 یعنی sharp نتوانست decode کند → همان مسیر قدیمی ادامه می‌دهد.
+    if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
+      throw AppError.badRequest(
+        `عرض تصویر باید حداقل ${MIN_IMAGE_WIDTH} پیکسل باشد.`,
+        'IMAGE_TOO_SMALL',
+      );
+    }
     const key = this.keyFor(user.id, input.model, modelId, input.fieldKey, processed.mainExt);
     const url = await this.driver.put(key, processed.main, processed.mainMime);
 
