@@ -5,11 +5,13 @@ import { ProductsService } from './products.service';
 import {
   CreateProductDto,
   DeleteMyProductDto,
+  GetMyProductDetailDto,
   GetProductByIdDto,
   GetProductListDto,
   GetRelatedProductsDto,
   GetSellerDto,
   SearchSuggestionsDto,
+  UpdateMyProductDto,
 } from './dto';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
 import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user.decorator';
@@ -57,6 +59,22 @@ export class ProductsController {
   @ApiOperation({ summary: 'آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت' })
   async getMyProducts(@CurrentUser() user: AuthUser) {
     return ok(await this.products.getMyProducts(user.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMyProductDetail')
+  @ApiOperation({ summary: 'جزئیات کامل آگهی خودم — پیش‌پر کردن فرم ویرایش' })
+  async getMyProductDetail(@CurrentUser() user: AuthUser, @Body() dto: GetMyProductDetailDto) {
+    return ok(await this.products.getMyProductDetail(user, dto.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('updateMyProduct')
+  @ApiOperation({ summary: 'ویرایش آگهی خودم → دوباره «در انتظار تایید»' })
+  async updateMyProduct(@CurrentUser() user: AuthUser, @Body() dto: UpdateMyProductDto) {
+    return ok(await this.products.updateMyProduct(user, dto), 'تغییرات آگهی شما ذخیره شد و دوباره در انتظار تایید است.');
   }
 
   @UseGuards(JwtAuthGuard)

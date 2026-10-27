@@ -141,6 +141,20 @@ export class DeleteMyProductDto {
   id!: number;
 }
 
+/** POST /products/getMyProductDetail — پیش‌پر کردن فرم ویرایش آگهی خودم */
+export class GetMyProductDetailDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+}
+
+/** POST /products/updateMyProduct — ویرایش آگهی خودم → بازگشت به «در انتظار تایید» */
+export class UpdateMyProductDto extends CreateProductDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+}
+
 export class SearchSuggestionsDto {
   @IsString()
   @Length(1, 60)

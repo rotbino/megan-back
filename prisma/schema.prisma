@@ -42,8 +42,10 @@ model User {
   role      String   @default("USER") // USER | ADMIN
   /// احراز هویت (کارت ملی + سلفی) — جریان ادمین
   isVerified   Boolean @default(false) @map("is_verified")
-  isBuyer      Boolean @default(true) @map("is_buyer")
-  isSeller     Boolean @default(false) @map("is_seller")
+  /// نقش فعال پنل — پیش‌فرض فروشنده (خواسته مالک)؛ با سوییچ پنل عوض می‌شود
+  /// و همان انتخاب ماندگار است (is_buyer=true و is_seller=false → پنل خریدار)
+  isBuyer      Boolean @default(false) @map("is_buyer")
+  isSeller     Boolean @default(true) @map("is_seller")
   /// غیرفعال توسط ادمین (A3) — ورود مسدود و محتوا از لیست‌های عمومی پنهان
   /// می‌شود؛ داده‌ها حذف نمی‌شوند (حذف نرم، نه سخت)
   isActive     Boolean  @default(true) @map("is_active")

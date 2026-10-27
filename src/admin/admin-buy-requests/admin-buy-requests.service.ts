@@ -154,7 +154,7 @@ export class AdminBuyRequestsService {
     const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
-        select: { id: true, userName: true, phone: true, isVerified: true },
+        select: { id: true, userName: true, phone: true, isVerified: true, firstName: true, lastName: true },
       }),
       this.categories.getNameMap(),
       this.locations.getNames(
@@ -179,6 +179,8 @@ export class AdminBuyRequestsService {
         buyer: {
           id: r.userId,
           user_name: buyer?.userName ?? UNKNOWN,
+          // نام کامل برای نمایش (خواسته مالک) — فالبک نام کاربری
+          full_name: [buyer?.firstName, buyer?.lastName].filter(Boolean).join(' ').trim() || buyer?.userName || '',
           phone: buyer?.phone ?? '',
           is_verified: buyer?.isVerified ?? false,
         },

@@ -143,10 +143,17 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   // ─── پاین‌لاین تصویر (sharp) ────────────────────────────────────────────────
 
   /**
-   * یک‌بار فشرده/تغییراندازه، دو بار ذخیره (اصلی + تامبنیل) — تامبنیل ۴۰۰px
-   * لیست‌ها و کارت‌های کوچک را می‌دهد؛ تصویر اصلی ۱۶۰۰px صفحه جزئیات را.
-   * (سرعت: کارت لیست هرگز تصویر ۱۶۰۰px نمی‌کشد)
+   * یک‌بار فشرده/تغییراندازه، دو بار ذخیره (اصلی + تامبنیل) — عین خواسته مالک:
+   *  • تصویر اصلی: حداکثر عرض ۱۲۰۰px (طول به‌تناسب)؛ اگر بعد از کوچک‌شدن حجم
+   *    از ۵۰۰KB بیشتر بود کیفیت پله‌ای کم می‌شود تا زیر سقف بیاید (کیفیت
+   *    هر پله فقط ~۸٪ کم می‌شود تا عکس زیاد افت نکند).
+   *  • تامبنیل: حداکثر عرض ۵۰۰px (طول اتوماتیک) — برای کارت‌های لیست.
+   * (سرعت: کارت لیست هرگز تصویر ۱۲۰۰px نمی‌کشد)
    */
+  private static readonly MAIN_MAX_WIDTH = 1200;
+  private static readonly MAIN_MAX_BYTES = 500 * 1024;
+  private static readonly THUMB_MAX_WIDTH = 500;
+
   private async processFile(buffer: Buffer, mime: string): Promise<ProcessedImage> {
     try {
       const sharp = (await import('sharp')).default;
@@ -154,15 +161,34 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       const hasAlpha = !!meta.hasAlpha;
       const isWebp = mime === 'image/webp';
 
-      const mainPipeline = sharp(buffer).rotate(); // جهت EXIF رعایت شود
-      const main = await mainPipeline
-        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-        .toFormat(isWebp ? 'webp' : hasAlpha ? 'png' : 'jpeg', isWebp ? { quality: 82 } : hasAlpha ? { compressionLevel: 9 } : { quality: 82, mozjpeg: true })
+      // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
+      const mainPipeline = sharp(buffer).rotate();
+      let main = await mainPipeline
+        .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .toFormat(isWebp ? 'webp' : hasAlpha ? 'png' : 'jpeg', isWebp ? { quality: 84 } : hasAlpha ? { compressionLevel: 9 } : { quality: 84, mozjpeg: true })
         .toBuffer();
+
+      // پله‌ای فشرده‌تر — تا زیر ۵۰۰KB بیاید (فقط jpeg/webp؛ png شفاف را دست نمی‌زنیم)
+      if (!hasAlpha && main.length > UploadsService.MAIN_MAX_BYTES) {
+        for (const quality of [78, 72, 66, 60, 54, 48]) {
+          main = await sharp(buffer)
+            .rotate()
+            .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, {
+              fit: 'inside',
+              withoutEnlargement: true,
+            })
+            .toFormat(isWebp ? 'webp' : 'jpeg', isWebp ? { quality } : { quality, mozjpeg: true })
+            .toBuffer();
+          if (main.length <= UploadsService.MAIN_MAX_BYTES) break;
+        }
+      }
 
       const thumb = await sharp(buffer)
         .rotate()
-        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+        .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true })
         .toFormat('jpeg', { quality: 78, mozjpeg: true }) // تامبنیل همیشه jpeg
         .toBuffer();
 

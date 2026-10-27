@@ -346,7 +346,7 @@ export class AdminProductsService {
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.prisma.user.findMany({
         where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
-        select: { id: true, userName: true, phone: true, isVerified: true },
+        select: { id: true, userName: true, phone: true, isVerified: true, firstName: true, lastName: true },
       }),
       this.categories.getNameMap(),
       this.locations.getNames(
@@ -372,6 +372,8 @@ export class AdminProductsService {
         seller: {
           id: p.userId,
           user_name: seller?.userName ?? UNKNOWN,
+          // نام کامل برای نمایش (خواسته مالک) — فالبک نام کاربری/موبایل
+          full_name: [seller?.firstName, seller?.lastName].filter(Boolean).join(' ').trim() || seller?.userName || '',
           phone: seller?.phone ?? '',
           is_verified: seller?.isVerified ?? false,
         },

@@ -8,7 +8,7 @@ import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { CallsService } from '../calls/calls.service';
 import type { AuthUser } from '../common/guards';
-import type { CreateProductDto, GetProductListDto } from './dto';
+import type { CreateProductDto, GetProductListDto, UpdateMyProductDto } from './dto';
 
 /** ظرفیت آگهی پلن رایگان باسکول */
 export const PRODUCT_CAPACITY = 5;
@@ -301,6 +301,75 @@ export class ProductsService {
     };
   }
 
+
+  /** POST /products/getMyProductDetail — رکورد کامل آگهی خودم برای پیش‌پر کردن ویرایش
+   *  (عکس‌ها با fileId تا حذف/جایگزینی سمت کلاینت ممکن باشد) */
+  async getMyProductDetail(user: AuthUser, id: number) {
+    const p = await this.prisma.product.findUnique({ where: { id } });
+    if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
+    if (p.status === 'deleted') throw AppError.notFound('این آگهی حذف شده است.');
+
+    const gallery = await this.prisma.file.findMany({
+      where: { relatedModel: 'Product', relatedId: String(id), fieldKey: 'gallery' },
+      orderBy: { createdAt: 'asc' },
+      take: 4,
+    });
+    const names = await this.hydrateNames([p]);
+    const dto = this.toDto(p, gallery.map((g) => ({ url: g.url, thumbUrl: g.thumbUrl })), names);
+    return {
+      ...dto,
+      // فایل‌های گالری با id — برای حذف تک‌تک عکس‌ها در ویرایش
+      photoFiles: gallery.map((g) => ({ id: g.id, url: g.url, thumbUrl: g.thumbUrl ?? g.url })),
+    };
+  }
+
+  /** POST /products/updateMyProduct — ویرایش آگهی خودم؛ مثل باسکول بعد از ویرایش
+   *  دوباره «در انتظار تایید» می‌شود تا کارشناس بازبینی کند. */
+  async updateMyProduct(user: AuthUser, dto: UpdateMyProductDto) {
+    const p = await this.prisma.product.findUnique({ where: { id: dto.id } });
+    if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
+    if (p.status === 'deleted') throw AppError.notFound('این آگهی حذف شده است.');
+
+    // همان اعتبارسنجی ارجاع‌های ثبت جدید
+    const sub = await this.categories.getCategoryById(dto.subCategoryId);
+    if (!sub || sub.kind !== 'CATEGORY') {
+      throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
+    }
+    const city = await this.locations.getCityById(dto.cityId);
+    if (!city) throw AppError.badRequest('شهر انتخابی معتبر نیست.', 'BAD_CITY');
+    if (city.province_id !== dto.provinceId) {
+      throw AppError.badRequest('شهر به استان انتخابی تعلق ندارد.', 'CITY_PROVINCE_MISMATCH');
+    }
+    const province = await this.locations.getProvinceById(dto.provinceId);
+    if (!province) throw AppError.badRequest('استان انتخابی معتبر نیست.', 'BAD_PROVINCE');
+
+    const parent = sub.parent_id != null ? await this.categories.getCategoryById(sub.parent_id) : null;
+    const categoryId = parent?.id ?? sub.id;
+
+    const updated = await this.prisma.product.update({
+      where: { id: dto.id },
+      data: {
+        productName: dto.productName.trim(),
+        description: dto.description.trim(),
+        categoryId,
+        subCategoryId: sub.id,
+        unit: sub.unit || 'کیلوگرم',
+        provinceId: province.id,
+        cityId: city.id,
+        stock: dto.stock,
+        minSaleAmount: dto.minSaleAmount,
+        minSalePrice: dto.minSalePrice,
+        features: (dto.features ?? []) as unknown as object,
+        // ویرایش = بازبینی مجدد (عین باسکول)؛ دلایل رد قبلی پاک می‌شود
+        status: 'pending',
+        rejectionReasons: [],
+      },
+    });
+
+    this.cache.invalidateTag('products');
+    this.cache.invalidateTag(`product:${dto.id}`);
+    return { id: updated.id, status: updated.status as string };
+  }
 
   /** POST /products/reviewProduct (ادمین) — تأیید/رد آگهی در انتظار تایید */
   async reviewProduct(dto: { id: number; approve: boolean; rejectionReasons?: string[] }) {
