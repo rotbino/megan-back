@@ -186,9 +186,24 @@ reviewVerification، uploads/listOrphans|deleteOrphans|getUsage و کلاس Admi
       نگهداشت فایل به `admin/uploads/*`
 - [x] سخت‌سازی: تغییر رمز خودم از `admin/auth/changePassword` (از A1)؛
       قفل ورود ۵ غلط/۱۵ دقیقه (از A1)
-- [ ] **فرانت A5:** داشبورد نموداری سبک (SVG بدون کتابخانه سنگین)،
-      `/admin/settings` (تغییر رمز خودم)، `/admin/admins`، `/admin/logs`،
-      `/admin/charges` (صف فیش‌ها)
+- [x] **فرانت A5:** داشبورد نموداری سبک (SVG بدون کتابخانه — TrendAreaChart
+      چندسریه با سوییچ + RevenueBarsChart انباشته + کارت‌های درآمد + صف‌ها با
+      لینک مستقیم + فید عملیات/ثبت‌نام اخیر)، `/admin/settings` (حساب + تغییر
+      رمز خودم)، `/admin/admins` (فقط SUPER_ADMIN — آیتم منو هم گیت‌شده)،
+      `/admin/logs` (فیلتر مسیر/نوع هدف/ادمین + payload بازشدنی)،
+      `/admin/charges` (تب وضعیت + دیالوگ بازبینی با پیش‌نمایش فیش) و
+      `/admin/verifications` (پیش‌نمایش کارت ملی + سلفی)
+
+> تست A5: `scripts/test-admin-a5.mjs` — ۵۸/۵۸ موفق (ساختار getStats/روند ۳۰
+> نقطه/درآمد، لاگ خودکار با actor-target-payload پاک‌سازی‌شده، فیلترها،
+> عملیات خواندنی لاگ نمی‌شود، createAdmin + ورود + ADMIN بدون دسترسی admins +
+> قفل ورود غیرفعال + reset رمز + گاردهای خودم/آخرین سوپر، شارژ از مسیر ادمین
+> (رد بدون دلیل/تأیید +۱۰۰هزار)، ۴ تست منفی امنیتی، ۷ مسیر قدیمی → 404).
+> رگرسیون: b6 18، b7 44، b8 25، b9 44، admin-a1 12، admin-a3 28، admin-a4 41،
+> locations 10، session-auth — همه سبز؛ test-api 30/32 (همان drift شناخته‌شده).
+> مرورگر: تأیید شارژ از پنل → لاگ خودکار در /admin/logs ظرف ثانیه؛ VLM
+> داشبورد ۹، دیالوگ ۹، لاگ ۹، ادمین‌ها ۹، شارژ ۹، تنظیمات ۹.۵/۱۰؛ موبایل
+> ۳۹۰px بدون overflow.
 
 ---
 
