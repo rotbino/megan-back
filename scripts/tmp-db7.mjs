@@ -1,0 +1,10 @@
+import { readFileSync } from 'fs';
+const env = readFileSync('.env', 'utf8');
+process.env.DATABASE_URL = env.match(/DATABASE_URL="([^"]+)"/)[1];
+const { PrismaClient } = await import('@prisma/client');
+const p = new PrismaClient();
+const u = await p.user.findUnique({ where: { phone: '09144133782' }, select: { id: true, passwordHash: true, isActive: true, sessionsRevokedAt: true, role: true } });
+console.log('user 09144133782:', JSON.stringify({ ...u, passwordHash: u.passwordHash ? 'SET(len ' + u.passwordHash.length + ')' : null }));
+const cnt = await p.user.count({ where: { passwordHash: { not: null } } });
+console.log('total users with password:', cnt);
+await p.$disconnect();

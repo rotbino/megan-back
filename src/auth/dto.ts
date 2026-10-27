@@ -44,3 +44,11 @@ export class RefreshTokenDto {
   @Length(20, 512)
   refreshToken!: string;
 }
+
+/** خروج — رفرش‌توکن اختیاری است؛ کاربر ترجیحاً از هدر شناسایی می‌شود */
+export class LogoutDto {
+  @IsOptional()
+  @IsString()
+  @Length(20, 512)
+  refreshToken?: string;
+}

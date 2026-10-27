@@ -76,6 +76,14 @@ export class BuyRequestsController {
     return ok(await this.buyRequests.getSuggestedBuyers(user.id));
   }
 
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getSuggestedSellers')
+  @ApiOperation({ summary: 'فروشندگان پیشنهادی — گروه دسته‌ای بر اساس درخواست‌های خرید من' })
+  async getSuggestedSellers(@CurrentUser() user: AuthUser) {
+    return ok(await this.buyRequests.getSuggestedSellers(user.id));
+  }
+
   // بازبینی درخواست حالا فقط از مسیر ادمین انجام می‌شود:
   // POST /admin/buy-requests/reviewBuyRequest (AdminJwtAuthGuard — فاز A4)
 }

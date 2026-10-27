@@ -382,6 +382,70 @@ export class BuyRequestsService {
     return [...best.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, 24);
   }
 
+  /**
+   * POST /buy-requests/getSuggestedSellers — فروشندگان پیشنهادی پنل خریدار:
+   * گروه دسته‌ای بر اساس درخواست‌های خرید confirmed خودم؛ برای هر دسته،
+   * تعداد فروشندگان متمایزی که آگهی confirmed همان دسته (برگ یا پدر) دارند.
+   * کلیک گروه → لیست محصولات همان دسته.
+   */
+  async getSuggestedSellers(userId: string): Promise<
+    Array<{ id: number; categoryName: string; sellerCount: number; href: string }>
+  > {
+    const myRequests = await this.prisma.buyRequest.findMany({
+      where: { userId, status: 'confirmed' },
+      select: { categoryId: true },
+      take: 100,
+    });
+    if (myRequests.length === 0) return [];
+    const catIds = [...new Set(myRequests.map((r) => r.categoryId))];
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        status: 'confirmed',
+        OR: [{ subCategoryId: { in: catIds } }, { categoryId: { in: catIds } }],
+      },
+      select: { userId: true, subCategoryId: true, categoryId: true },
+      take: 3000,
+    });
+    if (products.length === 0) return [];
+
+    // شمار فروشنده متمایز هر دسته درخواستی
+    const sellersByCat = new Map<number, Set<string>>();
+    for (const p of products) {
+      for (const cid of catIds) {
+        if (p.subCategoryId === cid || p.categoryId === cid) {
+          if (!sellersByCat.has(cid)) sellersByCat.set(cid, new Set());
+          sellersByCat.get(cid)!.add(p.userId);
+        }
+      }
+    }
+
+    // نام و slug دسته از درخت کش‌شده
+    const tree = await this.categories.getAllCategories();
+    const catInfo = new Map<number, { name: string; slug: string }>();
+    const walk = (nodes: Array<{ id: number; category_name: string; slug: string; children: unknown[] }>): void => {
+      for (const n of nodes) {
+        catInfo.set(n.id, { name: n.category_name, slug: n.slug });
+        walk(n.children as typeof nodes);
+      }
+    };
+    walk(tree as never);
+
+    const out: Array<{ id: number; categoryName: string; sellerCount: number; href: string }> = [];
+    for (const cid of catIds) {
+      const sellers = sellersByCat.get(cid);
+      if (!sellers || sellers.size === 0) continue;
+      const info = catInfo.get(cid);
+      out.push({
+        id: cid,
+        categoryName: info?.name ?? '—',
+        sellerCount: sellers.size,
+        href: `/product-list/category/${encodeURIComponent(info?.slug ?? String(cid))}`,
+      });
+    }
+    return out.sort((a, b) => b.sellerCount - a.sellerCount).slice(0, 12);
+  }
+
   // ─── ادمین ─────────────────────────────────────────────────────────────────
 
   /** POST /buy-requests/reviewBuyRequest (ادمین) — تأیید/رد درخواست */

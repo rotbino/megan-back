@@ -1,0 +1,12 @@
+import { readFileSync } from 'fs';
+const env = readFileSync('.env', 'utf8');
+process.env.DATABASE_URL = env.match(/DATABASE_URL="([^"]+)"/)[1];
+const { PrismaClient } = await import('@prisma/client');
+const p = new PrismaClient();
+const raw = await p.$runCommandRaw({ count: 'User', query: { province_id: null } });
+console.log('raw mongo User count province_id:null →', JSON.stringify(raw));
+const raw2 = await p.$runCommandRaw({ count: 'User', query: {} });
+console.log('raw mongo User total →', JSON.stringify(raw2));
+const arr = await p.user.findMany({ where: { provinceId: null }, select: { phone: true }, take: 5 });
+console.log('prisma findMany provinceId:null →', arr.length);
+await p.$disconnect();

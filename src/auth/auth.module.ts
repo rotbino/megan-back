@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from '../common/guards';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
 import { env, jwtExpiresInSeconds } from '../common/config/env';
 
 /** ماژول احراز هویت — JwtModule را export می‌کند تا گارد در همه ماژول‌ها کار کند */
@@ -14,7 +14,7 @@ import { env, jwtExpiresInSeconds } from '../common/config/env';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard],
-  exports: [JwtModule, JwtAuthGuard],
+  providers: [AuthService, JwtAuthGuard, OptionalJwtAuthGuard],
+  exports: [JwtModule, JwtAuthGuard, OptionalJwtAuthGuard],
 })
 export class AuthModule {}

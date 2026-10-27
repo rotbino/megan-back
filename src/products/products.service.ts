@@ -51,7 +51,7 @@ export interface ProductDto {
   updatedAt: string;
   photos: string[];
   photoThumbs: string[];
-  status?: string;
+  status: string;
   features?: Array<{ key: string; value: string }>;
   rejectionReasons?: string[];
 }
@@ -567,10 +567,10 @@ export class ProductsService {
       updatedAt: fmtDate(p.updatedAt),
       photos,
       photoThumbs,
-      ...(p.status !== 'confirmed'
-        ? { status: p.status, features, rejectionReasons }
-        : {}),
-      ...(p.status === 'confirmed' ? { features } : {}),
+      // status همیشه می‌رود — تب‌های «محصولات من» به آن فیلتر می‌شوند
+      status: p.status,
+      features,
+      ...(p.status !== 'confirmed' ? { rejectionReasons } : {}),
     };
   }
 }

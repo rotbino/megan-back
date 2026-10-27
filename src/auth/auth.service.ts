@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { hashPassword, verifyPassword } from '../common/password';
 import { env, isDev, jwtExpiresInSeconds, OTP_FIXED_CODE } from '../common/config/env';
@@ -34,6 +35,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly cache: CacheService,
   ) {}
 
   /** پاک‌سازی دوره‌ای کدهای منقضی و رفرش‌توکن‌های باطل (TTL ایندکس در Prisma نیست) */
@@ -259,12 +261,35 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** POST /auth/logout — ابطال رفرش‌توکن */
-  async logout(refreshToken: string): Promise<void> {
-    await this.prisma.refreshToken.update({
-      where: { tokenHash: sha256(refreshToken) },
-      data: { revokedAt: new Date() },
-    }).catch(() => undefined); // خروج با توکن نامعتبر هم موفق است
+  /** POST /auth/logout — خروج واقعی، سمت سرور:
+   *  ۱) مهر sessions_revoked_at روی کاربر → هر اکسس‌توکنی که قبل از این لحظه
+   *     صادر شده (حتی اگر امضایش تا ۷ روز معتبر باشد) فوراً باطل می‌شود.
+   *  ۲) همه رفرش‌توکن‌های باز کاربر باطل می‌شوند.
+   *  ۳) کش «زنده بودن نشست» ابطال می‌شود تا اثر آن فوری باشد.
+   * کاربر از توکن معتبر یا رفرش‌توکن معتبر شناسایی می‌شود؛ هیچ‌کدام نبود
+   * (مثلاً کلاینت از قبل پاک شده) → خروج بی‌اثر و موفق (idempotent). */
+  async logout(userId?: string, refreshToken?: string): Promise<void> {
+    let uid = userId;
+    if (!uid && refreshToken) {
+      const row = await this.prisma.refreshToken.findUnique({
+        where: { tokenHash: sha256(refreshToken) },
+      });
+      if (row && !row.revokedAt && row.expiresAt > new Date()) uid = row.userId;
+    }
+
+    if (uid) {
+      const now = new Date();
+      await this.prisma.user
+        .update({ where: { id: uid }, data: { sessionsRevokedAt: now } })
+        .catch(() => undefined);
+      // نکته MongoDB: فیلتر revokedAt: null با فیلدهای غایب match نمی‌شود —
+      // همه توکن‌های کاربر بدون قید وضعیت باطل می‌شوند (timestamp تازه بی‌ضرر است)
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: uid },
+        data: { revokedAt: now },
+      });
+      this.cache.invalidate(`user:alive:${uid}`);
+    }
   }
 
   // ─── داخلی ──────────────────────────────────────────────────────────────────

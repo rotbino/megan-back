@@ -1,0 +1,10 @@
+import { readFileSync } from 'fs';
+const env = readFileSync('.env', 'utf8');
+process.env.DATABASE_URL = env.match(/DATABASE_URL="([^"]+)"/)[1];
+const { PrismaClient } = await import('@prisma/client');
+const p = new PrismaClient();
+const provs = await p.baseProvince.findMany({ select: { id: true, name: true }, take: 31 });
+console.log('provinces:', provs.length, JSON.stringify(provs.slice(0, 5)));
+const cities = await p.baseCity.count();
+console.log('cities:', cities);
+await p.$disconnect();

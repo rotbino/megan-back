@@ -2,9 +2,10 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { LoginDto, RefreshTokenDto, SendOtpDto, SetPasswordDto, VerifyOtpDto } from './dto';
-import { JwtAuthGuard } from '../common/guards';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { LoginDto, LogoutDto, RefreshTokenDto, SendOtpDto, SetPasswordDto, VerifyOtpDto } from './dto';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
+import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
 const AUTH_THROTTLE = { default: { limit: 15, ttl: 60_000 } }; // سخت‌تر از حد سراسری
@@ -55,10 +56,13 @@ export class AuthController {
     return ok(await this.auth.refreshToken(dto.refreshToken));
   }
 
+  /** خروج — با اکسس‌توکن (هدر) یا رفرش‌توکن (بدنه)؛ هر دو نبود هم موفق.
+   *  سمت سرور همه نشست‌های کاربر را باطل می‌کند (لاگ‌اوت واقعی). */
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('logout')
-  @ApiOperation({ summary: 'خروج — ابطال رفرش‌توکن' })
-  async logout(@Body() dto: RefreshTokenDto) {
-    await this.auth.logout(dto.refreshToken);
+  @ApiOperation({ summary: 'خروج — ابطال همه نشست‌ها سمت سرور (اکسس‌توکن + همه رفرش‌توکن‌ها)' })
+  async logout(@MaybeCurrentUser() user: AuthUser | null, @Body() dto: LogoutDto) {
+    await this.auth.logout(user?.id, dto.refreshToken);
     return ok(null, 'با موفقیت خارج شدید.');
   }
 }
