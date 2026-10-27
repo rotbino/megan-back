@@ -11,8 +11,8 @@ import {
   GetSellerDto,
   SearchSuggestionsDto,
 } from './dto';
-import { JwtAuthGuard } from '../common/guards';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
+import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
@@ -74,6 +74,17 @@ export class ProductsController {
   @ApiOperation({ summary: 'پروفایل عمومی فروشنده + آگهی‌های تاییدشده' })
   async getSeller(@Body() dto: GetSellerDto) {
     return ok(await this.products.getSeller(dto.userName));
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getSellerPhone')
+  @ApiOperation({
+    summary:
+      'شماره تماس فروشنده آگهی — عمومی؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
+  })
+  async getSellerPhone(@MaybeCurrentUser() user: AuthUser | null, @Body() dto: GetProductByIdDto) {
+    return ok(await this.products.getSellerPhone(user, dto.id));
   }
 
   @Post('searchSuggestions')

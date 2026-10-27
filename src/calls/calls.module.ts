@@ -12,5 +12,6 @@ import { AuthModule } from '../auth/auth.module';
   imports: [AuthModule], // JwtModule برای REST-گارد
   controllers: [CallsController],
   providers: [CallsService],
+  exports: [CallsService], // products.getSellerPhone برای ثبت خودکار تماس
 })
 export class CallsModule {}

@@ -46,6 +46,34 @@ export class JwtAuthGuard implements CanActivate {
 // گارد نقش ادمینِ توکن‌کاربر (AdminGuard) در فاز A5 حذف شد — همه مسیرهای
 // ادمین حالا زیر admin/* با AdminJwtAuthGuard (کالکشن AdminUser جدا) هستند.
 
+/**
+ * گارد اختیاری — توکن باشد اعتبارسنجی و userId را می‌گذارد؛ نباشد/خراب
+ * باشد هم درخواست رد نمی‌شود (request.userId خالی می‌ماند). برای اندپوینت‌های
+ * عمومی مثل «گرفتن شماره فروشنده» که اگر خریدار وارد شده باشد، تماسش
+ * ثبت می‌شود و اگر مهمان باشد فقط شماره را می‌بیند.
+ */
+@Injectable()
+export class OptionalJwtAuthGuard implements CanActivate {
+  constructor(private readonly jwt: JwtService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<FastifyRequestWithUser>();
+    const header: string | undefined = request.headers?.authorization;
+    if (!header || !header.startsWith('Bearer ')) return true;
+    try {
+      const payload = await this.jwt.verifyAsync<{ sub: string; phone: string; role: string }>(
+        header.slice('Bearer '.length).trim(),
+      );
+      request.userId = payload.sub;
+      request.phone = payload.phone;
+      request.role = payload.role;
+    } catch {
+      /* توکن خراب/منقضی — مثل مهمان ادامه بده */
+    }
+    return true;
+  }
+}
+
 /** تایپ کمکی برای request تزئین‌شده توسط گارد */
 export interface FastifyRequestWithUser {
   headers: Record<string, unknown> & { authorization?: string };

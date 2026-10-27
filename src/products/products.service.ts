@@ -6,6 +6,7 @@ import { AppError } from '../common/errors/app-error';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { CallsService } from '../calls/calls.service';
 import type { AuthUser } from '../common/guards';
 import type { CreateProductDto, GetProductListDto } from './dto';
 
@@ -85,6 +86,7 @@ export class ProductsService {
     private readonly categories: CategoriesService,
     private readonly locations: LocationsService,
     private readonly uploads: UploadsService,
+    private readonly calls: CallsService,
   ) {}
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
@@ -337,6 +339,46 @@ export class ProductsService {
   }
 
   // ─── فروشنده عمومی ─────────────────────────────────────────────────────────
+
+  /**
+   * POST /products/getSellerPhone — شماره تماس فروشنده آگهی (مدل lead-gen):
+   * عمومی است (مثل آشکارسازی قیمت باسکول)؛ اما اگر خریدار وارد شده باشد،
+   * همان لحظه به‌عنوان «تماس» ثبت می‌شود تا ادمین بداند کی به کی زنگ زده.
+   * خود فروشنده شماره خودش را می‌بیند بدون ثبت.
+   */
+  async getSellerPhone(caller: AuthUser | null, productId: number) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { userId: true, status: true },
+    });
+    if (!product || product.status !== 'confirmed') throw AppError.notFound('آگهی یافت نشد.');
+
+    const seller = await this.prisma.user.findUnique({
+      where: { id: product.userId },
+      select: { id: true, phone: true, firstName: true, lastName: true, userName: true, isActive: true },
+    });
+    if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
+
+    // ثبت تماس — فقط برای خریدار واردشده و غیر از خود فروشنده؛ best-effort
+    let callLogged = false;
+    if (caller && caller.id !== seller.id) {
+      try {
+        await this.calls.reportCall(caller, { calleeId: seller.id, productId, source: 'product' });
+        callLogged = true;
+      } catch {
+        /* ثبت تماس نباید نمایش شماره را خراب کند */
+      }
+    }
+
+    return {
+      sellerId: seller.id,
+      phone: seller.phone,
+      firstName: seller.firstName,
+      lastName: seller.lastName,
+      userName: seller.userName,
+      callLogged,
+    };
+  }
 
   /** POST /products/getSeller — پروفایل کسب‌وکار + آگهی‌های تاییدشده */
   async getSeller(userName: string) {
