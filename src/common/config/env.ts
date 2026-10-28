@@ -107,5 +107,5 @@ export const FILES_STAGING_TTL_DAYS = num('FILES_STAGING_TTL_DAYS', process.env.
 // کارت واریز کارت‌به‌کارت و مالکش — نمایشی در UI شارژ؛ با کارت واقعی فقط .env عوض می‌شود.
 export const wallet = Object.freeze({
   CARD_NUMBER: process.env.WALLET_CARD_NUMBER || '6037-9975-1234-5678',
-  CARD_OWNER: process.env.WALLET_CARD_OWNER || 'شرکت بازارگاه ایمچ',
+  CARD_OWNER: process.env.WALLET_CARD_OWNER || 'سعید یوسفی',
 });

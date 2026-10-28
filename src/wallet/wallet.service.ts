@@ -32,8 +32,9 @@ export interface WalletTransactionDto {
   title: string;
   amount: number;
   incoming: boolean;
-  /** شارژ کارت‌به‌کارت تا تأیید ادمین «در انتظار تایید» است */
-  pendingAdmin: boolean;
+  /** نوع تراکنش — «card» واریز کارت‌به‌کارت تأییدشده؛ «ladder» نردبان؛ «adjust» اصلاح ادمین.
+   * آینده: «online» درگاه آنلاین — همین قرارداد، فقط مقدار جدید. */
+  type: 'card' | 'ladder' | 'adjust';
   at: Date;
 }
 
@@ -108,13 +109,18 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** POST /wallet/getWalletTransactions — شارژها + نردبان‌ها + اصلاح‌های ادمین، یکجا و مرتب */
+  /** POST /wallet/getWalletTransactions — فقط تراکنش‌های «قطعی‌شده»:
+   *  • شارژهای کارت‌به‌کارت «تأییدشده» (نوع card) + نردبان‌ها + اصلاح‌های ادمین.
+   *  • شارژهای در انتظار/ردشده اصلاً اینجا نمی‌آیند — تب «کارت به کارت» (getMyChargeOrders)
+   *    محل زندگی آنهاست تا کاربر وضعیت فیش خود را با دلیل رد پیگیری کند.
+   *  (خواسته مالک TEST-D6 — کیف پول مرتب: تراکنش = واقعی، کارت‌به‌کارت = صف فیش‌ها) */
   async getWalletTransactions(userId: string): Promise<{ items: WalletTransactionDto[] }> {
     const [charges, ladders, adjustments] = await Promise.all([
       this.prisma.chargeOrder.findMany({
-        where: { userId },
+        where: { userId, status: 'approved' },
         orderBy: { createdAt: 'desc' },
         take: TRANSACTIONS_LIMIT,
+        select: { id: true, charge: true, reviewedAt: true, createdAt: true },
       }),
       this.prisma.ladderOrder.findMany({
         where: { userId },
@@ -126,6 +132,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         where: { userId },
         orderBy: { createdAt: 'desc' },
         take: TRANSACTIONS_LIMIT,
+        select: { id: true, amount: true, reason: true, createdAt: true },
       }),
     ]);
 
@@ -142,21 +149,18 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     const items: WalletTransactionDto[] = [
       ...charges.map((c) => ({
         id: `charge:${c.id}`,
-        title:
-          c.status === 'rejected'
-            ? 'شارژ کیف پول — کارت به کارت (رد شد)'
-            : 'شارژ کیف پول — کارت به کارت',
-        amount: c.status === 'rejected' ? c.amount : c.charge,
-        incoming: c.status !== 'rejected',
-        pendingAdmin: c.status === 'pending',
-        at: c.createdAt,
+        title: 'شارژ کیف پول — کارت به کارت',
+        amount: c.charge,
+        incoming: true,
+        type: 'card' as const,
+        at: c.reviewedAt ?? c.createdAt,
       })),
       ...ladders.map((l) => ({
         id: `ladder:${l.id}`,
         title: `نردبان «${productName.get(l.productId) ?? 'آگهی'}» — یک‌ماهه`,
         amount: l.amount,
         incoming: false,
-        pendingAdmin: false,
+        type: 'ladder' as const,
         at: l.createdAt,
       })),
       ...adjustments.map((a) => ({
@@ -164,12 +168,49 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         title: `اصلاح کیف پول — ${a.reason}`,
         amount: Math.abs(a.amount),
         incoming: a.amount > 0,
-        pendingAdmin: false,
+        type: 'adjust' as const,
         at: a.createdAt,
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
     return { items };
+  }
+
+  /** POST /wallet/getMyChargeOrders — فیش‌های کارت‌به‌کارت خودِ کاربر (تب «کارت به کارت»).
+   * در انتظار/تأییدشده/ردشده + دلیل رد + بندانگشتی فیش — تا کاربر بداند چه شده و چه کند. */
+  async getMyChargeOrders(userId: string) {
+    const rows = await this.prisma.chargeOrder.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: TRANSACTIONS_LIMIT,
+    });
+
+    const orderIds = rows.map((r) => r.id);
+    const files = orderIds.length
+      ? await this.prisma.file.findMany({
+          where: { relatedModel: 'ChargeOrder', relatedId: { in: orderIds }, fieldKey: 'receipt' },
+          select: { relatedId: true, url: true, thumbUrl: true },
+        })
+      : [];
+    const fileMap = new Map(files.map((f) => [f.relatedId!, f]));
+
+    return {
+      items: rows.map((r) => {
+        const receipt = fileMap.get(r.id);
+        return {
+          id: r.id,
+          status: r.status,
+          packageKey: r.packageKey,
+          amount: r.amount,
+          bonusPercent: r.bonusPercent,
+          charge: r.charge,
+          rejectionReason: r.status === 'rejected' ? r.rejectionReason : null,
+          reviewedAt: r.reviewedAt,
+          createdAt: r.createdAt,
+          receipt: receipt ? { url: receipt.url, thumbUrl: receipt.thumbUrl } : null,
+        };
+      }),
+    };
   }
 
   /** POST /wallet/createChargeOrder (multipart: packageKey + receipt) — فیش واریزی */

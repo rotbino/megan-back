@@ -27,9 +27,17 @@ export class WalletController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('getWalletTransactions')
-  @ApiOperation({ summary: 'تاریخچه تراکنش‌ها — شارژها + کسر نردبان‌ها' })
+  @ApiOperation({ summary: 'تراکنش‌های قطعی‌شده — شارژ کارت‌به‌کارت تأییدشده + نردبان + اصلاح ادمین' })
   async getWalletTransactions(@CurrentUser() user: AuthUser) {
     return ok(await this.wallet.getWalletTransactions(user.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMyChargeOrders')
+  @ApiOperation({ summary: 'فیش‌های کارت‌به‌کارت خودم — در انتظار/تأیید/رد + دلیل رد (تب «کارت به کارت»)' })
+  async getMyChargeOrders(@CurrentUser() user: AuthUser) {
+    return ok(await this.wallet.getMyChargeOrders(user.id));
   }
 
   @UseGuards(JwtAuthGuard)
