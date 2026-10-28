@@ -5,6 +5,7 @@ import { BuyRequestsService } from './buy-requests.service';
 import {
   CreateBuyRequestDto,
   DeleteMyBuyRequestDto,
+  UpdateMyBuyRequestDto,
   GetBuyRequestContactDto,
   GetBuyRequestListDto,
   GetMyBuyRequestsDto,
@@ -58,6 +59,14 @@ export class BuyRequestsController {
   @ApiOperation({ summary: 'حذف نرم درخواست خرید خودم' })
   async deleteMyBuyRequest(@CurrentUser() user: AuthUser, @Body() dto: DeleteMyBuyRequestDto) {
     return ok(await this.buyRequests.deleteMyBuyRequest(user, dto.id), 'درخواست حذف شد.');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('updateMyBuyRequest')
+  @ApiOperation({ summary: 'ویرایش درخواست «در انتظار تایید» خودم (نوع/میزان/هدف/مکان)' })
+  async updateMyBuyRequest(@CurrentUser() user: AuthUser, @Body() dto: UpdateMyBuyRequestDto) {
+    return ok(await this.buyRequests.updateMyBuyRequest(user, dto), 'تغییرات درخواست ذخیره شد.');
   }
 
   @UseGuards(JwtAuthGuard)

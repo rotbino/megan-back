@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AppError } from '../../common/errors/app-error';
 import { hashPassword, verifyPassword } from '../../common/password';
@@ -32,23 +33,39 @@ export class AdminAuthService implements OnModuleInit {
   /**
    * بوت‌استرپ ادمین پیش‌فرض — فقط وقتی هیچ ادمینی با آن نام کاربری نیست
    * ساخته می‌شود؛ رمز عوض‌شده هرگز بازنویسی نمی‌شود.
-   * نام/رمز از env (ADMIN_DEFAULT_USERNAME/ADMIN_DEFAULT_PASSWORD).
+   *
+   * رمز اولیه (رفع باگ ۴ — امنیت):
+   * • ADMIN_DEFAULT_PASSWORD در env ست شده → همان.
+   * • ست نشده → رمز تصادفی قوی تولید می‌شود، فقط هش آن در DB ذخیره می‌شود
+   *   و رمز خام یک‌بار در لاگ بوت چاپ می‌شود تا اپراتور بردارد/عوض کند.
+   * هیچ رمز پیش‌فرضی در کد وجود ندارد؛ DB منبع حقیقت است.
    */
   async onModuleInit(): Promise<void> {
     try {
-      const existing = await this.prisma.adminUser.findUnique({
-        where: { username: adminEnv.DEFAULT_USERNAME },
+      const username = adminEnv.DEFAULT_USERNAME.trim();
+      if (!username) {
+        this.logger.log('admin-bootstrap: ADMIN_DEFAULT_USERNAME ست نشده — بدون بوت‌استرپ ادامه می‌دهیم');
+        return;
+      }
+      const existing = await this.prisma.adminUser.findUnique({ where: { username } });
+      if (existing) return;
+
+      const initialPassword = adminEnv.DEFAULT_PASSWORD || randomBytes(12).toString('base64url');
+      await this.prisma.adminUser.create({
+        data: {
+          username,
+          passwordHash: await hashPassword(initialPassword),
+          name: 'مدیر ارشد',
+          role: 'SUPER_ADMIN',
+        },
       });
-      if (!existing) {
-        await this.prisma.adminUser.create({
-          data: {
-            username: adminEnv.DEFAULT_USERNAME,
-            passwordHash: await hashPassword(adminEnv.DEFAULT_PASSWORD),
-            name: 'مدیر ارشد',
-            role: 'SUPER_ADMIN',
-          },
-        });
-        this.logger.warn(`admin-bootstrap: ادمین پیش‌فرض «${adminEnv.DEFAULT_USERNAME}» ساخته شد`);
+      if (adminEnv.DEFAULT_PASSWORD) {
+        this.logger.warn(`admin-bootstrap: ادمین پیش‌فرض «${username}» از env ساخته شد — پس از اولین ورود رمز را عوض کنید`);
+      } else {
+        // رمز تصادفی — فقط این‌بار نمایش داده می‌شود؛ ذخیره فقط هش است
+        this.logger.warn(
+          `admin-bootstrap: ادمین «${username}» با رمز تصادفی ساخته شد. رمز اولیه (فقط همین‌بار): ${initialPassword}`,
+        );
       }
     } catch (err) {
       // بوت نباید fail-fast باشد — ولی حتماً دیده شود

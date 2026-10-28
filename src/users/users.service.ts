@@ -122,20 +122,4 @@ export class UsersService {
     await this.prisma.user.update({ where: { id: userId }, data: update });
     return this.getProfile(userId);
   }
-
-  /** POST /users/getUserByPhone — اطلاعات عمومی حداقلی (بدون داده شخصی) */
-  async getUserByPhone(phone: string) {
-    const user = await this.prisma.user.findUnique({ where: { phone } });
-    if (!user) throw AppError.notFound('کاربری با این شماره یافت نشد.');
-    return {
-      id: user.id,
-      user_name: user.userName,
-      first_name: user.firstName,
-      last_name: user.lastName,
-      is_verified: user.isVerified,
-      is_buyer: user.isBuyer,
-      is_seller: user.isSeller,
-      created_at: user.createdAt,
-    };
-  }
 }

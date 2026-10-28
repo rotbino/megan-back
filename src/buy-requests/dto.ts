@@ -108,6 +108,44 @@ export class DeleteMyBuyRequestDto {
   id!: number;
 }
 
+/** POST /buy-requests/updateMyBuyRequest — ویرایش درخواست «در انتظار تایید» خودم */
+export class UpdateMyBuyRequestDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  /** «نوع کالا» — تغییر اسم → نود PRODUCT_TYPE جدید بازمصرف/ساخته می‌شود */
+  @IsOptional()
+  @IsString()
+  @Length(2, 100)
+  name?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000_000)
+  requirementAmount!: number;
+
+  @IsOptional()
+  @IsIn(['price_and_buy', 'price_only'])
+  goal?: 'price_and_buy' | 'price_only';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  provinceId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  cityId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+}
+
 /** شماره موبایل برای نشان‌کردن خریدار از لیست عمومی */
 export const PHONE_RE = /^09\d{9}$/;
 export class PhoneDto {

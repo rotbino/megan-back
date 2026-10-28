@@ -58,9 +58,11 @@ export const adminEnv = Object.freeze({
   JWT_SECRET: process.env.ADMIN_JWT_SECRET || '',
   /** عمر توکن ادمین — کوتاه؛ بدون refresh، انقضا = ورود مجدد */
   JWT_EXPIRES_IN: process.env.ADMIN_JWT_EXPIRES_IN || '12h',
-  /** بوت‌استرپ ادمین پیش‌فرض — فقط اگر وجود نداشته باشد ساخته می‌شود */
-  DEFAULT_USERNAME: process.env.ADMIN_DEFAULT_USERNAME || '09196421264',
-  DEFAULT_PASSWORD: process.env.ADMIN_DEFAULT_PASSWORD || 'admin434343',
+  /** بوت‌استرپ ادمین پیش‌فرض — فقط اگر وجود نداشته باشد ساخته می‌شود.
+   * رمز اولیه فقط از env می‌آید؛ اگر ست نشده بود رمز تصادفی قوی تولید و
+   * یک‌بار در لاگ بوت چاپ می‌شود. هیچ رمز پیش‌فرضی در کد نیست (رفع باگ ۴). */
+  DEFAULT_USERNAME: process.env.ADMIN_DEFAULT_USERNAME || '',
+  DEFAULT_PASSWORD: process.env.ADMIN_DEFAULT_PASSWORD || '',
 });
 
 /** راز مؤثر JWT ادمین — جدا از راز کاربران (حتی بدون env صریح) */

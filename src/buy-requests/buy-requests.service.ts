@@ -10,6 +10,7 @@ import {
   GetBuyRequestListDto,
   GetMyBuyRequestsDto,
   ReviewBuyRequestDto,
+  UpdateMyBuyRequestDto,
 } from './dto';
 
 /** شروع id دسته‌های ساخته‌شده — بالاتر از کل idهای باسکول (~۱۰۳۵) */
@@ -84,8 +85,22 @@ export class BuyRequestsService {
 
   /** POST /buy-requests/createBuyRequest → «در انتظار تایید» */
   async createBuyRequest(user: AuthUser, dto: CreateBuyRequestDto) {
-    const sub = await this.categories.getCategoryById(dto.subCategoryId);
-    if (!sub || sub.kind !== 'CATEGORY') {
+    // انتخاب‌گرهای فرانت (صفحه اول + ویزارد پنل) تا آخرین نود پایین می‌روند —
+    // اگر آن نود «نوع کالا» باشد (PRODUCT_TYPE، مثل «پسته اکبری» زیر «پسته»)
+    // دسته والد مبنا می‌شود و نام نود پیش‌فرض «نوع کالا» می‌ماند (باگ ۲۸-۱۰:
+    // درخواست خرید صفحه اول کلاً ثبت نمی‌شد چون kind نود PRODUCT_TYPE بود).
+    let sub = await this.categories.getCategoryById(dto.subCategoryId);
+    if (!sub) throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
+    let typeName = dto.name?.trim();
+    if (sub.kind === 'PRODUCT_TYPE') {
+      const parent =
+        sub.parent_id != null ? await this.categories.getCategoryById(sub.parent_id) : null;
+      if (!parent || parent.kind !== 'CATEGORY') {
+        throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
+      }
+      if (!typeName) typeName = sub.category_name; // کاربر خودش نوعی ننوشت → نام نود
+      sub = parent;
+    } else if (sub.kind !== 'CATEGORY') {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     }
 
@@ -108,8 +123,8 @@ export class BuyRequestsService {
 
     // «نوع کالا» → نود PRODUCT_TYPE فرزند دسته برگ (idempotent)
     let productTypeId: number | null = null;
-    if (dto.name?.trim()) {
-      productTypeId = await this.upsertProductType(dto.subCategoryId, dto.name.trim(), sub.unit, sub.min);
+    if (typeName) {
+      productTypeId = await this.upsertProductType(sub.id, typeName, sub.unit, sub.min);
     }
 
     const id = await this.nextId();
@@ -117,9 +132,9 @@ export class BuyRequestsService {
     const row = await this.prisma.buyRequest.create({
       data: {
         id,
-        name: dto.name?.trim() || null,
+        name: typeName || null,
         description: dto.description?.trim() || null,
-        categoryId: dto.subCategoryId,
+        categoryId: sub.id,
         productTypeId,
         requirementAmount: dto.requirementAmount,
         unit: sub.unit || 'کیلوگرم',
@@ -299,6 +314,63 @@ export class BuyRequestsService {
     await this.prisma.buyRequest.update({ where: { id }, data: { status: 'deleted' } });
     this.cache.invalidateTag('buy-requests');
     return { ok: true as const };
+  }
+
+  /**
+   * POST /buy-requests/updateMyBuyRequest — ویرایش درخواست «در انتظار تایید».
+   * فقط مالک و فقط pending (بعد از تأیید/رد، مثل باسکول قابل ویرایش نیست)؛
+   * تغییر «نوع کالا» → نود PRODUCT_TYPE تازه (idempotent). مکان اختیاری است.
+   */
+  async updateMyBuyRequest(user: AuthUser, dto: UpdateMyBuyRequestDto) {
+    const row = await this.prisma.buyRequest.findUnique({ where: { id: dto.id } });
+    if (!row || row.userId !== user.id) {
+      throw AppError.notFound('درخواست خرید یافت نشد.');
+    }
+    if (row.status !== 'pending') {
+      throw AppError.badRequest(
+        'فقط درخواست‌های «در انتظار تایید» قابل ویرایش هستند.',
+        'NOT_EDITABLE',
+      );
+    }
+
+    // اعتبار مکان — مثل ثبت جدید (هر دو یا هیچ‌کدام)
+    if (dto.provinceId || dto.cityId) {
+      if (!dto.provinceId || !dto.cityId) {
+        throw AppError.badRequest('استان و شهر را کامل انتخاب کنید.', 'CITY_REQUIRED');
+      }
+      const city = await this.locations.getCityById(dto.cityId);
+      if (!city) throw AppError.badRequest('شهر انتخابی معتبر نیست.', 'BAD_CITY');
+      if (city.province_id !== dto.provinceId) {
+        throw AppError.badRequest('شهر به استان انتخابی تعلق ندارد.', 'CITY_PROVINCE_MISMATCH');
+      }
+    }
+
+    // «نوع کالا» عوض شده → نود تازه (idempotent)؛ خالی = بدون تغییر می‌ماند
+    let productTypeId = row.productTypeId;
+    if (dto.name !== undefined && dto.name.trim() && dto.name.trim() !== row.name) {
+      const sub = await this.categories.getCategoryById(row.categoryId);
+      productTypeId = await this.upsertProductType(
+        row.categoryId,
+        dto.name.trim(),
+        sub?.unit ?? row.unit,
+        sub?.min ?? 0,
+      );
+    }
+
+    const updated = await this.prisma.buyRequest.update({
+      where: { id: dto.id },
+      data: {
+        name: dto.name !== undefined ? dto.name.trim() || null : row.name,
+        description: dto.description !== undefined ? dto.description.trim() || null : row.description,
+        productTypeId,
+        requirementAmount: dto.requirementAmount,
+        goal: dto.goal ?? (row.goal as 'price_and_buy' | 'price_only'),
+        provinceId: dto.provinceId ?? row.provinceId,
+        cityId: dto.cityId ?? row.cityId,
+      },
+    });
+    this.cache.invalidateTag('buy-requests');
+    return { id: updated.id, status: updated.status };
   }
 
   // ─── خریداران پیشنهادی (تطبیق آگهی‌های من) ─────────────────────────────────

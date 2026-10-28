@@ -52,9 +52,3 @@ export class UpdateProfileDto {
   @IsOptional()
   profile?: Record<string, unknown>;
 }
-
-export class GetUserByPhoneDto {
-  @IsString()
-  @Matches(/^09\d{9}$/, { message: 'شماره موبایل معتبر نیست.' })
-  phone!: string;
-}
