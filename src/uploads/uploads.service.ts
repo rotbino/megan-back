@@ -569,13 +569,14 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       where: { relatedModel: model, relatedId: modelId },
       select: { id: true, storageKey: true, thumbStorageKey: true },
     });
+    // پاک‌سازی ذخیره‌سازی «best-effort و غیرمسدودکننده» — درس تست ۲۸-۱۰: با
+    // شبکه لرزان آروان، حذف سنکرون (۲۰s×۴ retry برای هر آبجکت) کل درخواست
+    // ادمین را دقیقه‌ها معلق و سپس ۵۰۰ (شکستن پروکسی) می‌کرد، در حالی که
+    // سند File منبع حقیقت است و همین‌جا حذف می‌شود؛ آبجکت‌های یتیم روی
+    // ذخیره‌سازی بعداً توسط ابزار «آپلودهای یتیم» ادمین جمع می‌شوند.
     for (const f of rows) {
-      try {
-        if (f.storageKey) await this.driver.delete(f.storageKey);
-        if (f.thumbStorageKey) await this.driver.delete(f.thumbStorageKey).catch(() => undefined);
-      } catch {
-        /* بهترین‌حال */
-      }
+      if (f.storageKey) void this.driver.delete(f.storageKey).catch(() => undefined);
+      if (f.thumbStorageKey) void this.driver.delete(f.thumbStorageKey).catch(() => undefined);
     }
     await this.prisma.file.deleteMany({ where: { relatedModel: model, relatedId: modelId } });
     await this.bustCaches(model, modelId);
