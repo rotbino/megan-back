@@ -280,15 +280,15 @@ export class ProductsService {
 
   /** POST /products/getMyProducts — آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت */
   async getMyProducts(userId: string) {
+    // همه وضعیت‌ها (حتی حذف‌شده) — تب «حذف شده» باید ردیف‌ها را هم نشان دهد،
+    // نه فقط شمارنده را (باگ ۲۸-۱۰-۲۰۲۶: تب حذف‌شده همیشه خالی بود).
+    // ظرفیت سمت کلاینت با فیلتر status !== 'deleted' محاسبه می‌شود.
     const rows = await this.prisma.product.findMany({
-      where: { userId, status: { not: 'deleted' } },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     });
     const counts: Record<string, number> = { confirmed: 0, pending: 0, rejected: 0, deleted: 0 };
-    // ردیف‌های حذف‌شده هم برای تب «حذف شده» شمرده می‌شوند — یک کوئری دیگر
-    const deletedCount = await this.prisma.product.count({ where: { userId, status: 'deleted' } });
     for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
-    counts.deleted = deletedCount;
 
     const [gallery, names] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),

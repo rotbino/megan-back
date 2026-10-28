@@ -57,6 +57,20 @@ class ArvanStorage implements StorageDriver {
       region: ARVAN_REGION || 'us-east-1',
       credentials: { accessKeyId: ARVAN_ACCESS_KEY, secretAccessKey: ARVAN_SECRET_KEY },
       forcePathStyle: true,
+      // ── سخت‌گیری شبکه (درس تست ۲۸-۱۰-۲۰۲۶): ──
+      // مسیر اینترنت به آروان (یا هر S3 دیگری) می‌تواند بی‌سروصدا هنگ کند
+      // (اتصال TCP برقرار می‌شود اما پاسک پاسخ نمی‌دهد). بدون timeout، آپلود
+      // دقیقه‌ها معلق می‌ماند و کلاینت/proxy خطای ۵۰۰ می‌گیرد در حالی که سرور
+      // دیرتر موفق می‌شود → ردیف‌های تکراری و تجربه خراب.
+      // با timeout کوتاه + retry خودکار SDK، اتصال معلق سریع قطع و تلاش مجدد
+      // روی اتصال تازه انجام می‌شود (رفع ریشه‌ای هنگ آپلود).
+      requestHandler: {
+        requestTimeout: 20_000, // هر تلاش PUT/DELETE حداکثر ۲۰ ثانیه
+        connectionTimeout: 8_000, // برقراری اتصال حداکثر ۸ ثانیه
+        // آپلودها body کامل دارند → محدودیت هم‌زمانی پیش‌فرض کافی است
+      },
+      // ۴ تلاش (۱ + ۳ retry با backoff نمایی SDK) — پایداری در شبکه لرزان
+      maxAttempts: 4,
     });
   }
 
