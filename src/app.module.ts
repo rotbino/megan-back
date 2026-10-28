@@ -13,6 +13,8 @@ import { VerificationModule } from './verification/verification.module';
 import { BuyRequestsModule } from './buy-requests/buy-requests.module';
 import { SavedModule } from './saved/saved.module';
 import { ChatModule } from './chat/chat.module';
+import { PresenceModule } from './presence/presence.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PushModule } from './push/push.module';
@@ -36,6 +38,8 @@ import { AdminModule } from './admin/admin.module';
     BuyRequestsModule,
     SavedModule,
     ChatModule,
+    PresenceModule,
+    ReviewsModule,
     CallsModule,
     WalletModule,
     PushModule,

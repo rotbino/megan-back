@@ -5,6 +5,7 @@ import { CacheService } from '../../common/cache/cache.module';
 import { AppError } from '../../common/errors/app-error';
 import { WalletService } from '../../wallet/wallet.service';
 import { VerificationService } from '../../verification/verification.service';
+import { PresenceService, ONLINE_WINDOW_MS } from '../../presence/presence.service';
 import type {
   CreditWalletDto,
   GetUserListDto,
@@ -38,6 +39,9 @@ export interface AdminUserRow {
   /** pending | verified | none — برای چیپ وضعیت احراز */
   verification: 'pending' | 'verified' | 'none';
   last_login_at: Date | null;
+  /** آنلاین — نبض تازه‌تر از پنجره حضور */
+  online: boolean;
+  last_seen_at: Date | null;
   created_at: Date;
 }
 
@@ -59,6 +63,7 @@ export class AdminUsersService {
     private readonly cache: CacheService,
     private readonly wallet: WalletService,
     private readonly verification: VerificationService,
+    private readonly presence: PresenceService,
   ) {}
 
   // ─── لیست + جستجو + فیلتر ──────────────────────────────────────────────────
@@ -69,11 +74,29 @@ export class AdminUsersService {
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? 20));
     const s = dto.search?.trim();
 
+    // پنجره حضور — فیلتر «آنلاین» و نشان ردیف‌ها هر دو با همین مرز سنجیده می‌شوند
+    const onlineSince = new Date(Date.now() - ONLINE_WINDOW_MS);
+
+    // «آفلاین» = متممِ آنلاین‌ها — روی مونگو، فیلتر null پرایسما فقط null صریح
+    // را می‌گیرد نه فیلد غایب (رفتار سندیش)؛ پس شناسه‌های آنلاین را می‌گیریم و
+    // notIn می‌زنیم — فهرست آنلاین‌ها همیشه کوچک است (پنجره ۹۰ ثانیه).
+    let onlineIds: string[] | null = null;
+    if (dto.online === false) {
+      onlineIds = (
+        await this.prisma.user.findMany({
+          where: { lastSeenAt: { gt: onlineSince } },
+          select: { id: true },
+        })
+      ).map((u) => u.id);
+    }
+
     const where: Prisma.UserWhereInput = {
       ...(dto.role ? { role: dto.role } : {}),
       ...(dto.active !== undefined ? { isActive: dto.active } : {}),
       ...(dto.verified !== undefined ? { isVerified: dto.verified } : {}),
       ...(dto.seller !== undefined ? { isSeller: dto.seller } : {}),
+      ...(dto.online === true ? { lastSeenAt: { gt: onlineSince } } : {}),
+      ...(onlineIds ? { id: { notIn: onlineIds } } : {}),
       ...(s
         ? {
             OR: [
@@ -86,7 +109,7 @@ export class AdminUsersService {
         : {}),
     };
 
-    const [total, rows] = await Promise.all([
+    const [total, rows, onlineCount] = await Promise.all([
       this.prisma.user.count({ where }),
       this.prisma.user.findMany({
         where,
@@ -94,6 +117,8 @@ export class AdminUsersService {
         skip: (page - 1) * perPage,
         take: perPage,
       }),
+      // شمار آنلاین‌ها همیشه سرِ پاسخ — مستقل از فیلتر جاری
+      this.prisma.user.count({ where: { lastSeenAt: { gt: onlineSince } } }),
     ]);
 
     // شمارنده‌های هر ردیف — گروهی (نه به‌ازای هر ردیف)
@@ -118,6 +143,8 @@ export class AdminUsersService {
       page,
       perPage,
       pageCount: Math.max(1, Math.ceil(total / perPage)),
+      /** شمار کاربران آنلاین (پنجره ۹۰s) — نمایش سرصفحه جدول */
+      onlineCount,
       items: rows.map<AdminUserRow>((u) => ({
         id: u.id,
         phone: u.phone,
@@ -138,6 +165,10 @@ export class AdminUsersService {
         request_count: requestMap.get(u.id) ?? 0,
         verification: u.isVerified ? 'verified' : pendingSet.has(u.id) ? 'pending' : 'none',
         last_login_at: u.lastLoginAt,
+        // آنلاین از DB — پنجره ۹۰s هر دو منبع (حافظه/DB) را پوشش می‌دهد چون
+        // نوشتن DB حداکثر ۳۰s عقب است و نبض کلاینت ۴۵s است
+        online: Boolean(u.lastSeenAt && Date.now() - u.lastSeenAt.getTime() < ONLINE_WINDOW_MS),
+        last_seen_at: u.lastSeenAt,
         created_at: u.createdAt,
       })),
     };
@@ -201,6 +232,8 @@ export class AdminUsersService {
         city: city?.name ?? null,
         profile: user.profile ?? {},
         last_login_at: user.lastLoginAt,
+        online: await this.presence.isOnline(user.id),
+        last_seen_at: user.lastSeenAt,
         created_at: user.createdAt,
       },
       stats: {

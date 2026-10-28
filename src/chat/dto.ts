@@ -1,11 +1,22 @@
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 
-/** POST /chat/startThread — شروع/یافتن مکالمه روی یک آگهی */
+/**
+ * POST /chat/startThread — شروع/یافتن مکالمه.
+ * دو مسیر: productId (گفتگو روی آگهی) یا userName (گفتگوی مستقیم از پروفایل
+ * فروشنده — عین «ارسال پیام» باسکول؛ بدون آگهی زمینه).
+ */
 export class StartThreadDto {
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
-  productId!: number;
+  productId?: number;
+
+  /** شناسه عمومی پروفایل فروشنده — وقتی productId نیامده الزامی است */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  userName?: string;
 }
 
 /** POST /chat/sendMessage */

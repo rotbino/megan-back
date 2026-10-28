@@ -7,6 +7,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { CallsService } from '../calls/calls.service';
+import { PresenceService } from '../presence/presence.service';
 import type { AuthUser } from '../common/guards';
 import type { CreateProductDto, GetProductListDto, UpdateMyProductDto } from './dto';
 
@@ -87,6 +88,7 @@ export class ProductsService {
     private readonly locations: LocationsService,
     private readonly uploads: UploadsService,
     private readonly calls: CallsService,
+    private readonly presence: PresenceService,
   ) {}
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
@@ -410,20 +412,38 @@ export class ProductsService {
   // ─── فروشنده عمومی ─────────────────────────────────────────────────────────
 
   /**
-   * POST /products/getSellerPhone — شماره تماس فروشنده آگهی (مدل lead-gen):
+   * POST /products/getSellerPhone — شماره تماس فروشنده (مدل lead-gen):
    * فقط برای کاربر واردشده (گارد Jwt)؛ شماره/قیمت مهمان پنهان — عین باسکول.
+   * دو مسیر: آگهی (id) یا پروفایل فروشنده (userName — دکمه شماره تماس پروفایل).
    * خریدار واردشده همان لحظه به‌عنوان «تماس» ثبت می‌شود تا ادمین بداند کی به کی
    * زنگ زده. خود فروشنده شماره خودش را می‌بیند بدون ثبت.
    */
-  async getSellerPhone(caller: AuthUser | null, productId: number) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { userId: true, status: true },
-    });
-    if (!product || product.status !== 'confirmed') throw AppError.notFound('آگهی یافت نشد.');
+  async getSellerPhone(caller: AuthUser | null, dto: { id?: number; userName?: string }) {
+    let sellerId: string;
+    let productId: number | null = null;
+    const source = dto.userName ? 'profile' : 'product';
+
+    if (dto.id != null) {
+      const product = await this.prisma.product.findUnique({
+        where: { id: dto.id },
+        select: { id: true, userId: true, status: true },
+      });
+      if (!product || product.status !== 'confirmed') throw AppError.notFound('آگهی یافت نشد.');
+      sellerId = product.userId;
+      productId = product.id;
+    } else if (dto.userName?.trim()) {
+      const sellerRow = await this.prisma.user.findUnique({
+        where: { userName: dto.userName.trim() },
+        select: { id: true },
+      });
+      if (!sellerRow) throw AppError.notFound('فروشنده یافت نشد.');
+      sellerId = sellerRow.id;
+    } else {
+      throw AppError.badRequest('آگهی یا شناسه فروشنده لازم است.', 'SELLER_TARGET_REQUIRED');
+    }
 
     const seller = await this.prisma.user.findUnique({
-      where: { id: product.userId },
+      where: { id: sellerId },
       select: { id: true, phone: true, firstName: true, lastName: true, userName: true, isActive: true },
     });
     if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
@@ -432,7 +452,7 @@ export class ProductsService {
     let callLogged = false;
     if (caller && caller.id !== seller.id) {
       try {
-        await this.calls.reportCall(caller, { calleeId: seller.id, productId, source: 'product' });
+        await this.calls.reportCall(caller, { calleeId: seller.id, productId: productId ?? undefined, source });
         callLogged = true;
       } catch {
         /* ثبت تماس نباید نمایش شماره را خراب کند */
@@ -449,8 +469,20 @@ export class ProductsService {
     };
   }
 
-  /** POST /products/getSeller — پروفایل کسب‌وکار + آگهی‌های تاییدشده */
+  /** POST /products/getSeller — پروفایل کسب‌وکار + آگهی‌های تاییدشده.
+   * غنی‌شده (خواسته «پروفایل عین باسکول»): مکان، وضعیت آنلاین، خلاصه نظرات،
+   * احتمال پاسخگویی (درصد مکالمات که فروشنده جواب داده) و آمار عرضه.
+   * کش ۳۰s — DB آتلاس راه دور است و این مسیر ~۱۰ کوئری دارد (هر کدام ~۲۰۰ms RTT)؛
+   * وضعیت آنلاینِ زنده را کلاینت جدا از /presence/status می‌گیرد. */
   async getSeller(userName: string) {
+    return this.cache.wrap(
+      `seller:${userName}`,
+      { ttlMs: TTL.SHORT, tags: [`seller:${userName}`] },
+      async () => this.getSellerUncached(userName),
+    );
+  }
+
+  private async getSellerUncached(userName: string) {
     const seller = await this.prisma.user.findUnique({ where: { userName } });
     if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
 
@@ -459,16 +491,57 @@ export class ProductsService {
       orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
       take: 48,
     });
-    const [gallery, names] = await Promise.all([
+    // احتمال پاسخگویی — مکالماتی که خریدار شروع کرده چندتایش جواب فروشنده دارد.
+    // کوئری‌ها با threadId IN (ایندکس‌دار) نه فیلتر رابطه‌ای thread.sellerId —
+    // فیلتر رابطه‌ای اسکن کل پیام‌ها را می‌کشد (سنجش: ۰.۶s → سریع).
+    const sellerThreadIds = (
+      await this.prisma.chatThread.findMany({
+        where: { sellerId: seller.id },
+        select: { id: true },
+        take: 500, // سقف آمار — فروشنده با ۵۰۰+ مکالمه به‌روزرسانی کافی است
+      })
+    ).map((t) => t.id);
+
+    const [gallery, names, avatarFile, locNames, reviewAgg, chatStats] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
+      this.prisma.file.findFirst({
+        where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'avatar' },
+        orderBy: { createdAt: 'desc' },
+        select: { url: true, thumbUrl: true },
+      }),
+      this.locations.getNames(
+        seller.provinceId != null ? [seller.provinceId] : [],
+        seller.cityId != null ? [seller.cityId] : [],
+      ),
+      this.prisma.sellerReview.aggregate({
+        where: { sellerId: seller.id },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      sellerThreadIds.length
+        ? Promise.all([
+            this.prisma.chatMessage.groupBy({
+              by: ['threadId'],
+              where: { threadId: { in: sellerThreadIds }, senderId: { not: seller.id } },
+              _count: { _all: true },
+            }),
+            this.prisma.chatMessage.groupBy({
+              by: ['threadId'],
+              where: { threadId: { in: sellerThreadIds }, senderId: seller.id },
+              _count: { _all: true },
+            }),
+          ])
+        : [[], []],
     ]);
 
-    const avatarFile = await this.prisma.file.findFirst({
-      where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'avatar' },
-      orderBy: { createdAt: 'desc' },
-      select: { url: true, thumbUrl: true },
-    });
+    const buyerThreads = new Set(chatStats[0].map((g) => g.threadId));
+    const sellerReplied = chatStats[1].filter((g) => buyerThreads.has(g.threadId)).length;
+    const responseRate =
+      buyerThreads.size > 0 ? Math.round((sellerReplied / buyerThreads.size) * 100) : null;
+
+    // مجموع موجودی عرضه — همه با یک واحد نیستند؛ فقط اقلام هم‌واحد ردیف اول
+    const totalStock = rows.length ? rows.reduce((a, r) => a + r.stock, 0) : 0;
 
     return {
       user: {
@@ -476,11 +549,24 @@ export class ProductsService {
         userName: seller.userName,
         firstName: seller.firstName,
         lastName: seller.lastName,
+        sex: seller.sex,
         activePakageType: 0,
         isVerified: seller.isVerified,
         businessDesc: seller.businessDesc ?? null,
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
         createdAt: fmtDate(seller.createdAt),
+        // ── غنی‌سازی پروفایل (باسکول‌گونه) ──
+        online: await this.presence.isOnline(seller.id),
+        lastSeenAt: seller.lastSeenAt,
+        provinceName: seller.provinceId != null ? locNames.provinces.get(seller.provinceId) ?? null : null,
+        cityName: seller.cityId != null ? locNames.cities.get(seller.cityId) ?? null : null,
+        reviewSummary: {
+          avg: reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : 0,
+          count: reviewAgg._count._all,
+        },
+        responseRate,
+        productCount: rows.length,
+        totalStock,
       },
       products: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
     };

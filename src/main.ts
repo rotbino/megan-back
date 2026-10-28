@@ -12,6 +12,8 @@ import path from 'node:path';
 import { AppModule } from './app.module';
 import { ChatModule } from './chat/chat.module';
 import { ChatService } from './chat/chat.service';
+import { PresenceModule } from './presence/presence.module';
+import { PresenceService } from './presence/presence.service';
 import { env, isProd, storage } from './common/config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { setIo } from './chat/io-holder';
@@ -118,6 +120,7 @@ async function bootstrap(): Promise<void> {
   if (fastify?.io) {
     setIo(fastify.io);
     const chat = app.select(ChatModule).get(ChatService, { strict: false });
+    const presence = app.select(PresenceModule).get(PresenceService, { strict: false });
     const io = fastify.io;
     io.on('connection', async (socket) => {
       const token =
@@ -133,6 +136,12 @@ async function bootstrap(): Promise<void> {
       }
       socket.data.userId = userId;
       await socket.join(`user:${userId}`);
+      // حضور: اتصال WS خودش یک نبض است — و قطع آن هم (grace ۹۰s باقی می‌ماند
+      // تا ناوبری بین صفحات کاربر را ناگهانی آفلاین نکند)
+      presence?.touch(userId);
+      socket.on('disconnect', () => {
+        presence?.touch(userId);
+      });
     });
   }
 

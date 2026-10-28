@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
 import { JwtService } from '@nestjs/jwt';
@@ -21,8 +22,10 @@ export interface MessageDto {
 
 export interface ThreadDto {
   id: string;
-  productId: number;
-  productName: string;
+  /** آگهی زمینه — null یعنی گفتگوی مستقیم از پروفایل فروشنده */
+  productId: number | null;
+  /** نام آگهی زمینه — null برای گفتگوی مستقیم (کلاینت «گفتگو با فروشنده» می‌گذارد) */
+  productName: string | null;
   /** ObjectId کاربر جاری — کلاینت «من» را در پیام‌ها تشخیص می‌دهد */
   myId: string;
   /** نقش من در مکالمه */
@@ -83,30 +86,78 @@ export class ChatService {
 
   // ─── شروع مکالمه ───────────────────────────────────────────────────────────
 
-  /** POST /chat/startThread — یافتن/ساخت مکالمه من + آگهی */
+  /** POST /chat/startThread — یافتن/ساخت مکالمه من + آگهی یا مستقیم با فروشنده */
   async startThread(user: AuthUser, dto: StartThreadDto): Promise<ThreadDto> {
-    const product = await this.prisma.product.findUnique({
-      where: { id: dto.productId },
-      select: { id: true, productName: true, status: true, userId: true },
-    });
-    if (!product || product.status !== 'confirmed') {
-      throw AppError.notFound('محصول یافت نشد.');
-    }
-    if (product.userId === user.id) {
-      throw AppError.badRequest('این آگهی متعلق به خودتان است.', 'SELF_CHAT');
+    let sellerId: string;
+    let productId: number | null = null;
+
+    if (dto.productId != null) {
+      // مسیر آگهی — مکالمه درباره یک محصول مشخص
+      const product = await this.prisma.product.findUnique({
+        where: { id: dto.productId },
+        select: { id: true, productName: true, status: true, userId: true },
+      });
+      if (!product || product.status !== 'confirmed') {
+        throw AppError.notFound('محصول یافت نشد.');
+      }
+      if (product.userId === user.id) {
+        throw AppError.badRequest('این آگهی متعلق به خودتان است.', 'SELF_CHAT');
+      }
+      sellerId = product.userId;
+      productId = product.id;
+    } else {
+      // مسیر پروفایل — گفتگوی مستقیم با فروشنده (بدون آگهی زمینه)
+      if (!dto.userName?.trim()) {
+        throw AppError.badRequest('آگهی یا شناسه فروشنده لازم است.', 'THREAD_TARGET_REQUIRED');
+      }
+      const seller = await this.prisma.user.findUnique({
+        where: { userName: dto.userName.trim() },
+        select: { id: true, isActive: true },
+      });
+      if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
+      if (seller.id === user.id) {
+        throw AppError.badRequest('گفتگو با خودتان معنا ندارد.', 'SELF_CHAT');
+      }
+      sellerId = seller.id;
     }
 
-    const thread = await this.prisma.chatThread.upsert({
-      where: { productId_buyerId: { productId: dto.productId, buyerId: user.id } },
-      create: { productId: dto.productId, sellerId: product.userId, buyerId: user.id },
-      update: {},
-      include: {
-        product: { select: { productName: true } },
-        seller: { select: { id: true, firstName: true, lastName: true, userName: true } },
-        buyer: { select: { id: true, firstName: true, lastName: true, userName: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
-      },
+    const threadInclude = {
+      product: { select: { productName: true } },
+      seller: { select: { id: true, firstName: true, lastName: true, userName: true } },
+      buyer: { select: { id: true, firstName: true, lastName: true, userName: true } },
+      messages: { orderBy: { createdAt: 'desc' as const }, take: 1 },
+    };
+
+    // upsert با کلید مرکب و productId=null در تایپِ where پرایسما جا نمی‌شود
+    // (کلید مرکب null قبول نمی‌کند) → find + create با بازیابی از تداخل
+    // یکتایی (P2002) — رفتارِ upsert، بدون محدودیت تایپ.
+    // productId=null در where عادی به null/missing مونگو می‌خورد — درست است.
+    let thread = await this.prisma.chatThread.findFirst({
+      where: { sellerId, buyerId: user.id, productId },
+      include: threadInclude,
     });
+    if (!thread) {
+      try {
+        thread = await this.prisma.chatThread.create({
+          data: { productId, sellerId, buyerId: user.id },
+          include: threadInclude,
+        });
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          e.meta?.target
+        ) {
+          // مکالمه همزمان ساخته شد (دو تب) — همان را برگردان
+          thread = await this.prisma.chatThread.findFirstOrThrow({
+            where: { sellerId, buyerId: user.id, productId },
+            include: threadInclude,
+          });
+        } else {
+          throw e;
+        }
+      }
+    }
 
     const unreadCount = await this.prisma.chatMessage.count({
       where: { threadId: thread.id, senderId: { not: user.id }, readAt: null },
@@ -347,11 +398,11 @@ export class ChatService {
   private toThreadDto(
     t: {
       id: string;
-      productId: number;
+      productId: number | null;
       sellerId: string;
       buyerId: string;
       updatedAt: Date;
-      product: { productName: string };
+      product: { productName: string } | null;
       seller: { id: string; firstName: string; lastName: string; userName: string };
       buyer: { id: string; firstName: string; lastName: string; userName: string };
       messages: Array<{ text: string; createdAt: Date; senderId: string }>;
@@ -365,7 +416,7 @@ export class ChatService {
     return {
       id: t.id,
       productId: t.productId,
-      productName: t.product.productName,
+      productName: t.product?.productName ?? null,
       myId,
       myRole,
       counterpart: {

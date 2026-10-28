@@ -10,6 +10,7 @@ import {
   GetProductListDto,
   GetRelatedProductsDto,
   GetSellerDto,
+  GetSellerPhoneDto,
   SearchSuggestionsDto,
   UpdateMyProductDto,
 } from './dto';
@@ -99,10 +100,10 @@ export class ProductsController {
   @Post('getSellerPhone')
   @ApiOperation({
     summary:
-      'شماره تماس فروشنده آگهی — نیاز به ورود (مدل lead-gen)؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
+      'شماره تماس فروشنده (آگهی یا پروفایل) — نیاز به ورود (مدل lead-gen)؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
   })
-  async getSellerPhone(@CurrentUser() user: AuthUser, @Body() dto: GetProductByIdDto) {
-    return ok(await this.products.getSellerPhone(user, dto.id));
+  async getSellerPhone(@CurrentUser() user: AuthUser, @Body() dto: GetSellerPhoneDto) {
+    return ok(await this.products.getSellerPhone(user, dto));
   }
 
   @Post('searchSuggestions')

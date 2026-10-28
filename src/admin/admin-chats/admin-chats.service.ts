@@ -17,7 +17,8 @@ const AWAITING_SCAN_CAP = 2000;
 
 export interface AdminThreadRow {
   id: string;
-  product: { id: number; name: string };
+  /** آگهی زمینه — null یعنی گفتگوی مستقیم از پروفایل فروشنده */
+  product: { id: number; name: string } | null;
   buyer: UserCard;
   seller: UserCard;
   lastMessage: {
@@ -200,7 +201,9 @@ export class AdminChatsService {
     return {
       thread: {
         id: thread.id,
-        product: { id: thread.product.id, name: thread.product.productName, status: thread.product.status },
+        product: thread.product
+          ? { id: thread.product.id, name: thread.product.productName, status: thread.product.status }
+          : null,
         buyer,
         seller,
         messageCount: thread.messages.length,
@@ -268,7 +271,7 @@ export class AdminChatsService {
       id: string;
       createdAt: Date;
       lastMessageAt: Date | null;
-      product: { id: number; productName: string };
+      product: { id: number; productName: string } | null;
       buyer: { id: string; firstName: string; lastName: string; userName: string; phone: string; isActive: boolean; isVerified: boolean; lastLoginAt: Date | null };
       seller: { id: string; firstName: string; lastName: string; userName: string; phone: string; isActive: boolean; isVerified: boolean; lastLoginAt: Date | null };
       messages: Array<{ text: string; senderId: string; readAt: Date | null; createdAt: Date }>;
@@ -283,7 +286,7 @@ export class AdminChatsService {
       last && last.senderId === t.buyer.id ? 'buyer' : 'seller';
     return {
       id: t.id,
-      product: { id: t.product.id, name: t.product.productName },
+      product: t.product ? { id: t.product.id, name: t.product.productName } : null,
       buyer,
       seller,
       lastMessage: last

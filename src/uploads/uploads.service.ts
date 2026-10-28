@@ -214,19 +214,27 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   // ─── کلید و پوشه‌ها ────────────────────────────────────────────────────────
 
   /**
-   * معماری پوشه (per-entity، backup-friendly):
-   *   users/{userId}/avatar|staging/… · products/{productId}/gallery/…
-   * object storeها تخت‌اند — prefix در مقیاس میلیونها هزینه‌ای ندارد و بکاپ/
-   * lifecycle per-entity را بدیهی می‌کند. مصرف per-USER از DB (ایندکس ownerId)
-   * پاسخ داده می‌شود، نه با اسکن ذخیره‌سازی.
+   * معماری پوشه (per-USER — خواسته مالک ۱۴۰۵/۰۸/۰۷):
+   *   users/{ownerId}/avatars/… · users/{ownerId}/staging/…
+   *   users/{ownerId}/products/{productId}/gallery/…
+   *   users/{ownerId}/verifications/{orderId}/… · users/{ownerId}/charge-orders/{orderId}/…
+   * همه‌ی فایل‌های یک شخص زیر پوشه خودش است — کالا، چت (آینده)، پروفایل — تا
+   * سهمیه/هزینه فضای هر کاربر بعداً قابل اعمال شود (مصرف واقعی از جدول File
+   * با ایندکس ownerId پاسخ داده می‌شود — نه اسکن ذخیره‌سازی).
+   * فایل‌های قدیمی با کلید قبلی (products/{id}/…) در DB معتبرند و همچنان
+   * سرو می‌شوند؛ ساختار جدید فقط برای آپلودهای تازه است.
    */
   private keyFor(ownerId: string, model: RelatedModel, modelId: string | null, fieldKey: string, ext: string): string {
     const stamp = Date.now().toString(36);
     const rand = randomBytes(5).toString('hex');
-    const folder = modelId
-      ? `${MODEL_FOLDER[model]}/${modelId}`
-      : `${MODEL_FOLDER.User}/${ownerId}/staging`;
-    return `${folder}/${fieldKey}/${stamp}-${rand}.${ext}`;
+    // آواتار زیر پوشه خود کاربر است و نیازی به modelId ندارد
+    const inner =
+      model === 'User'
+        ? 'avatars'
+        : modelId
+          ? `${MODEL_FOLDER[model]}/${modelId}`
+          : 'staging';
+    return `users/${ownerId}/${inner}/${fieldKey}/${stamp}-${rand}.${ext}`;
   }
 
   // ─── آپلود ────────────────────────────────────────────────────────────────

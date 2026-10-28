@@ -59,6 +59,22 @@ export class GetProductByIdDto {
   id!: number;
 }
 
+/**
+ * ورودی getSellerPhone — دو مسیر: آگهی (id) یا پروفایل (userName).
+ * حداقل یکی باید بیاید (ولیدیشن در سرویس — پیام خطای گویا).
+ */
+export class GetSellerPhoneDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  userName?: string;
+}
+
 /** ورودی createProduct — دقیقاً خروجی ویزارد ۶ مرحله‌ای فرانت */
 export class CreateProductDto {
   @IsString()

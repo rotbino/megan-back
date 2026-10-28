@@ -41,6 +41,11 @@ export class GetUserListDto {
   @IsBoolean()
   seller?: boolean;
 
+  /** فقط کاربران آنلاین (نبض تازه‌تر از پنجره ۹۰ ثانیه) */
+  @IsOptional()
+  @IsBoolean()
+  online?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

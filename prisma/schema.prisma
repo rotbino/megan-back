@@ -50,6 +50,10 @@ model User {
   /// می‌شود؛ داده‌ها حذف نمی‌شوند (حذف نرم، نه سخت)
   isActive     Boolean  @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at")
+  /// آخرین نبض حضور — heartbeat/WS آن را تازه می‌کند؛ «آنلاین» یعنی
+  /// تازه‌تر از پنجره ~۹۰ ثانیه (grace برای پرش شبکه). ایندکس desc برای
+  /// شمار/فیلتر آنلاین‌ها در پنل ادمین.
+  lastSeenAt   DateTime? @map("last_seen_at")
   /// مهر زمان ابطال همه نشست‌ها (لاگ‌اوت سمت سرور) — توکن‌هایی که
   /// iat قبل از آن باشند رد می‌شوند؛ null یعنی هیچ ابطالی ثبت نشده
   sessionsRevokedAt DateTime? @map("sessions_revoked_at")
@@ -81,9 +85,15 @@ model User {
   walletAdjustments  WalletAdjustment[] @relation("WalletAdjustmentOwner")
   /// پیام‌های مستقیم پشتیبانی (ادمین → کاربر) — یک‌طرفه با خوانده‌شدن
   adminMessages   AdminMessage[] @relation("AdminMessageOwner")
+  /// نظراتی که درباره این کاربر (به‌عنوان فروشنده) نوشته شده
+  reviewsReceived SellerReview[] @relation("ReviewSeller")
+  /// نظراتی که این کاربر درباره فروشندگان نوشته
+  reviewsWritten SellerReview[] @relation("ReviewAuthor")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([lastSeenAt(sort: Desc)])
 }
 
 /// درخواست احراز هویت اسناد — کارت ملی + سلفی؛ بررسی و تأیید توسط ادمین.
@@ -559,8 +569,10 @@ model LadderOrder {
 /// یک مکالمه به‌ازای هر خریدار روی هر آگهی؛ فروشنده = مالک آگهی (denorm).
 model ChatThread {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  productId Int
-  product   Product  @relation("ChatThreadProduct", fields: [productId], references: [id])
+  /// آگهی زمینه مکالمه — null یعنی گفتگوی مستقیم از پروفایل فروشنده
+  /// (عین «ارسال پیام» باسکول در پروفایل؛ بدون آگهی خاص).
+  productId Int?
+  product   Product? @relation("ChatThreadProduct", fields: [productId], references: [id])
 
   sellerId  String   @map("seller_id") @db.ObjectId
   seller    User     @relation("ChatThreadSeller", fields: [sellerId], references: [id])
@@ -575,7 +587,9 @@ model ChatThread {
 
   messages ChatMessage[]
 
-  @@unique([productId, buyerId])
+  /// با productId=null مونگو null را مقدار می‌شمارد → حداکثر یک گفتگوی
+  /// مستقیم بین هر خریدار↔فروشنده؛ با productId همان یک مکالمه روی آگهی.
+  @@unique([sellerId, buyerId, productId])
   @@index([sellerId, lastMessageAt(sort: Desc)])
   @@index([buyerId, lastMessageAt(sort: Desc)])
 }
@@ -646,4 +660,30 @@ model CallLog {
   @@index([calleeId, createdAt(sort: Desc)])
   @@index([callerId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+}
+
+/// نظر کاربران درباره فروشنده (عین «نظرات کاربران» باسکول در پروفایل):
+/// امتیاز ۱..۵ + متن؛ هر کاربر حداکثر یک نظر برای هر فروشنده (upsert) —
+/// ویرایش نظر خودش آزاد است. خودفروشی نظر (نظر درباره خود) ممنوع.
+model SellerReview {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// فروشنده‌ای که نظر درباره‌اش است
+  sellerId String @map("seller_id") @db.ObjectId
+  seller   User   @relation("ReviewSeller", fields: [sellerId], references: [id])
+
+  /// نویسنده نظر
+  authorId String @map("author_id") @db.ObjectId
+  author   User   @relation("ReviewAuthor", fields: [authorId], references: [id])
+
+  /// ۱ تا ۵ ستاره
+  rating Int
+  /// متن نظر — حداکثر ~۱۰۰۰ نویسه
+  text   String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([authorId, sellerId])
+  @@index([sellerId, createdAt(sort: Desc)])
 }

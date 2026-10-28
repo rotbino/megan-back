@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { WalletModule } from '../../wallet/wallet.module';
 import { VerificationModule } from '../../verification/verification.module';
+import { PresenceModule } from '../../presence/presence.module';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminUsersService } from './admin-users.service';
 
@@ -15,7 +16,7 @@ import { AdminUsersService } from './admin-users.service';
  * (اصل طلایی §۱: «ادمین منطق دامنه را copy نمی‌کند»).
  */
 @Module({
-  imports: [AdminAuthModule, WalletModule, VerificationModule],
+  imports: [AdminAuthModule, WalletModule, VerificationModule, PresenceModule],
   controllers: [AdminUsersController],
   providers: [AdminUsersService],
 })
