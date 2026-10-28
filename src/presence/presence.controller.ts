@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Headers, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards';
@@ -12,6 +12,9 @@ import { PresenceHeartbeatDto, PresenceStatusDto } from './dto';
  * heartbeat: ریز و ارزان — کلاینت هر ۴۵ ثانیه می‌فرستد؛ حد نرخ بالا.
  * status: عمومی (بدون توکن) — نشانگر آنلاین در کارت فروشنده آگهی، پروفایل
  * و فرم چت مهمان‌ها هم می‌بینند؛ فقط وضعیت می‌دهد نه زمان دقیق حساس.
+ * leave: خروج صریح (بستن صفحه/انقضای نشست) — توکن منقضی هم پذیرفته
+ * می‌شود (امضا معتبر = هویت ثابت) تا کلاینتِ بی‌نشست بتواند خودش را
+ * همان لحظه آفلاین کند.
  */
 @ApiTags('presence')
 @Controller('presence')
@@ -26,6 +29,20 @@ export class PresenceController {
   async heartbeat(@CurrentUser() user: { id: string }, @Body() _dto: PresenceHeartbeatDto) {
     this.presence.touch(user.id);
     return ok({ online: true });
+  }
+
+  /** بیکن خروج — بدون JwtAuthGuard چون توکن منقضی/ابطال‌شده هم باید کار کند */
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('leave')
+  @ApiOperation({ summary: 'خروج صریح — بستن صفحه یا پایان نشست؛ فوری آفلاین' })
+  async leave(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() _dto: PresenceHeartbeatDto,
+  ) {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7).trim() : undefined;
+    const userId = token ? await this.presence.verifyDepartingToken(token) : null;
+    if (userId) this.presence.markDeparted(userId);
+    return ok({ offline: true });
   }
 
   @Throttle({ default: { limit: 120, ttl: 60_000 } })

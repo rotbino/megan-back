@@ -473,13 +473,17 @@ export class ProductsService {
    * غنی‌شده (خواسته «پروفایل عین باسکول»): مکان، وضعیت آنلاین، خلاصه نظرات،
    * احتمال پاسخگویی (درصد مکالمات که فروشنده جواب داده) و آمار عرضه.
    * کش ۳۰s — DB آتلاس راه دور است و این مسیر ~۱۰ کوئری دارد (هر کدام ~۲۰۰ms RTT)؛
-   * وضعیت آنلاینِ زنده را کلاینت جدا از /presence/status می‌گیرد. */
+   * وضعیت آنلاینِ زنده را کلاینت جدا از /presence/status می‌گیرد. مهر آنلاین
+   * در هر فراخوانی تازه می‌شود (خروج صریح لحظه‌ای در کش نمی‌ماند). */
   async getSeller(userName: string) {
-    return this.cache.wrap(
+    const cached = await this.cache.wrap(
       `seller:${userName}`,
       { ttlMs: TTL.SHORT, tags: [`seller:${userName}`] },
       async () => this.getSellerUncached(userName),
     );
+    // آنلاین از کش نمی‌آید — حقیقتِ لحظه از حضور (خروج فوری معتبر بماند)
+    cached.user.online = await this.presence.isOnline(cached.user.id);
+    return cached;
   }
 
   private async getSellerUncached(userName: string) {

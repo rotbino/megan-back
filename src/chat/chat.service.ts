@@ -332,6 +332,32 @@ export class ChatService {
 
   // ─── پیام‌های پشتیبانی (ادمین → کاربر) ────────────────────────────────────
 
+  /** POST /chat/unreadCount — بج هدر/فوتر: مجموع خوانده‌نشده چت + پشتیبانی */
+  async getUnreadCount(user: AuthUser): Promise<{ count: number; chat: number; support: number }> {
+    // ۵۰۰ مکالمه اخیر — بج «پیام جدید» است؛ نخ‌های خفته قدیمی بی‌اثرند
+    const threads = await this.prisma.chatThread.findMany({
+      where: { OR: [{ sellerId: user.id }, { buyerId: user.id }] },
+      orderBy: { lastMessageAt: 'desc' },
+      select: { id: true },
+      take: 500,
+    });
+
+    const [chat, support] = await Promise.all([
+      threads.length
+        ? this.prisma.chatMessage.count({
+            where: {
+              threadId: { in: threads.map((t) => t.id) },
+              senderId: { not: user.id },
+              readAt: null,
+            },
+          })
+        : Promise.resolve(0),
+      this.prisma.adminMessage.count({ where: { userId: user.id, readAt: null } }),
+    ]);
+
+    return { count: chat + support, chat, support };
+  }
+
   /** POST /chat/getMyAdminMessages — آخرین پیام‌های پشتیبانی من (صعودی) + خوانده‌نشده */
   async getMyAdminMessages(user: AuthUser): Promise<AdminInboxDto> {
     const [total, unread, rows] = await Promise.all([

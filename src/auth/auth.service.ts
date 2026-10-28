@@ -6,6 +6,7 @@ import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { hashPassword, verifyPassword } from '../common/password';
 import { env, isDev, jwtExpiresInSeconds, OTP_FIXED_CODE } from '../common/config/env';
+import { forceUserDeparture } from '../chat/io-holder';
 
 const OTP_TTL_MS = 2 * 60 * 1000; // عمر کد: ۲ دقیقه
 const OTP_MAX_ATTEMPTS = 5;
@@ -289,6 +290,8 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
         data: { revokedAt: now },
       });
       this.cache.invalidate(`user:alive:${uid}`);
+      // حضور: خروج = آفلاین همان لحظه — سوکت‌ها قطع + مهر offline_at
+      forceUserDeparture(uid);
     }
   }
 

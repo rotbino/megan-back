@@ -3,10 +3,14 @@
  * به سرور وصل می‌شود. سرویس چت از طریق emitToUser پیام تازه را به گیرنده
  * می‌رساند؛ اگر WS در دسترس نباشد (مثلاً پلاگین خاموش) فراخوانی no-op است —
  * چت همچنان از مسیر REST + refetch کلاینت کار می‌کند (تنزل تدریجی).
+ *
+ * + خروج форس کاربر (لاگ‌اوت/غیرفعال‌سازی ادمین): قطع سوکت‌هایش + خبر به
+ *   presence از طریق callback ثبت‌شده — بدون DI تا چرخه ماژول نشود.
  */
 
 type ServerLike = {
   to: (room: string) => { emit: (event: string, payload: unknown) => void };
+  in: (room: string) => { disconnectSockets: (close?: boolean) => void };
   /** ساختار socket.io برای بررسی حضور آنلاین — اختیاری چون نمونه تزئین‌شده است */
   sockets?: { adapter?: { rooms?: Map<string, Set<unknown>> } };
 };
@@ -48,4 +52,31 @@ export function isUserOnline(userId: string): boolean {
   } catch {
     return false;
   }
+}
+
+// ─── خروج فوری کاربر (بدون DI — برای لاگ‌اوت/ادمین) ────────────────────────
+
+type DepartHandler = (userId: string) => void;
+const departHandlers = new Set<DepartHandler>();
+
+/** main.ts این را ثبت می‌کند تا presence.markDeparted بدون چرخه ماژول صدا شود */
+export function onUserDepart(handler: DepartHandler): void {
+  departHandlers.add(handler);
+}
+
+/** خروج فوری — سوکت‌های کاربر قطع + handlerهای حضور خبر می‌گیرند */
+export function forceUserDeparture(userId: string): void {
+  if (!userId) return;
+  try {
+    io?.in(`user:${userId}`).disconnectSockets(true);
+  } catch {
+    /* سوکت نیست — handlerها کافی‌اند */
+  }
+  departHandlers.forEach((h) => {
+    try {
+      h(userId);
+    } catch {
+      /* هر handler مستقل */
+    }
+  });
 }

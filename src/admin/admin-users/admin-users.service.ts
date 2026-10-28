@@ -5,7 +5,8 @@ import { CacheService } from '../../common/cache/cache.module';
 import { AppError } from '../../common/errors/app-error';
 import { WalletService } from '../../wallet/wallet.service';
 import { VerificationService } from '../../verification/verification.service';
-import { PresenceService, ONLINE_WINDOW_MS } from '../../presence/presence.service';
+import { forceUserDeparture } from '../../chat/io-holder';
+import { PresenceService } from '../../presence/presence.service';
 import type {
   CreditWalletDto,
   GetUserListDto,
@@ -74,29 +75,20 @@ export class AdminUsersService {
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? 20));
     const s = dto.search?.trim();
 
-    // پنجره حضور — فیلتر «آنلاین» و نشان ردیف‌ها هر دو با همین مرز سنجیده می‌شوند
-    const onlineSince = new Date(Date.now() - ONLINE_WINDOW_MS);
-
-    // «آفلاین» = متممِ آنلاین‌ها — روی مونگو، فیلتر null پرایسما فقط null صریح
-    // را می‌گیرد نه فیلد غایب (رفتار سندیش)؛ پس شناسه‌های آنلاین را می‌گیریم و
-    // notIn می‌زنیم — فهرست آنلاین‌ها همیشه کوچک است (پنجره ۹۰ ثانیه).
-    let onlineIds: string[] | null = null;
-    if (dto.online === false) {
-      onlineIds = (
-        await this.prisma.user.findMany({
-          where: { lastSeenAt: { gt: onlineSince } },
-          select: { id: true },
-        })
-      ).map((u) => u.id);
-    }
+    // حضور واقعی — خروج‌های صریح (بستن صفحه/لاگ‌اوت/قطع سوکت) هم لحظه‌ای
+    // کم می‌شوند؛ فهرست آنلاین‌ها همیشه کوچک است (پنجره ۹۰ ثانیه).
+    // مونگو: فیلتر null پرایسما فیلد غایب را نمی‌گیرد → notIn/in با همین
+    // شناسه‌ها هم «آنلاین» و هم «آفلاین» را دقیق می‌سازد.
+    const onlineIds = await this.presence.onlineIds();
+    const onlineSet = new Set(onlineIds);
 
     const where: Prisma.UserWhereInput = {
       ...(dto.role ? { role: dto.role } : {}),
       ...(dto.active !== undefined ? { isActive: dto.active } : {}),
       ...(dto.verified !== undefined ? { isVerified: dto.verified } : {}),
       ...(dto.seller !== undefined ? { isSeller: dto.seller } : {}),
-      ...(dto.online === true ? { lastSeenAt: { gt: onlineSince } } : {}),
-      ...(onlineIds ? { id: { notIn: onlineIds } } : {}),
+      ...(dto.online === true ? { id: { in: onlineIds } } : {}),
+      ...(dto.online === false ? { id: { notIn: onlineIds } } : {}),
       ...(s
         ? {
             OR: [
@@ -109,7 +101,7 @@ export class AdminUsersService {
         : {}),
     };
 
-    const [total, rows, onlineCount] = await Promise.all([
+    const [total, rows] = await Promise.all([
       this.prisma.user.count({ where }),
       this.prisma.user.findMany({
         where,
@@ -117,8 +109,6 @@ export class AdminUsersService {
         skip: (page - 1) * perPage,
         take: perPage,
       }),
-      // شمار آنلاین‌ها همیشه سرِ پاسخ — مستقل از فیلتر جاری
-      this.prisma.user.count({ where: { lastSeenAt: { gt: onlineSince } } }),
     ]);
 
     // شمارنده‌های هر ردیف — گروهی (نه به‌ازای هر ردیف)
@@ -143,8 +133,8 @@ export class AdminUsersService {
       page,
       perPage,
       pageCount: Math.max(1, Math.ceil(total / perPage)),
-      /** شمار کاربران آنلاین (پنجره ۹۰s) — نمایش سرصفحه جدول */
-      onlineCount,
+      /** شمار کاربران آنلاین (حضور واقعی — بیکن خروج/قطع سوکت لحظه‌ای) */
+      onlineCount: onlineIds.length,
       items: rows.map<AdminUserRow>((u) => ({
         id: u.id,
         phone: u.phone,
@@ -165,9 +155,8 @@ export class AdminUsersService {
         request_count: requestMap.get(u.id) ?? 0,
         verification: u.isVerified ? 'verified' : pendingSet.has(u.id) ? 'pending' : 'none',
         last_login_at: u.lastLoginAt,
-        // آنلاین از DB — پنجره ۹۰s هر دو منبع (حافظه/DB) را پوشش می‌دهد چون
-        // نوشتن DB حداکثر ۳۰s عقب است و نبض کلاینت ۴۵s است
-        online: Boolean(u.lastSeenAt && Date.now() - u.lastSeenAt.getTime() < ONLINE_WINDOW_MS),
+        // آنلاین از حضور واقعی — خروج صریح (سوکت/بیکن) هم همین‌جا می‌نشیند
+        online: onlineSet.has(u.id),
         last_seen_at: u.lastSeenAt,
         created_at: u.createdAt,
       })),
@@ -277,6 +266,8 @@ export class AdminUsersService {
         where: { userId: dto.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      // حضور: کاربر غیرفعال همان لحظه آفلاین و سوکت‌هایش قطع شود
+      forceUserDeparture(dto.id);
     }
 
     // لیست‌های عمومی نام/محقِ کاربر را join می‌کنند — بیات کردن

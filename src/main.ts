@@ -16,7 +16,7 @@ import { PresenceModule } from './presence/presence.module';
 import { PresenceService } from './presence/presence.service';
 import { env, isProd, storage } from './common/config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { setIo } from './chat/io-holder';
+import { setIo, onUserDepart } from './chat/io-holder';
 
 const API_PREFIX = 'api/v1';
 
@@ -122,6 +122,13 @@ async function bootstrap(): Promise<void> {
     const chat = app.select(ChatModule).get(ChatService, { strict: false });
     const presence = app.select(PresenceModule).get(PresenceService, { strict: false });
     const io = fastify.io;
+
+    // خروج فوری (لاگ‌اوت/غیرفعال‌سازی) → حضور همان لحظه آفلاین — بدون DI
+    onUserDepart((uid) => presence?.markDeparted(uid));
+
+    // شمارنده اتصال per-user — چند تب = چند اتصال؛ آفلاین فقط وقتی همه بروند
+    const wsConns = new Map<string, number>();
+
     io.on('connection', async (socket) => {
       const token =
         (socket.handshake.auth?.token as string | undefined) ??
@@ -136,11 +143,19 @@ async function bootstrap(): Promise<void> {
       }
       socket.data.userId = userId;
       await socket.join(`user:${userId}`);
-      // حضور: اتصال WS خودش یک نبض است — و قطع آن هم (grace ۹۰s باقی می‌ماند
-      // تا ناوبری بین صفحات کاربر را ناگهانی آفلاین نکند)
+      // حضور: اتصال WS خودش یک نبض است (خروج قبلی را هم پاک می‌کند)
       presence?.touch(userId);
+      wsConns.set(userId, (wsConns.get(userId) ?? 0) + 1);
       socket.on('disconnect', () => {
-        presence?.touch(userId);
+        const remaining = (wsConns.get(userId) ?? 1) - 1;
+        if (remaining <= 0) {
+          // آخرین سوکت رفت — صفحه بسته/رفرش شده یا شبکه قطع: خروج فوری.
+          // (رفرش: صفحه جدید چند ثانیه بعد دوباره touch می‌کند — برمی‌گردد)
+          wsConns.delete(userId);
+          presence?.markDeparted(userId);
+        } else {
+          wsConns.set(userId, remaining); // تب دیگری هنوز باز است
+        }
       });
     });
   }

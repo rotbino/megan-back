@@ -61,6 +61,12 @@ export class ChatController {
 
   // ─── پیام‌های پشتیبانی (ادمین → کاربر؛ یک‌طرفه) ───────────────────────────
 
+  @Post('unreadCount')
+  @ApiOperation({ summary: 'بج پیام‌های خوانده‌نشده — مجموع چت + پشتیبانی' })
+  async unreadCount(@CurrentUser() user: AuthUser) {
+    return ok(await this.chat.getUnreadCount(user));
+  }
+
   @Post('getMyAdminMessages')
   @ApiOperation({ summary: 'پیام‌های پشتیبانی ایمچ من — ۵۰ پیام آخر + خوانده‌نشده' })
   async getMyAdminMessages(@CurrentUser() user: AuthUser) {
