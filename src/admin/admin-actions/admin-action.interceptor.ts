@@ -27,6 +27,7 @@ const TARGET_ID_KEYS = ['productId', 'userId', 'orderId', 'adminId', 'categoryId
 const TARGET_TYPE_BY_SECTION: Record<string, string> = {
   products: 'product',
   users: 'user',
+  messages: 'user',
   'buy-requests': 'buy_request',
   wallet: 'charge_order',
   'base-data': 'base_data',

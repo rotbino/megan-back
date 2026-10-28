@@ -38,6 +38,22 @@ export interface ThreadDto {
   updatedAt: Date;
 }
 
+/** پیام پشتیبانی (ادمین → کاربر) — یک‌طرفه؛ camelCase عین MessageDto */
+export interface AdminMessageDto {
+  id: string;
+  text: string;
+  adminUsername: string;
+  readAt: Date | null;
+  createdAt: Date;
+}
+
+/** صندوق پیام‌های پشتیبانی من — items صعودی (قدیمی → جدید) */
+export interface AdminInboxDto {
+  items: AdminMessageDto[];
+  total: number;
+  unread: number;
+}
+
 /**
  * ─── چت و پیام‌ها (B8) ───────────────────────────────────────────────────────
  * مکالمه خریدار ↔ فروشنده روی یک آگهی (عین باسکول). REST برای همه عملیات +
@@ -263,6 +279,35 @@ export class ChatService {
     return this.toThreadDto(thread, user.id, unreadCount);
   }
 
+  // ─── پیام‌های پشتیبانی (ادمین → کاربر) ────────────────────────────────────
+
+  /** POST /chat/getMyAdminMessages — آخرین پیام‌های پشتیبانی من (صعودی) + خوانده‌نشده */
+  async getMyAdminMessages(user: AuthUser): Promise<AdminInboxDto> {
+    const [total, unread, rows] = await Promise.all([
+      this.prisma.adminMessage.count({ where: { userId: user.id } }),
+      this.prisma.adminMessage.count({ where: { userId: user.id, readAt: null } }),
+      this.prisma.adminMessage.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 50, // صندوق ورودی اطلاع‌رسانی است — ۵۰ پیام آخر کافی است
+      }),
+    ]);
+    return {
+      items: rows.reverse().map((m) => this.toAdminMessageDto(m)),
+      total,
+      unread,
+    };
+  }
+
+  /** POST /chat/markMyAdminMessagesRead — باز کردن مکالمه پشتیبانی = خواندن */
+  async markMyAdminMessagesRead(user: AuthUser): Promise<{ read: number }> {
+    const r = await this.prisma.adminMessage.updateMany({
+      where: { userId: user.id, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { read: r.count };
+  }
+
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
   private toMessageDto(m: {
@@ -278,6 +323,22 @@ export class ChatService {
       threadId: m.threadId,
       senderId: m.senderId,
       text: m.text,
+      readAt: m.readAt,
+      createdAt: m.createdAt,
+    };
+  }
+
+  private toAdminMessageDto(m: {
+    id: string;
+    text: string;
+    adminUsername: string;
+    readAt: Date | null;
+    createdAt: Date;
+  }): AdminMessageDto {
+    return {
+      id: m.id,
+      text: m.text,
+      adminUsername: m.adminUsername,
       readAt: m.readAt,
       createdAt: m.createdAt,
     };

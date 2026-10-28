@@ -79,6 +79,8 @@ model User {
   callsReceived CallLog[]      @relation("CallCallee")
   pushSubscriptions  PushSubscription[] @relation("PushOwner")
   walletAdjustments  WalletAdjustment[] @relation("WalletAdjustmentOwner")
+  /// پیام‌های مستقیم پشتیبانی (ادمین → کاربر) — یک‌طرفه با خوانده‌شدن
+  adminMessages   AdminMessage[] @relation("AdminMessageOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -593,6 +595,29 @@ model ChatMessage {
 
   @@index([threadId, createdAt(sort: Desc)])
   @@index([threadId, readAt])
+}
+
+/// پیام مستقیم پشتیبانی (ادمین → کاربر) — یک‌طرفه برای اطلاع‌رسانی/حذف نرم
+/// اعلان‌ها. هر ردیف = یک پیام برای «یک» کاربر؛ ارسال گروهی/همه ردیف‌های
+/// جدا می‌سازد تا خوانده‌شدن per-user دقیق بماند (الگوی denorm باسکول).
+/// user-side: مکالمه سنجاق‌شده «پشتیبانی ایمچ» در /panel/messages.
+model AdminMessage {
+  id     String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId String  @map("user_id") @db.ObjectId
+  user   User    @relation("AdminMessageOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// نام کاربری ادمین فرستنده (نمایشی) — AdminUser جداست؛ username کافی است
+  adminUsername String @map("admin_username")
+  /// متن پیام — ساده در v1 (بدون فایل/عنوان)
+  text    String
+
+  /// null = خوانده‌نشده — با باز کردن مکالمه پشتیبانی توسط کاربر پر می‌شود
+  readAt  DateTime? @map("read_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([readAt, createdAt(sort: Desc)])
 }
 
 /// گزارش تماس کاربر-به-کاربر (A6).

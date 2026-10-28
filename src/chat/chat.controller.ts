@@ -58,4 +58,18 @@ export class ChatController {
   async getThread(@CurrentUser() user: AuthUser, @Body() dto: GetThreadDto) {
     return ok(await this.chat.getThread(user, dto.threadId));
   }
+
+  // ─── پیام‌های پشتیبانی (ادمین → کاربر؛ یک‌طرفه) ───────────────────────────
+
+  @Post('getMyAdminMessages')
+  @ApiOperation({ summary: 'پیام‌های پشتیبانی ایمچ من — ۵۰ پیام آخر + خوانده‌نشده' })
+  async getMyAdminMessages(@CurrentUser() user: AuthUser) {
+    return ok(await this.chat.getMyAdminMessages(user));
+  }
+
+  @Post('markMyAdminMessagesRead')
+  @ApiOperation({ summary: 'علامت خوانده‌شدن همه پیام‌های پشتیبانی' })
+  async markMyAdminMessagesRead(@CurrentUser() user: AuthUser) {
+    return ok(await this.chat.markMyAdminMessagesRead(user));
+  }
 }

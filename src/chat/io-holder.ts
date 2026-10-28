@@ -27,6 +27,8 @@ export const CHAT_EVENTS = {
   NEW_MESSAGE: 'chat:newMessage',
   /** تأیید خواندن پیام‌های ارسالی فرستنده */
   READ: 'chat:read',
+  /** پیام مستقیم پشتیبانی (ادمین → کاربر) برای گیرنده */
+  ADMIN_MESSAGE: 'chat:adminMessage',
 } as const;
 
 /** ارسال رویداد به اتاق شخصی کاربر — بی‌خطر وقتی io نیست */

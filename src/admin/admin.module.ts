@@ -12,6 +12,7 @@ import { AdminWalletModule } from './admin-wallet/admin-wallet.module';
 import { AdminAdminsModule } from './admin-admins/admin-admins.module';
 import { AdminUploadsModule } from './admin-uploads/admin-uploads.module';
 import { AdminChatsModule } from './admin-chats/admin-chats.module';
+import { AdminMessagesModule } from './admin-messages/admin-messages.module';
 import { AdminCallsModule } from './admin-calls/admin-calls.module';
 
 /**
@@ -36,6 +37,7 @@ import { AdminCallsModule } from './admin-calls/admin-calls.module';
     AdminUploadsModule,
     AdminChatsModule,
     AdminCallsModule,
+    AdminMessagesModule,
   ],
   providers: [
     // ثبت خودکار لاگ عملیات ادمین — سراسری ولی فقط برای درخواست‌های ادمین
