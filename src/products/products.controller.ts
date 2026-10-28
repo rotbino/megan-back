@@ -94,14 +94,14 @@ export class ProductsController {
     return ok(await this.products.getSeller(dto.userName));
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('getSellerPhone')
   @ApiOperation({
     summary:
-      'شماره تماس فروشنده آگهی — عمومی؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
+      'شماره تماس فروشنده آگهی — نیاز به ورود (مدل lead-gen)؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
   })
-  async getSellerPhone(@MaybeCurrentUser() user: AuthUser | null, @Body() dto: GetProductByIdDto) {
+  async getSellerPhone(@CurrentUser() user: AuthUser, @Body() dto: GetProductByIdDto) {
     return ok(await this.products.getSellerPhone(user, dto.id));
   }
 
