@@ -46,6 +46,8 @@ export interface MyBuyRequestDto {
   goal: 'price_and_buy' | 'price_only';
   hasHistory: boolean;
   createdAt: Date;
+  /** دلایل رد — فقط رد شده (باگ ۲۸-۱۰: به پنل کاربر نمی‌رسید) */
+  rejectionReasons: string[];
 }
 
 /** خریدار پیشنهادی برای فروشنده — منطبق تایپ SuggestedBuyer فرانت */
@@ -299,6 +301,7 @@ export class BuyRequestsService {
           goal: (r.goal as MyBuyRequestDto['goal']) ?? 'price_and_buy',
           hasHistory: r.hasHistory,
           createdAt: r.createdAt,
+          rejectionReasons: r.rejectionReason ? [r.rejectionReason] : [],
         }),
       ),
       counts: countMap,
