@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { UpdateProfileDto } from './dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: CacheService,
+  ) {}
 
   /** نام استان/شهر از id عددی باسکول — کوئری‌های ایندکس‌دار سبک */
   private async locationNames(provinceId: number | null, cityId: number | null) {
@@ -138,6 +142,12 @@ export class UsersService {
     }
 
     await this.prisma.user.update({ where: { id: userId }, data: update });
+    // کش پروفایل عمومی فروشنده (getSeller) بشکند تا ویرایش همان لحظه دیده شود
+    const updated = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { userName: true },
+    });
+    if (updated?.userName) this.cache.invalidateTag(`seller:${updated.userName.trim()}`);
     return this.getProfile(userId);
   }
 }

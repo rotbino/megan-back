@@ -35,6 +35,8 @@ export interface ThreadDto {
     firstName: string;
     lastName: string;
     userName: string;
+    /** آواتار طرف مقابل — در هدر مکالمه و حباب‌های پیام نمایش داده می‌شود */
+    avatarUrl: string | null;
   };
   lastMessage: { text: string; at: Date; senderId: string } | null;
   unreadCount: number;
@@ -123,8 +125,8 @@ export class ChatService {
 
     const threadInclude = {
       product: { select: { productName: true } },
-      seller: { select: { id: true, firstName: true, lastName: true, userName: true } },
-      buyer: { select: { id: true, firstName: true, lastName: true, userName: true } },
+      seller: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
+      buyer: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
       messages: { orderBy: { createdAt: 'desc' as const }, take: 1 },
     };
 
@@ -287,8 +289,8 @@ export class ChatService {
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
       take: 100,
       include: {
-        seller: { select: { id: true, firstName: true, lastName: true, userName: true } },
-        buyer: { select: { id: true, firstName: true, lastName: true, userName: true } },
+        seller: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
+        buyer: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
         product: { select: { id: true, productName: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
@@ -314,8 +316,8 @@ export class ChatService {
     const thread = await this.prisma.chatThread.findUnique({
       where: { id: threadId },
       include: {
-        seller: { select: { id: true, firstName: true, lastName: true, userName: true } },
-        buyer: { select: { id: true, firstName: true, lastName: true, userName: true } },
+        seller: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
+        buyer: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
         product: { select: { id: true, productName: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
@@ -429,8 +431,8 @@ export class ChatService {
       buyerId: string;
       updatedAt: Date;
       product: { productName: string } | null;
-      seller: { id: string; firstName: string; lastName: string; userName: string };
-      buyer: { id: string; firstName: string; lastName: string; userName: string };
+      seller: { id: string; firstName: string; lastName: string; userName: string; avatarUrl: string | null };
+      buyer: { id: string; firstName: string; lastName: string; userName: string; avatarUrl: string | null };
       messages: Array<{ text: string; createdAt: Date; senderId: string }>;
     },
     myId: string,
@@ -450,6 +452,7 @@ export class ChatService {
         firstName: counterpart.firstName,
         lastName: counterpart.lastName,
         userName: counterpart.userName,
+        avatarUrl: counterpart.avatarUrl ?? null,
       },
       lastMessage: last ? { text: last.text, at: last.createdAt, senderId: last.senderId } : null,
       unreadCount,

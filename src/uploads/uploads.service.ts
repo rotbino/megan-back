@@ -599,6 +599,14 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       if (model === 'Product' && modelId) {
         this.cache.invalidateTag(`product:${modelId}`);
       }
+      if (model === 'User' && modelId) {
+        // آواتار/گالری/گواهی کاربر — کش پروفایل عمومی فروشنده هم بشکند
+        const owner = await this.prisma.user.findUnique({
+          where: { id: modelId },
+          select: { userName: true },
+        });
+        if (owner?.userName) this.cache.invalidateTag(`seller:${owner.userName.trim()}`);
+      }
       this.cache.invalidateTag('products');
     } catch {
       /* غیرمسدودکننده */
