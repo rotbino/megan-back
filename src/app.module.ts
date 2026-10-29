@@ -15,6 +15,7 @@ import { SavedModule } from './saved/saved.module';
 import { ChatModule } from './chat/chat.module';
 import { PresenceModule } from './presence/presence.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { SurveyModule } from './survey/survey.module';
 import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PushModule } from './push/push.module';
@@ -40,6 +41,7 @@ import { AdminModule } from './admin/admin.module';
     ChatModule,
     PresenceModule,
     ReviewsModule,
+    SurveyModule,
     CallsModule,
     WalletModule,
     PushModule,

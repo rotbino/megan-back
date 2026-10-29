@@ -7,7 +7,7 @@ export interface ReviewRowDto {
   id: string;
   rating: number;
   text: string;
-  author: { userName: string; firstName: string; lastName: string };
+  author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -64,12 +64,12 @@ export class ReviewsService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * perPage,
         take: perPage,
-        include: { author: { select: { userName: true, firstName: true, lastName: true } } },
+        include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
       }),
       viewerId
         ? this.prisma.sellerReview.findUnique({
             where: { authorId_sellerId: { authorId: viewerId, sellerId: seller.id } },
-            include: { author: { select: { userName: true, firstName: true, lastName: true } } },
+            include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
           })
         : null,
     ]);
@@ -112,7 +112,7 @@ export class ReviewsService {
       where: { authorId_sellerId: { authorId, sellerId: seller.id } },
       create: { sellerId: seller.id, authorId, rating: dto.rating, text },
       update: { rating: dto.rating, text },
-      include: { author: { select: { userName: true, firstName: true, lastName: true } } },
+      include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
     // خلاصه امتیاز سرصفحه پروفایل از getSeller کش شده — همان لحظه تازه شود
     this.cache.invalidateTag(`seller:${dto.userName.trim()}`);
@@ -125,7 +125,7 @@ export class ReviewsService {
     text: string;
     createdAt: Date;
     updatedAt: Date;
-    author: { userName: string; firstName: string; lastName: string };
+    author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null };
   }): ReviewRowDto {
     return {
       id: r.id,

@@ -14,6 +14,8 @@ import { AdminUploadsModule } from './admin-uploads/admin-uploads.module';
 import { AdminChatsModule } from './admin-chats/admin-chats.module';
 import { AdminMessagesModule } from './admin-messages/admin-messages.module';
 import { AdminCallsModule } from './admin-calls/admin-calls.module';
+import { AdminSurveysModule } from './admin-surveys/admin-surveys.module';
+import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
 
 /**
  * ریشه پنل ادمین — تمام کد ادمین بک‌اند فقط در همین فولدر زندگی می‌کند
@@ -38,6 +40,8 @@ import { AdminCallsModule } from './admin-calls/admin-calls.module';
     AdminChatsModule,
     AdminCallsModule,
     AdminMessagesModule,
+    AdminSurveysModule,
+    AdminReviewsModule,
   ],
   providers: [
     // ثبت خودکار لاگ عملیات ادمین — سراسری ولی فقط برای درخواست‌های ادمین

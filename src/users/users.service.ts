@@ -25,9 +25,24 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw AppError.notFound('کاربر یافت نشد.');
 
-    const productCount = await this.prisma.product.count({
-      where: { userId, status: { in: ['confirmed', 'pending'] } },
-    });
+    const [productCount, gallery, certificates] = await Promise.all([
+      this.prisma.product.count({
+        where: { userId, status: { in: ['confirmed', 'pending'] } },
+      }),
+      // تصاویر مربوطه/گواهی‌ها — همان اسلات‌هایی که فرم ویرایش پروفایل آپلود می‌کند
+      this.prisma.file.findMany({
+        where: { relatedModel: 'User', relatedId: userId, fieldKey: 'gallery' },
+        orderBy: { createdAt: 'asc' },
+        take: 12,
+        select: { id: true, url: true, thumbUrl: true },
+      }),
+      this.prisma.file.findMany({
+        where: { relatedModel: 'User', relatedId: userId, fieldKey: 'certificate' },
+        orderBy: { createdAt: 'asc' },
+        take: 8,
+        select: { id: true, url: true, thumbUrl: true },
+      }),
+    ]);
     const { provinceName, cityName } = await this.locationNames(user.provinceId, user.cityId);
 
     return {
@@ -56,6 +71,9 @@ export class UsersService {
         updated_at: user.updatedAt,
       },
       profile: user.profile ?? {},
+      // تصاویر مربوطه + گواهی‌ها — برای فرم ویرایش و امتیاز کامل بودن پروفایل
+      gallery: gallery.map((f) => ({ id: f.id, url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
+      certificates: certificates.map((f) => ({ id: f.id, url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
     };
   }
 

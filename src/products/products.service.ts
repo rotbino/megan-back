@@ -506,12 +506,25 @@ export class ProductsService {
       })
     ).map((t) => t.id);
 
-    const [gallery, names, avatarFile, locNames, reviewAgg, chatStats] = await Promise.all([
+    const [gallery, names, avatarFile, userGallery, userCertificates, locNames, reviewAgg, chatStats] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
       this.prisma.file.findFirst({
         where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'avatar' },
         orderBy: { createdAt: 'desc' },
+        select: { url: true, thumbUrl: true },
+      }),
+      // گالری/گواهی‌های کسب‌وکار فروشنده (تصاویر مربوطه — عین باسکول)
+      this.prisma.file.findMany({
+        where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'gallery' },
+        orderBy: { createdAt: 'asc' },
+        take: 12,
+        select: { url: true, thumbUrl: true },
+      }),
+      this.prisma.file.findMany({
+        where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'certificate' },
+        orderBy: { createdAt: 'asc' },
+        take: 8,
         select: { url: true, thumbUrl: true },
       }),
       this.locations.getNames(
@@ -558,6 +571,13 @@ export class ProductsService {
         isVerified: seller.isVerified,
         businessDesc: seller.businessDesc ?? null,
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
+        // ── فیلدهای پروفایل کسب‌وکار (embedded myuser_profiles باسکول) ──
+        address: (seller.profile as { address?: string } | null)?.address ?? null,
+        publicPhone: (seller.profile as { publicPhone?: string } | null)?.publicPhone ?? null,
+        isCompany: Boolean((seller.profile as { isCompany?: boolean } | null)?.isCompany),
+        companyName: (seller.profile as { companyName?: string } | null)?.companyName ?? null,
+        gallery: userGallery.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
+        certificates: userCertificates.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
         createdAt: fmtDate(seller.createdAt),
         // ── غنی‌سازی پروفایل (باسکول‌گونه) ──
         online: await this.presence.isOnline(seller.id),

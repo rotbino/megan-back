@@ -94,6 +94,8 @@ model User {
   reviewsReceived SellerReview[] @relation("ReviewSeller")
   /// نظراتی که این کاربر درباره فروشندگان نوشته
   reviewsWritten SellerReview[] @relation("ReviewAuthor")
+  /// پاسخ نظرسنجی عملکرد ایمچ (یکی؛ userId یکتا)
+  surveyResponse  SurveyResponse? @relation("SurveyOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -691,4 +693,24 @@ model SellerReview {
 
   @@unique([authorId, sellerId])
   @@index([sellerId, createdAt(sort: Desc)])
+}
+
+/// نظرسنجی عملکرد ایمچ (عین نظرسنجی باسکول): امتیاز ۵گانه + متن دلخواه.
+/// هر کاربر حداکثر یک پاسخ (userId یکتا) — ثبت مجدد یعنی ویرایش نظر خودش.
+/// پنل ادمین فهرست/آمار/حذف دارد (ماژول admin-surveys).
+model SurveyResponse {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  user   User   @relation("SurveyOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique @map("user_id") @db.ObjectId
+
+  /// excellent | good | average | bad | very_bad (۵گانه نظرسنجی)
+  score String
+  /// متن دلخواه — حداکثر ۱۰۰۰ نویسه
+  note  String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([score])
 }
