@@ -13,6 +13,7 @@ import {
   GetCampaignsDto,
   ReviewAdminPackageOrderDto,
   SetCampaignDiscountDto,
+  SetCampaignPurchaseCountDto,
   UpsertCampaignDto,
   UpsertPlanDto,
 } from './dto';
@@ -102,6 +103,15 @@ export class AdminPackagesController {
     return ok(
       await this.packages.setCampaignDiscount(dto),
       'درصد تخفیف جاری کمپین به‌روزرسانی شد.',
+    );
+  }
+
+  @Post('setCampaignPurchaseCount')
+  @ApiOperation({ summary: 'تغییر سریع شمار دستی/نمایشی خریداران (null = فقط واقعی)' })
+  async setCampaignPurchaseCount(@Body() dto: SetCampaignPurchaseCountDto) {
+    return ok(
+      await this.packages.setCampaignPurchaseCount(dto),
+      'شمار خریداران کمپین به‌روزرسانی شد.',
     );
   }
 }

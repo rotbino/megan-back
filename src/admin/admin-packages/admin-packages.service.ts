@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AppError } from '../../common/errors/app-error';
-import { PackagesService, readTiers, type CampaignTier } from '../../packages/packages.service';
+import {
+  PackagesService,
+  readTiers,
+  effectivePurchaseCount,
+  type CampaignTier,
+} from '../../packages/packages.service';
 import {
   GetAdminPackageOrdersDto,
   ReviewAdminPackageOrderDto,
@@ -12,6 +17,7 @@ import {
   UpsertCampaignDto,
   DeleteCampaignDto,
   SetCampaignDiscountDto,
+  SetCampaignPurchaseCountDto,
 } from './dto';
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
@@ -149,7 +155,9 @@ export class AdminPackagesService {
 
   // ─── مدیریت کمپین‌ها (CRUD + درصد جاری) ──────────────────────────────────
 
-  /** POST /admin/packages/getCampaigns — همه کمپین‌ها + وضعیت/آمار جاری */
+  /** POST /admin/packages/getCampaigns — همه کمپین‌ها + وضعیت/آمار جاری.
+   *  گزارش پله جاری شامل جاهای باقی‌مانده است تا ادمین دقیقاً همان چیزی را
+   *  ببیند که کاربر در صفحه بسته‌ها می‌بیند («فقط N نفر جا داره»). */
   async getCampaigns(dto: GetCampaignsDto) {
     const where = { ...(dto.status ? { isActive: dto.status === 'active' } : {}) };
     const campaigns = await this.prisma.salesCampaign.findMany({
@@ -162,6 +170,7 @@ export class AdminPackagesService {
         const expired = c.endsAt != null && c.endsAt <= now;
         const running = c.isActive && c.startsAt <= now && !expired;
         const tiers = readTiers(c.tiers);
+        const effectiveCount = effectivePurchaseCount(c.purchaseCount, c.manualPurchaseCount);
         return {
           id: c.id,
           title: c.title,
@@ -169,6 +178,8 @@ export class AdminPackagesService {
           type: c.type === 'quantity' ? 'quantity' : 'time',
           discountPercent: c.discountPercent,
           manualDiscountPercent: c.manualDiscountPercent,
+          finalPercent: c.finalPercent ?? null,
+          manualPurchaseCount: c.manualPurchaseCount ?? null,
           startsAt: c.startsAt,
           endsAt: c.endsAt,
           isActive: c.isActive,
@@ -178,7 +189,12 @@ export class AdminPackagesService {
           currentPercent: running
             ? this.packages.currentPercent(c, c.purchaseCount)
             : 0,
+          /** شمار واقعی خریدهای ثبت‌شده */
           purchaseCount: c.purchaseCount,
+          /** شمار مؤثر = بیشینهٔ واقعی/دستی — عدد نمایشی صفحه بسته‌ها */
+          effectiveCount,
+          /** گزارش پله جاری (تعدادی) — عین چیزی که کاربر می‌بیند */
+          currentTier: PackagesService.tierReport(tiers, c.finalPercent ?? null, effectiveCount),
           tiers,
           createdAt: c.createdAt,
         };
@@ -235,6 +251,14 @@ export class AdminPackagesService {
       dto.manualDiscountPercent == null
         ? null
         : Math.max(0, Math.min(100, Math.round(dto.manualDiscountPercent)));
+    const finalPercent =
+      dto.finalPercent == null || dto.finalPercent <= 0
+        ? null
+        : Math.max(0, Math.min(100, Math.round(dto.finalPercent)));
+    const manualPurchaseCount =
+      dto.manualPurchaseCount == null || dto.manualPurchaseCount < 0
+        ? null
+        : Math.round(dto.manualPurchaseCount);
 
     const data = {
       title,
@@ -242,6 +266,8 @@ export class AdminPackagesService {
       type,
       discountPercent: percent,
       manualDiscountPercent: manual,
+      finalPercent,
+      manualPurchaseCount,
       startsAt,
       endsAt,
       isActive: dto.isActive,
@@ -285,6 +311,35 @@ export class AdminPackagesService {
       id: updated.id,
       manualDiscountPercent: updated.manualDiscountPercent,
       currentPercent: this.packages.currentPercent(updated, updated.purchaseCount),
+    };
+  }
+
+  /**
+   * POST /admin/packages/setCampaignPurchaseCount — تغییر سریع شمار دستی/نمایشی
+   * خریداران (خواسته مالک ۳۱-۱۰: «بتونم الکی بگم ۱۹ نفر خریدن تا بنویسه
+   * تخفیف ۵۰٪ فقط برای ۲ نفر دیگر»). manual=null یعنی فقط شمار واقعی ملاک باشد.
+   */
+  async setCampaignPurchaseCount(dto: SetCampaignPurchaseCountDto) {
+    if (!OID_RE.test(dto.id)) throw AppError.notFound('کمپین یافت نشد.');
+    const c = await this.prisma.salesCampaign.findUnique({ where: { id: dto.id } });
+    if (!c) throw AppError.notFound('کمپین یافت نشد.');
+    const manual =
+      dto.manualPurchaseCount == null || dto.manualPurchaseCount < 0
+        ? null
+        : Math.round(dto.manualPurchaseCount);
+    const updated = await this.prisma.salesCampaign.update({
+      where: { id: dto.id },
+      data: { manualPurchaseCount: manual },
+    });
+    const effective = effectivePurchaseCount(updated.purchaseCount, updated.manualPurchaseCount);
+    const tiers = readTiers(updated.tiers);
+    return {
+      id: updated.id,
+      manualPurchaseCount: updated.manualPurchaseCount,
+      purchaseCount: updated.purchaseCount,
+      effectiveCount: effective,
+      currentPercent: this.packages.currentPercent(updated, updated.purchaseCount),
+      currentTier: PackagesService.tierReport(tiers, updated.finalPercent ?? null, effective),
     };
   }
 }

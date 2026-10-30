@@ -607,9 +607,15 @@ model Plan {
 /// کمپین فروش (خواسته مالک ۳۱-۱۰) — دو نوع:
 ///  • زمانی (time): درصد ثابت تا تاریخ پایان (مثلاً ۵۰٪ سالگرد فعالیت).
 ///  • تعدادی (quantity): پله‌ای بر اساس شمار خریداران — «۱۰ نفر اول ۷۰٪،
-///    ۳۰ نفر بعدی ۵۰٪، ۱۰۰ نفر بعدی ۳۰٪، تا پایان کمپین ۳۰٪». تخفیف جاری
-///    از purchaseCount محاسبه می‌شود؛ manualDiscountPercent برای دست‌کاری
-///    مستقیم ادمین (null = خودکار پله‌ای).
+///    ۳۰ نفر بعدی ۵۰٪، ۱۰۰ نفر بعدی ۳۰٪». تخفیف جاری از شمار مؤثر خریداران
+///    (بیشینهٔ purchaseCount و manualPurchaseCount) محاسبه می‌شود؛
+///    manualDiscountPercent برای دست‌کاری مستقیم ادمین (null = خودکار پله‌ای).
+///  • finalPercent (خواسته مالک ۳۱-۱۰): درصد عمومی که بعد از اتمام تعدادِ همهٔ
+///    پله‌های محدود شروع می‌شود و تا پایان کمپین معتبر می‌ماند — «بعد از نفر
+///    صدم ۳۰٪ تا پایان جشنواره».
+///  • manualPurchaseCount (خواسته مالک ۳۱-۱۰): شمار دستی/نمایشی خریداران —
+///    ادمین می‌تواند عدد را «الکی» بالا ببرد تا فوریت بسازد؛ مؤثر =
+///    max(واقعی، دستی).
 model SalesCampaign {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   title     String
@@ -621,6 +627,10 @@ model SalesCampaign {
   discountPercent Int @default(0)
   /// override دستی درصد جاری — null = محاسبه خودکار پله‌ای
   manualDiscountPercent Int? @map("manual_discount_percent")
+  /// درصد عمومی پس از اتمام پله‌های محدود — تا پایان کمپین (فقط تعدادی)
+  finalPercent Int? @map("final_percent")
+  /// شمار دستی/نمایشی خریداران — مؤثر = max(purchaseCount, این عدد)
+  manualPurchaseCount Int? @map("manual_purchase_count")
   startsAt  DateTime @default(now()) @map("starts_at")
   /// پایان کمپین — null یعنی بی‌پایان (تا غیرفعال شود)
   endsAt    DateTime? @map("ends_at")

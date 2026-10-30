@@ -187,6 +187,22 @@ export class UpsertCampaignDto {
   @Max(100)
   manualDiscountPercent?: number | null;
 
+  /** درصد عمومی پس از اتمام پله‌های محدود — تا پایان کمپین (خواسته مالک ۳۱-۱۰) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  finalPercent?: number | null;
+
+  /** شمار دستی/نمایشی خریداران — مؤثر = max(واقعی، دستی) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  manualPurchaseCount?: number | null;
+
   /** ISO — خالی = اکنون */
   @IsOptional()
   @IsString()
@@ -229,4 +245,20 @@ export class SetCampaignDiscountDto {
   @Min(0)
   @Max(100)
   manualDiscountPercent?: number | null;
+}
+
+/** POST /admin/packages/setCampaignPurchaseCount — تغییر سریع شمار دستی خریداران
+ *  (خواسته مالک ۳۱-۱۰: «الکی ست کنم چند نفر خریدن تا فوریت بسازم»). */
+export class SetCampaignPurchaseCountDto {
+  @IsString()
+  @IsNotEmpty()
+  id!: string;
+
+  /** null = فقط شمار واقعی خریدها ملاک باشد */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  manualPurchaseCount?: number | null;
 }

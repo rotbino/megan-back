@@ -92,6 +92,20 @@ export interface CampaignTier {
   percent: number;
 }
 
+/** شمار مؤثر خریداران — بیشینهٔ خرید واقعی و عدد دستی/نمایشی ادمین
+ *  (خواسته مالک ۳۱-۱۰: «بتونم الکی ست کنم چند نفر خریدن»). */
+export function effectivePurchaseCount(
+  real: number,
+  manual: number | null | undefined,
+): number {
+  return Math.max(real, manual ?? 0);
+}
+
+/** گیرهٔ درصد در بازهٔ ۰ تا ۱۰۰ */
+function clampPercent(v: number): number {
+  return Math.max(0, Math.min(100, Math.round(v)));
+}
+
 /** شکل امن خوانده‌شده tiers از Json */
 export function readTiers(raw: unknown): CampaignTier[] {
   if (!Array.isArray(raw)) return [];
@@ -150,11 +164,20 @@ export interface ActiveCampaignInfo {
   /** درصد جاری — در تعدادی از پله/override دستی، در زمانی همان discountPercent */
   discountPercent: number;
   endsAt: Date | null;
-  /** شمار خریدهای ثبت‌شده تاکنون */
+  /** شمار مؤثر خریداران (بیشینهٔ واقعی/دستی) — عددی که به کاربر نمایش داده می‌شود */
   purchaseCount: number;
-  /** پله جاری (فقط تعدادی) + برچسب انسانی مثل «۷ نفر از ۱۰ نفر اول» */
-  currentTier: { from: number; to: number | null; percent: number; boughtInTier: number } | null;
+  /** پله جاری (فقط تعدادی) + ظرفیت باقی‌مانده برای گزارش «فقط N نفر جا داره» */
+  currentTier: {
+    from: number;
+    to: number | null;
+    percent: number;
+    boughtInTier: number;
+    /** جاهای باقی‌مانده همین پله — null = بی‌پایان (تا پایان کمپین) */
+    spotsLeft: number | null;
+  } | null;
   tiers: CampaignTier[];
+  /** درصد عمومی پس از اتمام پله‌های محدود — تا پایان کمپین (خواسته مالک ۳۱-۱۰) */
+  finalPercent: number | null;
 }
 
 @Injectable()
@@ -215,19 +238,55 @@ export class PackagesService {
     return null;
   }
 
-  /** درصد تخفیف جاری کمپین — override دستی مقدم بر محاسبه پله‌ای */
+  /**
+   * گزارش پله جاری برای شمار مؤثر خریداران — شامل جاهای باقی‌مانده
+   * (خواسته مالک ۳۱-۱۰: «بنویسه ۹ نفر خریدن و تخفیف ۷۰٪ فقط یک نفر جا داره»).
+   * بعد از اتمام پله‌های محدود، اگر finalPercent تعریف شده باشد پلهٔ عمومی
+   * «تا پایان کمپین» سنتز می‌شود.
+   */
+  static tierReport(
+    tiers: CampaignTier[],
+    finalPercent: number | null,
+    count: number,
+  ): ActiveCampaignInfo['currentTier'] {
+    if (tiers.length === 0) return null;
+    let tier = PackagesService.tierFor(tiers, count + 1);
+    if (!tier && finalPercent != null) {
+      const lastTo = tiers[tiers.length - 1].to ?? 0;
+      tier = { from: lastTo + 1, to: null, percent: clampPercent(finalPercent) };
+    }
+    if (!tier) return null;
+    const boughtInTier = Math.max(0, count - (tier.from - 1));
+    const spotsLeft = tier.to == null ? null : Math.max(0, tier.to - count);
+    return { ...tier, boughtInTier, spotsLeft };
+  }
+
+  /** درصد تخفیف جاری کمپین — override دستی مقدم بر محاسبه پله‌ای.
+   *  شمار خریداران مؤثر = بیشینهٔ واقعی/دستی است تا فوریت دستی ادمین هم
+   *  روی تعیین پله خرید بعدی اثر بگذارد. */
   currentPercent(
-    campaign: { type: string; discountPercent: number; manualDiscountPercent: number | null; tiers: Prisma.JsonValue | null },
+    campaign: {
+      type: string;
+      discountPercent: number;
+      manualDiscountPercent: number | null;
+      finalPercent?: number | null;
+      manualPurchaseCount?: number | null;
+      tiers: Prisma.JsonValue | null;
+    },
     purchaseCount: number,
   ): number {
     if (campaign.manualDiscountPercent != null) {
-      return Math.max(0, Math.min(100, Math.round(campaign.manualDiscountPercent)));
+      return clampPercent(campaign.manualDiscountPercent);
     }
     if (campaign.type === 'quantity') {
-      const tier = PackagesService.tierFor(readTiers(campaign.tiers), purchaseCount + 1);
+      const count = effectivePurchaseCount(purchaseCount, campaign.manualPurchaseCount);
+      const tier = PackagesService.tierFor(readTiers(campaign.tiers), count + 1);
       if (tier) return tier.percent;
+      // بعد از اتمام تعداد همهٔ پله‌های محدود → درصد عمومی تا پایان کمپین
+      // (خواسته مالک ۳۱-۱۰)؛ اگر تعریف نشده باشد تخفیف پله‌ای تمام می‌شود.
+      return campaign.finalPercent != null ? clampPercent(campaign.finalPercent) : 0;
     }
-    return Math.max(0, Math.min(100, Math.round(campaign.discountPercent)));
+    return clampPercent(campaign.discountPercent);
   }
 
   /** شکل عمومی کمپین فعال — برای getPlans و getMyPackage */
@@ -239,6 +298,8 @@ export class PackagesService {
       type: string;
       discountPercent: number;
       manualDiscountPercent: number | null;
+      finalPercent: number | null;
+      manualPurchaseCount: number | null;
       endsAt: Date | null;
       tiers: Prisma.JsonValue | null;
       purchaseCount: number;
@@ -246,15 +307,10 @@ export class PackagesService {
   ): ActiveCampaignInfo | null {
     if (!c) return null;
     const tiers = readTiers(c.tiers);
-    const percent = this.currentPercent(c, c.purchaseCount);
-    let currentTier: ActiveCampaignInfo['currentTier'] = null;
-    if (c.type === 'quantity') {
-      const tier = PackagesService.tierFor(tiers, c.purchaseCount + 1);
-      if (tier) {
-        const boughtInTier = Math.max(0, c.purchaseCount - (tier.from - 1));
-        currentTier = { ...tier, boughtInTier };
-      }
-    }
+    const count = effectivePurchaseCount(c.purchaseCount, c.manualPurchaseCount);
+    const percent = this.currentPercent(c, count);
+    const currentTier =
+      c.type === 'quantity' ? PackagesService.tierReport(tiers, c.finalPercent, count) : null;
     return {
       id: c.id,
       title: c.title,
@@ -262,9 +318,10 @@ export class PackagesService {
       type: c.type === 'quantity' ? 'quantity' : 'time',
       discountPercent: percent,
       endsAt: c.endsAt,
-      purchaseCount: c.purchaseCount,
+      purchaseCount: count,
       currentTier,
       tiers,
+      finalPercent: c.finalPercent ?? null,
     };
   }
 
