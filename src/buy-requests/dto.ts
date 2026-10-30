@@ -114,7 +114,7 @@ export class UpdateMyBuyRequestDto {
   @IsInt()
   id!: number;
 
-  /** «نوع کالا» — تغییر اسم → نود PRODUCT_TYPE جدید بازمصرف/ساخته می‌شود */
+  /** «نوع کالا» — تغییر اسم → ردیف Good جدید بازمصرف/ساخته می‌شود */
   @IsOptional()
   @IsString()
   @Length(2, 100)

@@ -45,7 +45,6 @@ async function main() {
     _id: c.id,
     category_name: (c.category_name ?? '').trim(),
     slug: (c.category_name ?? '').trim(), // اسلاگ فارسی مثل خود باسکول
-    kind: 'CATEGORY',
     unit: c.unit ?? 'کیلوگرم',
     min: c.min ?? 100,
     example: c.example ?? null,

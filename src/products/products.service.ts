@@ -154,7 +154,9 @@ export class ProductsService {
         const orderBy: Prisma.ProductOrderByWithRelationInput[] =
           sort === 'newest'
             ? [{ updatedAt: 'desc' }]
-            : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
+            : // «مرتبط‌ترین» — خواسته مالک (۳۰-۱۰): نردبان اول، بعد آگهی‌های
+              // فروشندگان ویژه، بعد جدیدترین به‌روزرسانی
+              [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }];
 
         const [total, rows] = await Promise.all([
           this.prisma.product.count({ where }),
@@ -181,7 +183,9 @@ export class ProductsService {
 
   // ─── جزئیات ────────────────────────────────────────────────────────────────
 
-  /** POST /products/getProductById — عمومی (confirmed)؛ بازدید فقط روی cache-miss */
+  /** POST /products/getProductById — عمومی (confirmed).
+   *  شمارش بازدید اینجا نیست — SSR/ISR با کش صدا زده می‌شود و خزنده/پیش‌رندر
+   *  چندباره می‌شمارد؛ بازدید واقعی از ping کلاینت → reportView ثبت می‌شود. */
   async getProductById(id: number) {
     return this.cache.wrap(
       `product:${id}`,
@@ -193,10 +197,6 @@ export class ProductsService {
         if (!p) {
           throw AppError.notFound('محصول یافت نشد.');
         }
-        // شمارش بازدید — fire-and-forget؛ پاسخ با مقدار فعلی
-        void this.prisma.product
-          .update({ where: { id }, data: { viewCount: { increment: 1 } } })
-          .catch(() => undefined);
         const gallery = await this.uploads.galleryMap([id]);
         const names = await this.hydrateNames([p]);
         return this.toDto(p, gallery.get(id) ?? [], names);
@@ -216,6 +216,22 @@ export class ProductsService {
       this.hydrateNames(rows),
     ]);
     return rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names));
+  }
+
+  /** آگهی‌های تاییدشده با این idها — علاقه‌مندی‌ها (F5) و صفحه «ذخیره‌شده‌ها».
+   *  ترتیب خروجی = ترتیب آرایه ورودی (تازه‌ترین نشان‌شده اول). */
+  async getProductsByIds(ids: number[]): Promise<ProductDto[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: ids }, status: 'confirmed', user: { isActive: true } },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const ordered = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(ordered.map((r) => r.id)),
+      this.hydrateNames(ordered),
+    ]);
+    return ordered.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names));
   }
 
   // ─── ثبت (ویزارد) ──────────────────────────────────────────────────────────
@@ -242,7 +258,7 @@ export class ProductsService {
 
     // اعتبارسنجی ارجاع‌ها — دسته/استان/شهر باید فعال باشند
     const sub = await this.categories.getCategoryById(dto.subCategoryId);
-    if (!sub || sub.kind !== 'CATEGORY') {
+    if (!sub) {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     }
     const city = await this.locations.getCityById(dto.cityId);
@@ -281,6 +297,8 @@ export class ProductsService {
         features: (dto.features ?? []) as unknown as object,
         status: 'pending',
         userId: user.id,
+        // فروشنده ویژه = بسته فعال — denorm برای سورت لیست (۳۰-۱۰)
+        isElevated: pakage > 0,
       },
     });
 
@@ -289,6 +307,192 @@ export class ProductsService {
   }
 
   // ─── پنل ───────────────────────────────────────────────────────────────────
+
+  // ─── آمار آگهی (خواسته مالک ۳۰-۱۰) ─────────────────────────────────────────
+
+  /**
+   * POST /products/reportView — ثبت بازدید واقعی مرورگر (ping کلاینت).
+   * SSR/ISR و خزنده‌ها شمرده نمی‌شوند؛ بیننده = کاربر واردشده یا نشست مهمان.
+   * بازدید خودِ فروشنده از آگهی خودش نویز است و ثبت نمی‌شود.
+   */
+  async reportView(
+    viewer: AuthUser | null,
+    dto: { id: number; sessionId?: string },
+  ) {
+    const p = await this.prisma.product.findFirst({
+      where: { id: dto.id, status: 'confirmed', user: { isActive: true } },
+      select: { id: true, userId: true },
+    });
+    if (!p) return { counted: false as const };
+
+    if (viewer && viewer.id === p.userId) return { counted: false as const };
+
+    await this.prisma.$transaction([
+      this.prisma.productView.create({
+        data: {
+          productId: p.id,
+          viewerId: viewer?.id ?? null,
+          sessionId: viewer ? null : (dto.sessionId?.slice(0, 40) || null),
+        },
+      }),
+      this.prisma.product.update({
+        where: { id: p.id },
+        data: { viewCount: { increment: 1 } },
+      }),
+    ]);
+    return { counted: true as const };
+  }
+
+  /**
+   * POST /products/getMyProductStats — آمار کامل آگهی برای مالک:
+   * چه کسانی دیدند (چند بار، چه تاریخی)، چه کسانی تماس زدند، چه کسانی ذخیره کردند.
+   *
+   * گیت هویت (خواسته مالک): شماره تماس/نام بینندگان فقط برای مالکِ دارای
+   * اشتراک ویژه فعال؛ مالک رایگان شمارنده‌ها را می‌بیند و هویت‌ها قفل‌اند —
+   * فرانت دکمه «خرید اشتراک» را کنار پیام قفل نشان می‌دهد.
+   */
+  async getMyProductStats(user: AuthUser, productId: number) {
+    const p = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, productName: true, userId: true, viewCount: true, status: true, createdAt: true },
+    });
+    if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
+
+    const me = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { activePakageType: true, packageExpiresAt: true },
+    });
+    const canSeeIdentity = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0;
+
+    const since = new Date(Date.now() - 14 * 86_400_000);
+    const [viewRows, callRows, saveRows] = await Promise.all([
+      this.prisma.productView.findMany({
+        where: { productId, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      this.prisma.callLog.findMany({
+        where: { productId, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { id: true, callerId: true, createdAt: true },
+      }),
+      this.prisma.favoriteProduct.findMany({
+        where: { productId },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { id: true, userId: true, createdAt: true },
+      }),
+    ]);
+
+    // بینندگان — تجمیع به‌ازای کاربر/نشست: تعداد بازدید + اولین/آخرین
+    interface ViewerAgg {
+      key: string;
+      viewerId: string | null;
+      sessionId: string | null;
+      views: number;
+      firstAt: Date;
+      lastAt: Date;
+    }
+    const agg = new Map<string, ViewerAgg>();
+    for (const v of viewRows) {
+      const key = v.viewerId ?? `guest:${v.sessionId ?? 'anon'}`;
+      const cur = agg.get(key);
+      if (cur) {
+        cur.views += 1;
+        if (v.createdAt < cur.firstAt) cur.firstAt = v.createdAt;
+        if (v.createdAt > cur.lastAt) cur.lastAt = v.createdAt;
+      } else {
+        agg.set(key, {
+          key,
+          viewerId: v.viewerId,
+          sessionId: v.sessionId,
+          views: 1,
+          firstAt: v.createdAt,
+          lastAt: v.createdAt,
+        });
+      }
+    }
+
+    // هویت کاربران مرتبط (بینندگان/تماس‌گیرندگان/ذخیره‌کنندگان) — یک کوئری
+    const userIds = [
+      ...new Set([
+        ...[...agg.values()].map((v) => v.viewerId).filter((x): x is string => x != null),
+        ...callRows.map((c) => c.callerId),
+        ...saveRows.map((sv) => sv.userId),
+      ]),
+    ];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, userName: true, phone: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    /** هویت یا null قفل — گیت اشتراک ویژه مالک */
+    const identity = (id: string | null) => {
+      if (!canSeeIdentity || id == null) return null;
+      const u = userMap.get(id);
+      return u
+        ? { firstName: u.firstName, lastName: u.lastName, userName: u.userName, phone: u.phone }
+        : null;
+    };
+
+    // سری روزانه ۱۴ روز اخیر (فارسی نمایش داده می‌شود در فرانت)
+    const daily: Array<{ date: string; count: number }> = [];
+    const byDay = new Map<string, number>();
+    for (const v of viewRows) {
+      const d = v.createdAt.toISOString().slice(0, 10);
+      byDay.set(d, (byDay.get(d) ?? 0) + 1);
+    }
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+      daily.push({ date: d, count: byDay.get(d) ?? 0 });
+    }
+
+    const [totalViews, uniqueViewers] = await Promise.all([
+      this.prisma.productView.count({ where: { productId } }),
+      this.prisma.productView.groupBy({
+        by: ['viewerId', 'sessionId'],
+        where: { productId },
+        _count: { _all: true },
+      }),
+    ]);
+
+    return {
+      product: {
+        id: p.id,
+        productName: p.productName,
+        status: p.status,
+        viewCount: p.viewCount,
+        createdAt: p.createdAt,
+      },
+      /** مالک اشتراک ویژه دارد؟ هویت‌ها فقط در این حالت باز می‌شوند */
+      canSeeIdentity,
+      totals: {
+        views: totalViews,
+        uniqueViewers: uniqueViewers.length,
+        contactClicks: await this.prisma.callLog.count({ where: { productId } }),
+        saves: saveRows.length,
+      },
+      daily,
+      viewers: [...agg.values()].map((v) => ({
+        isGuest: v.viewerId == null,
+        views: v.views,
+        firstAt: v.firstAt,
+        lastAt: v.lastAt,
+        user: identity(v.viewerId),
+      })),
+      callers: callRows.map((c) => ({
+        at: c.createdAt,
+        user: identity(c.callerId),
+      })),
+      savers: saveRows.map((sv) => ({
+        at: sv.createdAt,
+        user: identity(sv.userId),
+      })),
+    };
+  }
 
   /** POST /products/getMyProducts — آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت */
   async getMyProducts(userId: string) {
@@ -352,7 +556,7 @@ export class ProductsService {
 
     // همان اعتبارسنجی ارجاع‌های ثبت جدید
     const sub = await this.categories.getCategoryById(dto.subCategoryId);
-    if (!sub || sub.kind !== 'CATEGORY') {
+    if (!sub) {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     }
     const city = await this.locations.getCityById(dto.cityId);
@@ -365,6 +569,12 @@ export class ProductsService {
 
     const parent = sub.parent_id != null ? await this.categories.getCategoryById(sub.parent_id) : null;
     const categoryId = parent?.id ?? sub.id;
+
+    // فروشنده ویژه = بسته فعال — denorm را هم تازه کنیم (۳۰-۱۰)
+    const me = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { activePakageType: true, packageExpiresAt: true },
+    });
 
     const updated = await this.prisma.product.update({
       where: { id: dto.id },
@@ -383,6 +593,7 @@ export class ProductsService {
         // ویرایش = بازبینی مجدد (عین باسکول)؛ دلایل رد قبلی پاک می‌شود
         status: 'pending',
         rejectionReasons: [],
+        isElevated: effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0,
       },
     });
 
@@ -706,6 +917,7 @@ export class ProductsService {
       cityId: number;
       userId: string;
       isLadder: boolean;
+      isElevated: boolean;
       hasVideo: boolean;
       isOld: boolean;
       viewCount: number;
@@ -756,7 +968,7 @@ export class ProductsService {
         isVerified: seller?.isVerified ?? false,
       },
       isLadder: p.isLadder,
-      isElevated: false, // بدون فروشنده ویژه در ایمچ
+      isElevated: p.isElevated, // فروشنده ویژه — denorm از بسته فعال (۳۰-۱۰)
       hasVideo: p.hasVideo,
       isOld: p.isOld,
       viewCount: p.viewCount,

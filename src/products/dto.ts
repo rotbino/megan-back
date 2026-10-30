@@ -59,6 +59,19 @@ export class GetProductByIdDto {
   id!: number;
 }
 
+/** ورودی reportView — ping آمار بازدید مرورگر (مهمان با sessionId) */
+export class ReportViewDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  /** نشست مرورگر مهمان — uuid سمت کلاینت */
+  @IsOptional()
+  @IsString()
+  @Length(8, 40)
+  sessionId?: string;
+}
+
 /**
  * ورودی getSellerPhone — دو مسیر: آگهی (id) یا پروفایل (userName).
  * حداقل یکی باید بیاید (ولیدیشن در سرویس — پیام خطای گویا).

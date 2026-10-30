@@ -6,7 +6,6 @@ export interface CategoryNode {
   id: number;
   category_name: string;
   slug: string;
-  kind: string;
   unit: string;
   min: number;
   example: string | null;
@@ -22,7 +21,8 @@ export class CategoriesService {
     private readonly cache: CacheService,
   ) {}
 
-  /** POST /categories/getAllCategories — درخت کامل سه‌سطحی (کش‌شده) */
+  /** POST /categories/getAllCategories — درخت کامل سه‌سطحی (کش‌شده).
+   *  نوع کالا (Good) جداست و هرگز در این درخت نیست (خواسته مالک ۳۰-۱۰). */
   async getAllCategories(): Promise<CategoryNode[]> {
     return this.cache.wrap(
       'categories:tree',
@@ -139,7 +139,6 @@ export class CategoriesService {
     id: number;
     categoryName: string;
     slug: string;
-    kind: string;
     unit: string;
     min: number;
     example: string | null;
@@ -150,7 +149,6 @@ export class CategoriesService {
       id: c.id,
       category_name: c.categoryName,
       slug: c.slug,
-      kind: c.kind,
       unit: c.unit,
       min: c.min,
       example: c.example ?? null,

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { UploadsService } from '../uploads/uploads.service';
 import { wallet as walletEnv } from '../common/config/env';
@@ -61,6 +62,7 @@ export class PackagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly uploads: UploadsService,
+    private readonly cache: CacheService,
   ) {}
 
   /** POST /packages/getPlans — عمومی: پلن‌ها + امکانات بسته رایگان (صفحه قیمتها) */
@@ -309,7 +311,15 @@ export class PackagesService {
           where: { id: order.userId },
           data: { activePakageType: plan.pakageType, packageExpiresAt: expiresAt },
         }),
+        // فروشنده ویژه شد — همه آگهی‌های تاییدشده‌اش elevated می‌شوند تا در
+        // سورت «مرتبط‌ترین» بالاتر از رقبا دیده شوند (خواسته مالک ۳۰-۱۰)
+        this.prisma.product.updateMany({
+          where: { userId: order.userId, status: 'confirmed' },
+          data: { isElevated: true },
+        }),
       ]);
+      // کش لیست‌ها بیات شود — ترتیب نمایش عوض شده
+      this.cache.invalidateTag('products');
       return { id: updated.id, status: updated.status, expiresAt };
     }
 

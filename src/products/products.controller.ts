@@ -11,6 +11,7 @@ import {
   GetRelatedProductsDto,
   GetSellerDto,
   GetSellerPhoneDto,
+  ReportViewDto,
   SearchSuggestionsDto,
   UpdateMyProductDto,
 } from './dto';
@@ -38,6 +39,14 @@ export class ProductsController {
   @ApiOperation({ summary: 'جزئیات یک آگهی تاییدشده (عمومی)' })
   async getProductById(@Body() dto: GetProductByIdDto) {
     return ok(await this.products.getProductById(dto.id));
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('reportView')
+  @ApiOperation({ summary: 'ثبت بازدید واقعی مرورگر — ping کلاینت صفحه آگهی (آمار)' })
+  async reportView(@MaybeCurrentUser() user: AuthUser | null, @Body() dto: ReportViewDto) {
+    return ok(await this.products.reportView(user, dto));
   }
 
   @Post('getRelatedProducts')
@@ -68,6 +77,17 @@ export class ProductsController {
   @ApiOperation({ summary: 'جزئیات کامل آگهی خودم — پیش‌پر کردن فرم ویرایش' })
   async getMyProductDetail(@CurrentUser() user: AuthUser, @Body() dto: GetMyProductDetailDto) {
     return ok(await this.products.getMyProductDetail(user, dto.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMyProductStats')
+  @ApiOperation({
+    summary:
+      'آمار آگهی من — چه کسانی دیدند/تماس زدند/ذخیره کردند؛ هویت‌ها فقط با اشتراک ویژه',
+  })
+  async getMyProductStats(@CurrentUser() user: AuthUser, @Body() dto: GetMyProductDetailDto) {
+    return ok(await this.products.getMyProductStats(user, dto.id));
   }
 
   @UseGuards(JwtAuthGuard)

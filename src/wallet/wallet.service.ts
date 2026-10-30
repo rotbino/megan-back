@@ -16,8 +16,8 @@ export const CHARGE_PACKAGES = [
   { key: 'p400', amount: 400_000, bonusPercent: 20, charge: 480_000 },
 ] as const;
 
-/** نردبان هر محصول برای یک ماه — از کیف پول کسر می‌شود (تنها قابلیت تبلیغاتی) */
-export const LADDER_MONTHLY_PRICE = 100_000;
+/** هزینه نردبان هر آگهی برای یک ماه — خواسته مالک (۳۰-۱۰): ۵۰ هزار تومان */
+export const LADDER_MONTHLY_PRICE = 50_000;
 
 /** مدت نردبان: ۳۰ روز */
 const LADDER_DURATION_MS = 30 * 86_400_000;
@@ -83,6 +83,40 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         data: { isLadder: false },
       });
       if (res.count > 0) this.cache.invalidateTag('products');
+    } catch {
+      /* reaper هرگز نباید کاربر را بیدار کند */
+    }
+    await this.reapElevatedFlags();
+  }
+
+  /**
+   * پرچم «فروشنده ویژه» آگهی‌ها را با واقعیت بسته‌ها هم‌گام نگه می‌دارد:
+   *  • مالکان بستهٔ فعال → isElevated=true (تأیید بسته فوری ست می‌کند؛ این
+   *    پاک‌سازی برای آگهی‌های ثبت‌شده وسط دوره/حالت‌های جاافتاده است)
+   *  • مالکانی که بسته‌شان منقضی شده → isElevated=false (ساعت شنی همه‌چیز)
+   */
+  private async reapElevatedFlags(): Promise<void> {
+    try {
+      const premiumUsers = await this.prisma.user.findMany({
+        where: { activePakageType: { gt: 0 }, packageExpiresAt: { gt: new Date() } },
+        select: { id: true },
+      });
+      const premiumIds = premiumUsers.map((u) => u.id);
+
+      const [on, off] = await this.prisma.$transaction([
+        this.prisma.product.updateMany({
+          where: { userId: { in: premiumIds }, isElevated: false },
+          data: { isElevated: true },
+        }),
+        this.prisma.product.updateMany({
+          where: {
+            isElevated: true,
+            ...(premiumIds.length > 0 ? { userId: { notIn: premiumIds } } : {}),
+          },
+          data: { isElevated: false },
+        }),
+      ]);
+      if (on.count > 0 || off.count > 0) this.cache.invalidateTag('products');
     } catch {
       /* reaper هرگز نباید کاربر را بیدار کند */
     }

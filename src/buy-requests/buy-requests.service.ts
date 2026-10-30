@@ -14,8 +14,8 @@ import {
   UpdateMyBuyRequestDto,
 } from './dto';
 
-/** شروع id دسته‌های ساخته‌شده — بالاتر از کل idهای باسکول (~۱۰۳۵) */
-const CATEGORY_START_ID = 900_000;
+/** شروع id انواع کالا (Good) — بالاتر از کل idهای باسکول (~۱۰۳۵) */
+const GOOD_START_ID = 900_000;
 
 const BUY_REQUEST_PAGE = 12; // عین صفحه‌بندی باسکول
 
@@ -72,8 +72,8 @@ interface NameMaps {
 /**
  * ─── درخواست‌های خرید (RFQ) — B7 ─────────────────────────────────────────────
  * ساختار عین باسکول: جمله کارت «خریدار {مقدار} {واحد} {دسته} از نوع {نوع} هستم».
- * «نوع کالا» هنگام ثبت به نود PRODUCT_TYPE درخت دسته تبدیل می‌شود (فرزند کاربر-
- * ساختهٔ دسته برگ) — زیربنای تطبیق درخواست با فروشندگان همان نوع.
+ * «نوع کالا» هنگام ثبت به ردیف جدول Good تبدیل می‌شود (جداشده از درخت دسته،
+ * خواسته مالک ۳۰-۱۰) — زیربنای تطبیق درخواست با فروشندگان همان نوع.
  */
 @Injectable()
 export class BuyRequestsService {
@@ -88,24 +88,11 @@ export class BuyRequestsService {
 
   /** POST /buy-requests/createBuyRequest → «در انتظار تایید» */
   async createBuyRequest(user: AuthUser, dto: CreateBuyRequestDto) {
-    // انتخاب‌گرهای فرانت (صفحه اول + ویزارد پنل) تا آخرین نود پایین می‌روند —
-    // اگر آن نود «نوع کالا» باشد (PRODUCT_TYPE، مثل «پسته اکبری» زیر «پسته»)
-    // دسته والد مبنا می‌شود و نام نود پیش‌فرض «نوع کالا» می‌ماند (باگ ۲۸-۱۰:
-    // درخواست خرید صفحه اول کلاً ثبت نمی‌شد چون kind نود PRODUCT_TYPE بود).
-    let sub = await this.categories.getCategoryById(dto.subCategoryId);
+    // انتخاب‌گرهای فرانت تا دسته برگ پایین می‌روند؛ نوع کالا (Good) جدول جدا
+    // دارد و هرگز نود درخت نیست (خواسته مالک ۳۰-۱۰) — فقط وجود دسته چک می‌شود.
+    const sub = await this.categories.getCategoryById(dto.subCategoryId);
     if (!sub) throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
-    let typeName = dto.name?.trim();
-    if (sub.kind === 'PRODUCT_TYPE') {
-      const parent =
-        sub.parent_id != null ? await this.categories.getCategoryById(sub.parent_id) : null;
-      if (!parent || parent.kind !== 'CATEGORY') {
-        throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
-      }
-      if (!typeName) typeName = sub.category_name; // کاربر خودش نوعی ننوشت → نام نود
-      sub = parent;
-    } else if (sub.kind !== 'CATEGORY') {
-      throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
-    }
+    const typeName = dto.name?.trim();
 
     // مکان — اختیاری مثل باسکول (خریدار می‌تواند «همه ایران» بماند)
     if (dto.provinceId || dto.cityId) {
@@ -124,10 +111,10 @@ export class BuyRequestsService {
       }
     }
 
-    // «نوع کالا» → نود PRODUCT_TYPE فرزند دسته برگ (idempotent)
-    let productTypeId: number | null = null;
+    // «نوع کالا» → ردیف Good جداشده از دسته‌ها (idempotent)
+    let goodId: number | null = null;
     if (typeName) {
-      productTypeId = await this.upsertProductType(sub.id, typeName, sub.unit, sub.min);
+      goodId = await this.upsertGood(sub.id, typeName, user.id);
     }
 
     const id = await this.nextId();
@@ -138,7 +125,7 @@ export class BuyRequestsService {
         name: typeName || null,
         description: dto.description?.trim() || null,
         categoryId: sub.id,
-        productTypeId,
+        goodId,
         requirementAmount: dto.requirementAmount,
         unit: sub.unit || 'کیلوگرم',
         provinceId: dto.provinceId ?? null,
@@ -154,42 +141,43 @@ export class BuyRequestsService {
   }
 
   /**
-   * نود PRODUCT_TYPE — «نوع {دسته} خود را وارد کنید» باسکول:
-   * type موجود (فرزند همان دسته با همین نام) بازمصرف می‌شود؛ در غیر این صورت
-   * با id از Counter دسته ساخته می‌شود. کش دسته‌ها ابطال می‌شود.
+   * نوع کالا (Good) — «نوع {دسته} خود را وارد کنید» باسکول:
+   * نوع موجود (همان دسته با همین نام) بازمصرف می‌شود؛ در غیر این صورت با id
+   * از Counter('good') ساخته می‌شود. جدول Category دست نمی‌خورد — نوع کالا
+   * دیگر نود درخت نیست و در سایدبار دیده نمی‌شود (خواسته مالک ۳۰-۱۰).
    */
-  private async upsertProductType(
-    parentCategoryId: number,
+  private async upsertGood(
+    categoryId: number,
     name: string,
-    unit: string,
-    min: number,
+    createdById: string,
   ): Promise<number> {
-    const existing = await this.prisma.category.findFirst({
-      where: { parentId: parentCategoryId, categoryName: name, kind: 'PRODUCT_TYPE' },
+    const existing = await this.prisma.good.findUnique({
+      where: { categoryId_name: { categoryId, name } },
       select: { id: true },
     });
-    if (existing) return existing.id;
+    if (existing) {
+      await this.prisma.good.update({
+        where: { id: existing.id },
+        data: { usageCount: { increment: 1 } },
+      });
+      return existing.id;
+    }
 
     const counter = await this.prisma.counter.upsert({
-      where: { id: 'category' },
-      create: { id: 'category', seq: CATEGORY_START_ID },
+      where: { id: 'good' },
+      create: { id: 'good', seq: GOOD_START_ID },
       update: { seq: { increment: 1 } },
     });
-    const id = counter.seq;
-    await this.prisma.category.create({
+    const good = await this.prisma.good.create({
       data: {
-        id,
-        parentId: parentCategoryId,
-        categoryName: name,
-        slug: `${name}-${id}`,
-        kind: 'PRODUCT_TYPE',
-        unit,
-        min,
+        id: counter.seq,
+        categoryId,
+        name,
+        createdById,
+        usageCount: 1,
       },
     });
-    this.cache.invalidateTag('categories');
-    this.cache.invalidateTag('base');
-    return id;
+    return good.id;
   }
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
@@ -333,6 +321,12 @@ export class BuyRequestsService {
       throw AppError.notFound('درخواست خرید یافت نشد.');
     }
     await this.prisma.buyRequest.update({ where: { id }, data: { status: 'deleted' } });
+    // شمارنده استفاده نوع کالا — best-effort؛ خطا نباید حذف را خراب کند
+    if (row.goodId != null) {
+      await this.prisma.good
+        .update({ where: { id: row.goodId }, data: { usageCount: { decrement: 1 } } })
+        .catch(() => undefined);
+    }
     this.cache.invalidateTag('buy-requests');
     return { ok: true as const };
   }
@@ -340,7 +334,7 @@ export class BuyRequestsService {
   /**
    * POST /buy-requests/updateMyBuyRequest — ویرایش درخواست «در انتظار تایید».
    * فقط مالک و فقط pending (بعد از تأیید/رد، مثل باسکول قابل ویرایش نیست)؛
-   * تغییر «نوع کالا» → نود PRODUCT_TYPE تازه (idempotent). مکان اختیاری است.
+   * تغییر «نوع کالا» → ردیف Good تازه (idempotent). مکان اختیاری است.
    */
   async updateMyBuyRequest(user: AuthUser, dto: UpdateMyBuyRequestDto) {
     const row = await this.prisma.buyRequest.findUnique({ where: { id: dto.id } });
@@ -366,16 +360,10 @@ export class BuyRequestsService {
       }
     }
 
-    // «نوع کالا» عوض شده → نود تازه (idempotent)؛ خالی = بدون تغییر می‌ماند
-    let productTypeId = row.productTypeId;
+    // «نوع کالا» عوض شده → ردیف Good تازه (idempotent)؛ خالی = بدون تغییر می‌ماند
+    let goodId = row.goodId;
     if (dto.name !== undefined && dto.name.trim() && dto.name.trim() !== row.name) {
-      const sub = await this.categories.getCategoryById(row.categoryId);
-      productTypeId = await this.upsertProductType(
-        row.categoryId,
-        dto.name.trim(),
-        sub?.unit ?? row.unit,
-        sub?.min ?? 0,
-      );
+      goodId = await this.upsertGood(row.categoryId, dto.name.trim(), user.id);
     }
 
     const updated = await this.prisma.buyRequest.update({
@@ -383,7 +371,7 @@ export class BuyRequestsService {
       data: {
         name: dto.name !== undefined ? dto.name.trim() || null : row.name,
         description: dto.description !== undefined ? dto.description.trim() || null : row.description,
-        productTypeId,
+        goodId,
         requirementAmount: dto.requirementAmount,
         goal: dto.goal ?? (row.goal as 'price_and_buy' | 'price_only'),
         provinceId: dto.provinceId ?? row.provinceId,

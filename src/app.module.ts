@@ -20,6 +20,8 @@ import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PackagesModule } from './packages/packages.module';
 import { PushModule } from './push/push.module';
+import { ActivityModule } from './activity/activity.module';
+import { FavoritesModule } from './favorites/favorites.module';
 import { AdminModule } from './admin/admin.module';
 
 /**
@@ -47,6 +49,8 @@ import { AdminModule } from './admin/admin.module';
     WalletModule,
     PackagesModule, // بسته‌های اشتراک — خرید کارت‌به‌کارت + گیت‌ها
     PushModule,
+    ActivityModule, // فعالیت کاربران — جستجو/دسته/صفحه (۳۰-۱۰)
+    FavoritesModule, // علاقه‌مندی‌ها — آگهی + فروشنده (۳۰-۱۰)
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],
   controllers: [HealthController],

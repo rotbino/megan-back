@@ -106,6 +106,12 @@ model User {
   packageOrders  PackageOrder[] @relation("PackageOrderOwner")
   /// پاسخ نظرسنجی عملکرد ایمچ (یکی؛ userId یکتا)
   surveyResponse  SurveyResponse? @relation("SurveyOwner")
+  /// آگهی‌هایی که این کاربر نشان کرده (علاقه‌مندی‌ها — ۳۰-۱۰)
+  favoriteProducts FavoriteProduct[] @relation("FavoriteProductOwner")
+  /// فروشنده‌هایی که این کاربر ذخیره کرده
+  favoriteSellers  FavoriteSeller[]  @relation("FavoriteSellerOwner")
+  /// کاربرانی که این فروشنده را ذخیره کرده‌اند
+  favoritedBy      FavoriteSeller[]  @relation("FavoriteSellerTarget")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -243,8 +249,6 @@ model Category {
   parentId     Int?    @map("parent_id")
   categoryName String  @map("category_name")
   slug         String
-  /// CATEGORY (دسته) | PRODUCT_TYPE (نوع کالا — فرزند کاربر-ساختهٔ برگ، برای RFQ آینده)
-  kind         String  @default("CATEGORY")
   /// واحد فروش پیش‌فرض (کیلوگرم)
   unit         String  @default("")
   /// حداقل سفارش پیش‌فرض
@@ -253,8 +257,35 @@ model Category {
   example      String?
   score        Int     @default(0)
 
-  @@index([parentId, kind, score])
+  @@index([parentId, score])
   @@index([slug])
+}
+
+/// ─── نوع کالا (Good) — جداشده از درخت Category (خواسته مالک ۳۰-۱۰) ────────
+/// قبلاً «نوع کالا» به‌صورت نود PRODUCT_TYPE زیر دسته برگ در همان جدول
+/// Category ذخیره می‌شد و در سایدبار/فیلتر لیست محصولات ظاهر می‌شد؛ اشتباه
+/// بود — نوع کالا ورودی آزاد کاربران است، نه دسته. حالا جدول جدا دارد:
+///  • در هیچ ناوبری دسته‌ای (سایدبار/مگامنو/کشکید) دیده نمی‌شود؛
+///  • هنگام ثبت/ویرایش درخواست خرید idempotent ساخته/بازمصرف می‌شود؛
+///  • برای تطبیق «خریداران پیشنهادی» و آمار استفاده می‌شود.
+model Good {
+  /// id عددی از Counter('good') — مهاجرت: همان id نودهای PRODUCT_TYPE قدیمی
+  id          Int      @id @map("_id")
+  /// نام نوع — مثل «اکبری» (یکتا به‌ازای دسته)
+  name        String
+  /// دسته برگ که این نوع به آن تعلق دارد
+  categoryId  Int      @map("category_id")
+  /// اولین کاربری که این نوع را وارد کرد — برای آمار/پاکسازی
+  createdById String?  @map("created_by_id") @db.ObjectId
+  /// دفعات استفاده در درخواست‌های خرید
+  usageCount  Int      @default(0) @map("usage_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+  @@index([name])
 }
 
 /// ─── لوکیشن درختی واحد ───────────────────────────────────────────────────────
@@ -366,9 +397,13 @@ model Product {
   /// دلایل رد — آرایه رشته
   rejectionReasons Json? @map("rejection_reasons")
 
-  /// نردبان — آگهی نردبان‌شده بالای «مرتبط‌ترین» (۱۰۰هزار/ماه)
+  /// نردبان — آگهی نردبان‌شده بالای «مرتبط‌ترین» (۵۰هزار/ماه)
   isLadder        Boolean   @default(false) @map("is_ladder")
   ladderExpiresAt DateTime? @map("ladder_expires_at")
+
+  /// آگهیِ فروشنده ویژه (بسته اشتراک فعال) — سورت «مرتبط‌ترین»:
+  /// نردبان اول → ویژه → جدیدترین (خواسته مالک ۳۰-۱۰)؛ نگهداری با reaper
+  isElevated      Boolean   @default(false) @map("is_elevated")
 
   hasVideo   Boolean @default(false) @map("has_video")
   isOld      Boolean @default(false) @map("is_old")
@@ -388,9 +423,11 @@ model Product {
   chatThreads  ChatThread[]  @relation("ChatThreadProduct")
   ladderOrders LadderOrder[] @relation("LadderProduct")
   callLogs     CallLog[]     @relation("CallLogProduct")
+  favoriteProducts FavoriteProduct[] @relation("FavoriteProductProduct")
+  productViews    ProductView[]     @relation("ProductViewProduct")
 
-  /// سورت «مرتبط‌ترین» = نردبان اول، بعد جدیدترین
-  @@index([status, isLadder, updatedAt(sort: Desc)])
+  /// سورت «مرتبط‌ترین» = نردبان اول، بعد ویژه، بعد جدیدترین (خواسته مالک ۳۰-۱۰)
+  @@index([status, isLadder, isElevated, updatedAt(sort: Desc)])
   @@index([subCategoryId, status])
   @@index([provinceId, cityId, status])
   @@index([userId, status])
@@ -412,8 +449,8 @@ model BuyRequest {
 
   /// دسته برگ (بهداشت شخصی=1035)
   categoryId        Int     @map("category_id")
-  /// نود PRODUCT_TYPE Categories در صورت انتخاب از پیشنهادها
-  productTypeId     Int?    @map("product_type_id")
+  /// نوع کالای انتخابی — ارجاع به جدول Good (جداشده از Category، ۳۰-۱۰)
+  goodId            Int?    @map("good_id")
 
   /// میزان نیازمندی (۶۰۰ عدد / ۱۰٬۰۰۰ کیلوگرم)
   requirementAmount Int     @map("requirement_amount")
@@ -756,4 +793,96 @@ model SurveyResponse {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([score])
+}
+
+// ─── فعالیت کاربران (خواسته مالک ۳۰-۱۰) ─────────────────────────────────────
+// جدول توسعه‌پذیر: فعلاً جستجوها / انتخاب دسته از سایدبار / بازدید صفحات لاگ
+// می‌شود؛ فعالیت‌های آینده (کلیک تماس، ذخیره و …) فقط با type جدید اضافه
+// می‌شوند — بدون مهاجرت. مهمان‌ها با sessionId مرورگر دنبال می‌شوند.
+
+/// هر ردیف یک رویداد فعالیت است — هرگز آپدیت نمی‌شود (append-only)
+model ActivityLog {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// search | category_view | page_view
+  type String
+  /// کاربر واردشده — مهمان = null
+  userId    String? @map("user_id") @db.ObjectId
+  /// نشست مرورگر مهمان — uuid در localStorage فرانت (تجمیع بازدید مهمان)
+  sessionId String? @map("session_id")
+
+  /// متن جستجو (type=search)
+  q String?
+  /// دسته انتخاب‌شده از سایدبار (type=category_view) — نام + id در صورت resolve
+  categoryId   Int?    @map("category_id")
+  categoryName String? @map("category_name")
+  /// مسیر صفحه (type=page_view)
+  path     String?
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([type, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([q])
+  @@index([categoryName])
+}
+
+// ─── علاقه‌مندی‌ها (خواسته مالک ۳۰-۱۰) ────────────────────────────────────────
+// دو موجودیت مستقل:
+//  • FavoriteProduct — «نشان کردن» آگهی برای کاربر (دکمه ذخیره صفحه آگهی)
+//  • FavoriteSeller  — ذخیره صفحه اختصاصی فروشنده (دکمه ذخیره پروفایل)
+// آمار آگهی (چه کسانی ذخیره کردند) از همین جدول‌ها خوانده می‌شود.
+
+model FavoriteProduct {
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  user    User   @relation("FavoriteProductOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId  String @map("user_id") @db.ObjectId
+
+  /// آگهی نشان‌شده
+  productId Int
+  product   Product @relation("FavoriteProductProduct", fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, productId])
+  @@index([productId, createdAt(sort: Desc)])
+}
+
+model FavoriteSeller {
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  user    User   @relation("FavoriteSellerOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId  String @map("user_id") @db.ObjectId
+
+  /// فروشنده ذخیره‌شده
+  sellerId String @map("seller_id") @db.ObjectId
+  seller   User   @relation("FavoriteSellerTarget", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, sellerId])
+  @@index([sellerId, createdAt(sort: Desc)])
+}
+
+// ─── آمار آگهی (خواسته مالک ۳۰-۱۰) ───────────────────────────────────────────
+// چه کسانی آگهی را دیدند و چه تاریخی — تک‌رکورد به‌ازای هر بازدید واقعی مرورگر
+// (ping سمت کلاینت، نه SSR — خزنده‌ها شمرده نمی‌شوند). «چه کسی تماس زد» از
+// CallLog موجود و «چه کسی ذخیره کرد» از FavoriteProduct خوانده می‌شود.
+
+model ProductView {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// آگیی که دیده شد
+  productId Int
+  product   Product @relation("ProductViewProduct", fields: [productId], references: [id], onDelete: Cascade)
+
+  /// بیننده واردشده — مهمان = null
+  viewerId   String? @map("viewer_id") @db.ObjectId
+  /// نشست مرورگر مهمان (تجمیع بازدیدهای مهمان)
+  sessionId  String? @map("session_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([productId, createdAt(sort: Desc)])
+  @@index([productId, viewerId])
 }

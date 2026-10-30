@@ -4,11 +4,11 @@ import { CacheService } from '../../common/cache/cache.module';
 import { AppError } from '../../common/errors/app-error';
 import type { UpsertCategoryDto, UpsertLocationDto } from './dto';
 
-/** شروع id دسته‌های جدید — بالاتر از کل باسکول و PRODUCT_TYPE های کاربران */
+/** شروع id دسته‌های جدید — بالاتر از کل idهای باسکول */
 const CATEGORY_COUNTER_START = 950_000;
 /** شروع id مکان‌های جدید — بالاتر از idهای باسکول */
 const LOCATION_COUNTER_START = 500_000;
-/** حداکثر عمق درخت دسته (ریشه=۱) — نوع کالا (PRODUCT_TYPE) فرزند برگ می‌شود */
+/** حداکثر عمق درخت دسته (ریشه=۱) */
 const MAX_CATEGORY_DEPTH = 3;
 
 /** تبدیل نام فارسی به slug — عین الگوی باقی پروژه */
@@ -27,12 +27,12 @@ function slugify(name: string): string {
  * به‌روز می‌کند؛ آگهی‌ها/درخواست‌ها فقط شناسه ارجاع دارند و نام تازه را
  * هنگام خواندن با join می‌گیرند (بدون denorm برای sync).
  */
-/** نود درخت دسته برای جدول مدیریت — با شمارنده‌ها */
+/** نود درخت دسته برای جدول مدیریت — با شمارنده‌ها.
+ *  نوع کالا (Good) دیگر نود درخت نیست — تب جداگانه «انواع کالا» دارد. */
 export interface AdminCategoryNode {
   id: number;
   categoryName: string;
   slug: string;
-  kind: string;
   unit: string;
   min: number;
   example: string | null;
@@ -56,7 +56,7 @@ export class AdminBaseDataService {
 
   /**
    * POST /admin/base-data/getCategoryTree — درخت کامل + شمارش فرزند/آگهی/درخواست
-   * برای جدول مدیریت (تفکیک دسته/نوع کالا).
+   * برای جدول مدیریت (فقط دسته‌ها — انواع کالا جدول Good).
    */
   async getCategoryTree() {
     const [rows, childCounts, productCounts, requestCounts] = await Promise.all([
@@ -79,7 +79,6 @@ export class AdminBaseDataService {
       id: c.id,
       categoryName: c.categoryName,
       slug: c.slug,
-      kind: c.kind,
       unit: c.unit,
       min: c.min,
       example: c.example ?? null,
@@ -120,9 +119,6 @@ export class AdminBaseDataService {
     if (dto.parentId != null && dto.parentId !== 0) {
       const parent = await this.prisma.category.findUnique({ where: { id: dto.parentId } });
       if (!parent) throw AppError.badRequest('دسته والد وجود ندارد.', 'BAD_PARENT');
-      if (parent.kind === 'PRODUCT_TYPE') {
-        throw AppError.badRequest('زیر «نوع کالا» نمی‌توان سطح دیگری ساخت.', 'BAD_PARENT_KIND');
-      }
       if (!isCreate && dto.id != null) {
         let cursor: { id: number; parentId: number | null } | null = parent;
         while (cursor) {
@@ -139,10 +135,10 @@ export class AdminBaseDataService {
       parentDepth = await this.depthOf(parent.id);
     }
 
-    // عمق: والد حداکثر سطح ۲ → فرزند سطح ۳ (برگ)؛ نوع کالا فقط فرزند برگ
+    // عمق: والد حداکثر سطح ۲ → فرزند سطح ۳ (برگ)
     if (isCreate && parentId != null && parentDepth >= MAX_CATEGORY_DEPTH) {
       throw AppError.badRequest(
-        `درخت دسته حداکثر ${MAX_CATEGORY_DEPTH} سطح دارد؛ زیر سطح برگ فقط «نوع کالا» (از فرم درخواست خرید) اضافه می‌شود.`,
+        `درخت دسته حداکثر ${MAX_CATEGORY_DEPTH} سطح دارد.`,
         'MAX_DEPTH',
       );
     }
@@ -171,7 +167,6 @@ export class AdminBaseDataService {
           id,
           categoryName: dto.categoryName.trim(),
           slug,
-          kind: 'CATEGORY',
           parentId,
           unit: dto.unit?.trim() || 'کیلوگرم',
           min: dto.min ?? 100,
@@ -214,7 +209,7 @@ export class AdminBaseDataService {
     ]);
 
     if (childCount > 0) {
-      throw AppError.conflict('ابتدا زیردسته‌های (یا نوع‌های کالای) این دسته را حذف یا منتقل کنید.', 'HAS_CHILDREN');
+      throw AppError.conflict('ابتدا زیردسته‌های این دسته را حذف یا منتقل کنید.', 'HAS_CHILDREN');
     }
     if (productCount > 0 || parentRefCount > 0) {
       throw AppError.conflict('آگهی‌هایی به این دسته ارجاع دارند؛ حذف آن ممکن نیست.', 'IN_USE');
@@ -225,6 +220,102 @@ export class AdminBaseDataService {
 
     await this.prisma.category.delete({ where: { id } });
     this.invalidateCategoryCaches();
+    return { id, deleted: true };
+  }
+
+  // ─── انواع کالا (Good) — ورودی آزاد کاربران، جداشده از درخت ────────────────
+
+  /**
+   * POST /admin/base-data/getGoods — فهرست انواع کالا با نام دسته + تعداد
+   * درخواست‌هایی که به هر نوع ارجاع دارند (تب «انواع کالا» صفحه دسته‌بندی‌ها).
+   */
+  async getGoods(dto: { categoryId?: number; q?: string; page?: number; perPage?: number }) {
+    const page = Math.max(1, dto.page ?? 1);
+    const perPage = Math.min(100, Math.max(1, dto.perPage ?? 20));
+    const where = {
+      ...(dto.categoryId != null ? { categoryId: dto.categoryId } : {}),
+      ...(dto.q?.trim() ? { name: { contains: dto.q.trim() } } : {}),
+    };
+
+    const [rows, total, requestCounts] = await Promise.all([
+      this.prisma.good.findMany({
+        where,
+        orderBy: [{ usageCount: 'desc' }, { updatedAt: 'desc' }],
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      this.prisma.good.count({ where }),
+      this.prisma.buyRequest.groupBy({ by: ['goodId'], _count: { _all: true } }),
+    ]);
+
+    const requestMap = new Map(requestCounts.map((r) => [r.goodId, r._count._all]));
+    const catIds = [...new Set(rows.map((g) => g.categoryId))];
+    const cats = await this.prisma.category.findMany({
+      where: { id: { in: catIds } },
+      select: { id: true, categoryName: true, parentId: true },
+    });
+    const catMap = new Map(cats.map((c) => [c.id, c]));
+    // اجداد دسته‌ها — مرحله‌به‌مرحله بالا می‌رویم تا ریشه (حداکثر ۳ سطح)
+    for (let level = 0; level < 3; level++) {
+      const nextIds = new Set<number>();
+      for (const c of catMap.values()) {
+        if (c.parentId != null && !catMap.has(c.parentId)) nextIds.add(c.parentId);
+      }
+      if (nextIds.size === 0) break;
+      const parents = await this.prisma.category.findMany({
+        where: { id: { in: [...nextIds] } },
+        select: { id: true, categoryName: true, parentId: true },
+      });
+      for (const p of parents) catMap.set(p.id, p);
+    }
+
+    /** مسیر کامل مثل «کشاورزی ← خشکبار ← پسته» */
+    const fullPath = (catId: number): string => {
+      const names: string[] = [];
+      let cursor = catMap.get(catId);
+      let hops = 0;
+      while (cursor && hops < 4) {
+        names.unshift(cursor.categoryName);
+        cursor = cursor.parentId != null ? catMap.get(cursor.parentId) : undefined;
+        hops++;
+      }
+      return names.join(' ← ') || '—';
+    };
+
+    return {
+      items: rows.map((g) => {
+        return {
+          id: g.id,
+          name: g.name,
+          categoryId: g.categoryId,
+          categoryName: catMap.get(g.categoryId)?.categoryName ?? '—',
+          /** مسیر دسته مثل «کشاورزی ← خشکبار ← پسته» */
+          categoryPath: fullPath(g.categoryId),
+          usageCount: g.usageCount,
+          requestCount: requestMap.get(g.id) ?? 0,
+          createdAt: g.createdAt,
+        };
+      }),
+      total,
+      page,
+      pageCount: Math.max(1, Math.ceil(total / perPage)),
+    };
+  }
+
+  /** POST /admin/base-data/deleteGood — حذف نوع کالا (فقط بدون ارجاع درخواست) */
+  async deleteGood(id: number) {
+    const good = await this.prisma.good.findUnique({ where: { id } });
+    if (!good) throw AppError.notFound('نوع کالا مورد نظر پیدا نشد.');
+
+    const requestCount = await this.prisma.buyRequest.count({ where: { goodId: id } });
+    if (requestCount > 0) {
+      throw AppError.conflict(
+        'درخواست‌های خریدی به این نوع کالا ارجاع دارند؛ حذف آن ممکن نیست.',
+        'IN_USE',
+      );
+    }
+
+    await this.prisma.good.delete({ where: { id } });
     return { id, deleted: true };
   }
 

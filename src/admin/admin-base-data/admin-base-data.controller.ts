@@ -6,6 +6,8 @@ import { AdminBaseDataService } from './admin-base-data.service';
 import { ok } from '../../common/api-response';
 import {
   DeleteCategoryDto,
+  DeleteGoodDto,
+  GetGoodsDto,
   SetLocationActiveDto,
   UpsertCategoryDto,
   UpsertLocationDto,
@@ -41,6 +43,20 @@ export class AdminBaseDataController {
   @ApiOperation({ summary: 'حذف دسته — فقط بدون فرزند و بدون ارجاع' })
   async deleteCategory(@Body() dto: DeleteCategoryDto) {
     return ok(await this.baseData.deleteCategory(dto.id));
+  }
+
+  // ─── انواع کالا (Good) ──────────────────────────────────────────────
+
+  @Post('getGoods')
+  @ApiOperation({ summary: 'انواع کالا (ورودی آزاد کاربران) با مسیر دسته و شمارنده‌ها' })
+  async getGoods(@Body() dto: GetGoodsDto) {
+    return ok(await this.baseData.getGoods(dto));
+  }
+
+  @Post('deleteGood')
+  @ApiOperation({ summary: 'حذف نوع کالا — فقط بدون ارجاع درخواست' })
+  async deleteGood(@Body() dto: DeleteGoodDto) {
+    return ok(await this.baseData.deleteGood(dto.id));
   }
 
   // ─── مکان‌ها ───────────────────────────────────────────────────────────────

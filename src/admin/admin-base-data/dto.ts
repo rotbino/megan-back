@@ -54,6 +54,39 @@ export class DeleteCategoryDto {
   id!: number;
 }
 
+export class GetGoodsDto {
+  /** فیلتر دسته برگ */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  categoryId?: number;
+
+  /** جستجو در نام نوع */
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  perPage?: number;
+}
+
+export class DeleteGoodDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+}
+
 export class UpsertLocationDto {
   /** buskolId موجود = ویرایش؛ خالی = ایجاد (id تازه از Counter) */
   @IsOptional()

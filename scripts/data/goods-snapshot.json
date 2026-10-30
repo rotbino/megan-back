@@ -1,0 +1,30 @@
+{
+  "types": [
+    {
+      "id": 900002,
+      "name": "اکبری",
+      "categoryId": 44
+    },
+    {
+      "id": 900011,
+      "name": "مامرا",
+      "categoryId": 55
+    },
+    {
+      "id": 900012,
+      "name": "ماسک بزرگ",
+      "categoryId": 1042
+    },
+    {
+      "id": 900013,
+      "name": "احمدآقایی",
+      "categoryId": 44
+    },
+    {
+      "id": 900014,
+      "name": "فندقی",
+      "categoryId": 44
+    }
+  ],
+  "requests": []
+}
