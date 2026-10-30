@@ -10,9 +10,12 @@ import { CallsService } from '../calls/calls.service';
 import { PresenceService } from '../presence/presence.service';
 import type { AuthUser } from '../common/guards';
 import type { CreateProductDto, GetProductListDto, UpdateMyProductDto } from './dto';
+import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages.service';
 
-/** ظرفیت آگهی پلن رایگان باسکول */
-export const PRODUCT_CAPACITY = 5;
+/** ظرفیت آگهی بسته رایگان — قبلاً ۵؛ حالا ۱۰ (خواسته مالک). بسته فعال = نامحدود. */
+export const PRODUCT_CAPACITY = FREE_PRODUCT_CAPACITY;
+/** capacity=-1 در پاسخ getMyProducts یعنی «نامحدود» (بسته فعال) */
+export const UNLIMITED_CAPACITY = -1;
 const PER_PAGE_DEFAULT = 16;
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
 
@@ -219,15 +222,22 @@ export class ProductsService {
 
   /** POST /products/createProduct — خروجی ویزارد ۶ مرحله‌ای → «در انتظار تایید» */
   async createProduct(user: AuthUser, dto: CreateProductDto) {
-    // ظرفیت پلن رایگان (عین باسکول)
-    const active = await this.prisma.product.count({
-      where: { userId: user.id, status: { in: ['pending', 'confirmed'] } },
+    // ظرفیت — بسته رایگان ۱۰ آگهی؛ بسته فعال = نامحدود (خواسته مالک)
+    const me = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { activePakageType: true, packageExpiresAt: true },
     });
-    if (active >= PRODUCT_CAPACITY) {
-      throw AppError.badRequest(
-        'امکان ثبت محصول جدید را ندارید! ظرفیت پلن رایگان شما تکمیل شده است.',
-        'CAPACITY_FULL',
-      );
+    const pakage = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt);
+    if (pakage === 0) {
+      const active = await this.prisma.product.count({
+        where: { userId: user.id, status: { in: ['pending', 'confirmed'] } },
+      });
+      if (active >= FREE_PRODUCT_CAPACITY) {
+        throw AppError.badRequest(
+          'امکان ثبت محصول جدید را ندارید! ظرفیت بسته رایگان شما (۱۰ آگهی) تکمیل شده است — با خرید بسته اشتراک، ثبت محصول نامحدود می‌شود.',
+          'CAPACITY_FULL',
+        );
+      }
     }
 
     // اعتبارسنجی ارجاع‌ها — دسته/استان/شهر باید فعال باشند
@@ -292,6 +302,14 @@ export class ProductsService {
     const counts: Record<string, number> = { confirmed: 0, pending: 0, rejected: 0, deleted: 0 };
     for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
 
+    // ظرفیت مؤثر — بسته فعال = نامحدود (-1)؛ رایگان = ۱۰
+    const me = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { activePakageType: true, packageExpiresAt: true },
+    });
+    const pakage = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt);
+    const capacity = pakage > 0 ? UNLIMITED_CAPACITY : FREE_PRODUCT_CAPACITY;
+
     const [gallery, names] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
@@ -299,7 +317,7 @@ export class ProductsService {
     return {
       items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
       counts,
-      capacity: PRODUCT_CAPACITY,
+      capacity,
     };
   }
 

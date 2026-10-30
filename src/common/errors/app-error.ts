@@ -17,8 +17,8 @@ export class AppError extends HttpException {
   static unauthorized(msg: string): AppError {
     return new AppError('UNAUTHORIZED', msg, HttpStatus.UNAUTHORIZED);
   }
-  static forbidden(msg: string): AppError {
-    return new AppError('FORBIDDEN', msg, HttpStatus.FORBIDDEN);
+  static forbidden(msg: string, code = 'FORBIDDEN'): AppError {
+    return new AppError(code, msg, HttpStatus.FORBIDDEN);
   }
   static notFound(msg = 'یافت نشد.'): AppError {
     return new AppError('NOT_FOUND', msg, HttpStatus.NOT_FOUND);

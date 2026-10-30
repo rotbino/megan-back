@@ -156,11 +156,14 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
   j = await sendReceipt('wallet/createChargeOrder', userToken, 'p100', null);
   check('بدون فیش رد می‌شود', j.json?.code === 'RECEIPT_MISSING', JSON.stringify(j.json));
 
-  // ۸) سفارش p200 با فیش → pending + دیده شدن در تراکنش‌ها
+  // ۸) سفارش p200 با فیش → pending؛ طبق TEST-D6 در تراکنش‌ها «نمی‌آید» —
+  //    فیش‌های در انتظار فقط در تب «کارت به کارت» (getMyChargeOrders) زندگی می‌کنند
   j = await sendReceipt('wallet/createChargeOrder', userToken, 'p200', jpeg);
   check('سفارش شارژ pending', j.json?.status === true && j.json?.data?.status === 'pending', JSON.stringify(j.json).slice(0, 300));
   r = await post('wallet/getWalletTransactions', {}, userToken);
-  check('تراکنش در انتظار تایید دیده می‌شود', (r.json?.data?.items ?? []).some((t) => t.pendingAdmin && t.amount === 220_000));
+  check('تراکنش در انتظار در تاریخچه نمی‌آید (TEST-D6)', !(r.json?.data?.items ?? []).some((t) => t.amount === 220_000));
+  r = await post('wallet/getMyChargeOrders', {}, userToken);
+  check('فیش در انتظار در تب «کارت به کارت»', (r.json?.data?.items ?? []).some((t) => t.status === 'pending' && t.amount === 200_000));
   check('موجودی هنوز صفر', (await post('wallet/getWallet', {}, userToken)).json?.data?.balance === 0);
 
   // ۹) ادمین — صف + فیش آروان + رد بدون دلیل
@@ -210,10 +213,10 @@ async function sendReceipt(path, token, packageKey, jpegBuf, filename = 'receipt
   r = await post('wallet/ladderProduct', { productId: productA }, userToken);
   check('نردبان سوم رد می‌شود', r.json?.code === 'WALLET_INSUFFICIENT', JSON.stringify(r.json));
 
-  // ۱۶) تاریخچه — شارژ تأییدشده + ردشده + ۲ نردبان
+  // ۱۶) تاریخچه — شارژ تأییدشده + ۲ نردبان (TEST-D6: در انتظار/ردشده اینجا نیستند)
   r = await post('wallet/getWalletTransactions', {}, userToken);
   const items = r.json?.data?.items ?? [];
-  check('۴ تراکنش', items.length === 4, JSON.stringify(items));
+  check('۳ تراکنش', items.length === 3, JSON.stringify(items));
   check('شارژ تأییدشده (+220هزار)', items.some((t) => t.incoming && !t.pendingAdmin && t.amount === 220_000));
   check('شارژ ردشده', items.some((t) => !t.incoming && t.amount === 100_000 && /رد/.test(t.title)));
   check('۲ نردبان کسرشده', items.filter((t) => !t.incoming && /نردبان/.test(t.title) && t.amount === 100_000).length === 2);

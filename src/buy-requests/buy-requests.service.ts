@@ -4,6 +4,7 @@ import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
+import { effectivePakageType } from '../packages/packages.service';
 import type { AuthUser } from '../common/guards';
 import {
   CreateBuyRequestDto,
@@ -240,7 +241,9 @@ export class BuyRequestsService {
     return rows.map((r) => this.toDto(r, names));
   }
 
-  /** POST /buy-requests/getBuyRequestContact — شماره خریدار (لاگین لازم) */
+  /** POST /buy-requests/getBuyRequestContact — شماره خریدار (لاگین لازم).
+   *  گیت بسته (خواسته مالک): بسته رایگان شماره خریداران را نمی‌بیند —
+   *  فقط با بسته فعال (۱/۲/۳) اطلاعات تماس آشکار می‌شود. */
   async getBuyRequestContact(user: AuthUser, id: number) {
     const row = await this.prisma.buyRequest.findUnique({
       where: { id },
@@ -249,6 +252,21 @@ export class BuyRequestsService {
     if (!row || row.status !== 'confirmed') {
       throw AppError.notFound('درخواست خرید یافت نشد.');
     }
+
+    // خودِ خریدار بدون بسته هم شماره خودش را می‌بیند
+    if (row.userId !== user.id) {
+      const me = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { activePakageType: true, packageExpiresAt: true },
+      });
+      if (effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) === 0) {
+        throw AppError.forbidden(
+          'مشاهده اطلاعات تماس خریداران ویژه بسته اشتراک فعال دارد — برای دسترسی نامحدود به همه خریداران، یکی از بسته‌های ایمچ را فعال کنید.',
+          'PACKAGE_REQUIRED',
+        );
+      }
+    }
+
     const buyer = await this.prisma.user.findUnique({
       where: { id: row.userId },
       select: { phone: true, firstName: true, lastName: true, isVerified: true },
@@ -387,6 +405,15 @@ export class BuyRequestsService {
    * حجم فروش» باسکول) — امتیاز تطابق از ۱۰۰.
    */
   async getSuggestedBuyers(userId: string): Promise<SuggestedBuyerDto[]> {
+    // گیت بسته — خریداران پیشنهادی هم مثل صفحه خریداران ویژه بسته فعال است
+    const me = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { activePakageType: true, packageExpiresAt: true },
+    });
+    if (effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) === 0) {
+      return [];
+    }
+
     const products = await this.prisma.product.findMany({
       where: { userId, status: 'confirmed' },
       select: { id: true, productName: true, subCategoryId: true, stock: true },

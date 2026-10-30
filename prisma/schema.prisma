@@ -71,6 +71,14 @@ model User {
   /// پروفایل کسب‌وکار embedded — فیلدهای myuser_profiles باسکول
   profile    Json?
 
+  /// بسته فعال — عین active_pakage_type باسکول:
+  /// ۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله. انقضای گذشته عملاً رایگان است
+  /// (effectivePakageType در پکیج‌سرویس محاسبه می‌شود؛ فیلد دست‌نخورده می‌ماند
+  /// تا سابقه پس از تمدید دوباره زنده شود).
+  activePakageType Int        @default(0) @map("active_pakage_type")
+  /// انقضای بسته فعال — null یعنی هیچ بسته‌ای خریداری نشده
+  packageExpiresAt DateTime?  @map("package_expires_at")
+
   files        File[]         @relation("FileOwner")
   products     Product[]      @relation("ProductOwner")
   refreshTokens RefreshToken[]
@@ -94,6 +102,8 @@ model User {
   reviewsReceived SellerReview[] @relation("ReviewSeller")
   /// نظراتی که این کاربر درباره فروشندگان نوشته
   reviewsWritten SellerReview[] @relation("ReviewAuthor")
+  /// سفارش‌های خرید بسته اشتراک این کاربر (کارت‌به‌کارت + فیش)
+  packageOrders  PackageOrder[] @relation("PackageOrderOwner")
   /// پاسخ نظرسنجی عملکرد ایمچ (یکی؛ userId یکتا)
   surveyResponse  SurveyResponse? @relation("SurveyOwner")
 
@@ -517,6 +527,39 @@ model ChargeOrder {
   /// کاربر ادمین بررسی‌کننده
   reviewedBy String?   @map("reviewed_by") @db.ObjectId
   reviewedAt DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// سفارش خرید بسته اشتراک (عین ChargeOrder ولی برای اشتراک، نه شارژ کیف پول):
+/// کاربر مبلغ پلن را کارت‌به‌کارت می‌کند + فیش را می‌فرستد → ادمین تأیید می‌کند
+/// → activePakageType کاربر روی پلن تنظیم و packageExpiresAt تمدید می‌شود.
+/// امکانات بسته: ثبت نامحدود محصول، دسترسی به خریداران، نشان فروشنده ویژه.
+model PackageOrder {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @map("user_id") @db.ObjectId
+  user      User     @relation("PackageOrderOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// کلید پلن — p2m | p6m | p12m
+  planKey   String  @map("plan_key")
+  /// مدت پلن (ماه) — ۲ | ۶ | ۱۲
+  months    Int
+  /// مبلغ واریزی کارت‌به‌کارت (تومان)
+  amount    Int
+
+  /// pending | approved | rejected
+  status         String  @default("pending")
+  rejectionReason String? @map("rejection_reason")
+  /// کاربر ادمین بررسی‌کننده
+  reviewedBy String?   @map("reviewed_by") @db.ObjectId
+  reviewedAt DateTime? @map("reviewed_at")
+  /// بازه اعتبار اعمال‌شده پس از تأیید (startsAt = مبنا یا انقضای زنده قبلی)
+  startsAt  DateTime? @map("starts_at")
+  expiresAt DateTime? @map("expires_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -9,6 +9,7 @@ import { AdminBuyRequestsModule } from './admin-buy-requests/admin-buy-requests.
 import { AdminActionsModule } from './admin-actions/admin-actions.module';
 import { AdminActionInterceptor } from './admin-actions/admin-action.interceptor';
 import { AdminWalletModule } from './admin-wallet/admin-wallet.module';
+import { AdminPackagesModule } from './admin-packages/admin-packages.module';
 import { AdminAdminsModule } from './admin-admins/admin-admins.module';
 import { AdminUploadsModule } from './admin-uploads/admin-uploads.module';
 import { AdminChatsModule } from './admin-chats/admin-chats.module';
@@ -35,6 +36,7 @@ import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
     AdminBuyRequestsModule,
     AdminActionsModule,
     AdminWalletModule,
+    AdminPackagesModule, // صف بازبینی فیش‌های خرید بسته اشتراک
     AdminAdminsModule,
     AdminUploadsModule,
     AdminChatsModule,

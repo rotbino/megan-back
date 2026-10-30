@@ -18,6 +18,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { SurveyModule } from './survey/survey.module';
 import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
+import { PackagesModule } from './packages/packages.module';
 import { PushModule } from './push/push.module';
 import { AdminModule } from './admin/admin.module';
 
@@ -44,6 +45,7 @@ import { AdminModule } from './admin/admin.module';
     SurveyModule,
     CallsModule,
     WalletModule,
+    PackagesModule, // بسته‌های اشتراک — خرید کارت‌به‌کارت + گیت‌ها
     PushModule,
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],

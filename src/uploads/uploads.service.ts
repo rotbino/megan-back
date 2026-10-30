@@ -27,7 +27,7 @@ import type { AuthUser } from '../common/guards';
 import { buildStorage, type StorageDriver } from './storage';
 
 /** مدل‌هایی که فایل تزئین می‌کند — کلاینت نمی‌تواند دیگری بسازد. */
-export const RELATED_MODELS = ['User', 'Product', 'Verification', 'ChargeOrder'] as const;
+export const RELATED_MODELS = ['User', 'Product', 'Verification', 'ChargeOrder', 'PackageOrder'] as const;
 export type RelatedModel = (typeof RELATED_MODELS)[number];
 
 /** ObjectIdهای ارسالی کلاینت قبل از لمس Prisma اعتبارسنجی می‌شوند (۲۴hex → 404 تمیز) */
@@ -58,6 +58,7 @@ const MODEL_FOLDER: Record<RelatedModel, string> = {
   Product: 'products',
   Verification: 'verifications',
   ChargeOrder: 'charge-orders',
+  PackageOrder: 'package-orders',
 };
 
 const MIME_EXT: Record<string, string> = {
@@ -269,6 +270,19 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         select: { userId: true },
       });
       if (!order) throw AppError.notFound('سفارش شارژ یافت نشد.');
+      if (order.userId !== user.id && user.role !== 'ADMIN') {
+        throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
+      }
+      return order;
+    }
+    // PackageOrder — فیش خرید بسته اشتراک؛ id آبجکت، فقط مالک سفارش
+    if (model === 'PackageOrder') {
+      if (!OID_RE.test(modelId)) throw AppError.notFound('سفارش بسته یافت نشد.');
+      const order = await this.prisma.packageOrder.findUnique({
+        where: { id: modelId },
+        select: { userId: true },
+      });
+      if (!order) throw AppError.notFound('سفارش بسته یافت نشد.');
       if (order.userId !== user.id && user.role !== 'ADMIN') {
         throw AppError.forbidden('شما اجازه‌ی این کار را ندارید.');
       }
