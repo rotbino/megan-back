@@ -16,16 +16,39 @@ export const CHARGE_PACKAGES = [
   { key: 'p400', amount: 400_000, bonusPercent: 20, charge: 480_000 },
 ] as const;
 
+/** شارژ دلخواه (دکمه «سایر» — خواسته مالک ۳۱-۱۰):
+ *  • حداقل ۴۰۰ هزار تومان — کمتر رد می‌شود.
+ *  • ۴۰۰ هزار تا ۱ میلیون → ۳۰٪ شارژ اضافه؛ بیش از ۱ میلیون → ۵۰٪. */
+export const CUSTOM_CHARGE_MIN = 400_000;
+/** سقف منطقی شارژ دلخواه — جلوگیری از اشتباه سه‌رقمی در فیش */
+export const CUSTOM_CHARGE_MAX = 100_000_000;
+/** آستانه ۵۰٪ — بالای این مبلغ */
+export const CUSTOM_CHARGE_TIER2_AT = 1_000_000;
+
+/** درصد شارژ اضافه مبلغ دلخواه — ۳۰٪ تا ۱ میلیون، ۵۰٪ بالاتر */
+export function customBonusPercent(amount: number): number {
+  return amount > CUSTOM_CHARGE_TIER2_AT ? 50 : 30;
+}
+
 /** هزینه نردبان هر آگهی برای یک ماه — خواسته مالک (۳۰-۱۰): ۵۰ هزار تومان */
 export const LADDER_MONTHLY_PRICE = 50_000;
 
-/** مدت نردبان: ۳۰ روز */
-const LADDER_DURATION_MS = 30 * 86_400_000;
+/** حداکثر ماه نردبان (خواسته مالک ۳۱-۱۰: تا ۴ ماه) */
+export const LADDER_MAX_MONTHS = 4;
+
+/** مدت نردبان: ۳۰ روز در هر ماه */
+const LADDER_MONTH_MS = 30 * 86_400_000;
 
 /** حداکثر تراکنش‌های برگشتی در تاریخچه */
 const TRANSACTIONS_LIMIT = 100;
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
+
+/** برچسب فارسی تعداد ماه — یک‌ماهه/دو ماهه/سه ماهه/چهار ماهه */
+function monthsLabel(months: number): string {
+  const n = Math.min(12, Math.max(1, Math.round(months)));
+  return n === 1 ? 'یک‌ماهه' : n === 2 ? 'دو ماهه' : n === 3 ? 'سه ماهه' : 'چهار ماهه';
+}
 
 export interface WalletTransactionDto {
   id: string;
@@ -104,8 +127,10 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       const premiumIds = premiumUsers.map((u) => u.id);
 
       const [on, off] = await this.prisma.$transaction([
+        // not:true (→ $ne) در مونگو اسنادِ «بدون فیلد» را هم می‌گیرد —
+        // آگهی‌های مهاجرت‌شده قدیمی is_elevated صریح ندارند
         this.prisma.product.updateMany({
-          where: { userId: { in: premiumIds }, isElevated: false },
+          where: { userId: { in: premiumIds }, isElevated: { not: true } },
           data: { isElevated: true },
         }),
         this.prisma.product.updateMany({
@@ -134,12 +159,21 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
     return {
       balance: me.walletBalance,
-      /** حداقل شارژ — برابر هزینه نردبان یک‌ماهه (عین باسکول) */
+      /** حداقل شارژ پکیجی — برابر هزینه نردبان یک‌ماهه (عین باسکول) */
       minCharge: LADDER_MONTHLY_PRICE,
       ladderMonthlyPrice: LADDER_MONTHLY_PRICE,
+      ladderMaxMonths: LADDER_MAX_MONTHS,
       cardNumber: walletEnv.CARD_NUMBER,
       cardOwner: walletEnv.CARD_OWNER,
       packages: CHARGE_PACKAGES,
+      /** قواعد شارژ دلخواه (دکمه «سایر») — فرانت همان را نمایش می‌دهد */
+      custom: {
+        min: CUSTOM_CHARGE_MIN,
+        max: CUSTOM_CHARGE_MAX,
+        tier2At: CUSTOM_CHARGE_TIER2_AT,
+        tier1Percent: 30,
+        tier2Percent: 50,
+      },
     };
   }
 
@@ -160,7 +194,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         where: { userId },
         orderBy: { createdAt: 'desc' },
         take: TRANSACTIONS_LIMIT,
-        select: { id: true, productId: true, amount: true, createdAt: true },
+        select: { id: true, productId: true, amount: true, months: true, createdAt: true },
       }),
       this.prisma.walletAdjustment.findMany({
         where: { userId },
@@ -191,7 +225,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       })),
       ...ladders.map((l) => ({
         id: `ladder:${l.id}`,
-        title: `نردبان «${productName.get(l.productId) ?? 'آگهی'}» — یک‌ماهه`,
+        title: `نردبان «${productName.get(l.productId) ?? 'آگهی'}» — ${monthsLabel(l.months)}`,
         amount: l.amount,
         incoming: false,
         type: 'ladder' as const,
@@ -247,15 +281,42 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** POST /wallet/createChargeOrder (multipart: packageKey + receipt) — فیش واریزی */
+  /** POST /wallet/createChargeOrder (multipart: packageKey [+ amount] + receipt) —
+   *  فیش واریزی. packageKey='custom' + amount = شارژ دلخواه (دکمه «سایر»):
+   *  حداقل ۴۰۰ هزار؛ ۳۰٪ شارژ اضافه تا ۱ میلیون و ۵۰٪ بالاتر (خواسته مالک ۳۱-۱۰). */
   async createChargeOrder(user: AuthUser, req: FastifyRequest) {
-    // ۱) پکیج + فیش — فقط این دو فیلد پذیرفته می‌شوند
+    // ۱) پکیج + مبلغ — اول اعتبار پکیج/مبلغ، بعد فیش (پیام درست به کاربر)
     const { fields, files } = await this.uploads.readMultipartMulti(req, ['receipt']);
     const packageKey = (fields.packageKey || '').trim();
-    const pkg = CHARGE_PACKAGES.find((p) => p.key === packageKey);
-    if (!pkg) {
-      throw AppError.badRequest('پکیج شارژ نامعتبر است.', 'PACKAGE_INVALID');
+
+    let amount: number;
+    let bonusPercent: number;
+    if (packageKey === 'custom') {
+      // شارژ دلخواه — «سایر»
+      amount = Math.round(Number(fields.amount));
+      if (!Number.isFinite(amount) || amount < CUSTOM_CHARGE_MIN) {
+        throw AppError.badRequest(
+          `حداقل مبلغ شارژ دلخواه ${CUSTOM_CHARGE_MIN.toLocaleString('fa-IR')} تومان است.`,
+          'CUSTOM_CHARGE_MIN',
+        );
+      }
+      if (amount > CUSTOM_CHARGE_MAX) {
+        throw AppError.badRequest(
+          `حداکثر مبلغ شارژ دلخواه ${CUSTOM_CHARGE_MAX.toLocaleString('fa-IR')} تومان است.`,
+          'CUSTOM_CHARGE_MAX',
+        );
+      }
+      bonusPercent = customBonusPercent(amount);
+    } else {
+      const pkg = CHARGE_PACKAGES.find((p) => p.key === packageKey);
+      if (!pkg) {
+        throw AppError.badRequest('پکیج شارژ نامعتبر است.', 'PACKAGE_INVALID');
+      }
+      amount = pkg.amount;
+      bonusPercent = pkg.bonusPercent;
     }
+    const charge = Math.round(amount * (1 + bonusPercent / 100));
+
     const receipt = files.get('receipt');
     if (!receipt) {
       throw AppError.badRequest('تصویر فیش واریزی الزامی است.', 'RECEIPT_MISSING');
@@ -266,10 +327,10 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     const order = await this.prisma.chargeOrder.create({
       data: {
         userId: user.id,
-        packageKey: pkg.key,
-        amount: pkg.amount,
-        bonusPercent: pkg.bonusPercent,
-        charge: pkg.charge,
+        packageKey,
+        amount,
+        bonusPercent,
+        charge,
       },
     });
     try {
@@ -286,17 +347,22 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
     return {
       orderId: order.id,
-      packageKey: pkg.key,
-      amount: pkg.amount,
-      charge: pkg.charge,
+      packageKey,
+      amount,
+      bonusPercent,
+      charge,
       status: 'pending' as const,
     };
   }
 
   // ─── نردبان ─────────────────────────────────────────────────────────────────
 
-  /** POST /wallet/ladderProduct — نردبان یک‌ماهه از کیف پول (اتمیک) */
+  /** POST /wallet/ladderProduct — نردبان ۱ تا ۴ ماه از کیف پول (اتمیک).
+   *  پیش‌فرض ۱ ماه؛ اگر موجودی برای ماه‌های انتخابی کافی نباشد پیام دقیق همان
+   * بازه می‌آید: «شارژ برای دو ماهه کافی نیست» (خواسته مالک ۳۱-۱۰). */
   async ladderProduct(user: AuthUser, dto: LadderProductDto) {
+    const months = Math.min(LADDER_MAX_MONTHS, Math.max(1, Math.round(dto.months ?? 1)));
+    const cost = LADDER_MONTHLY_PRICE * months;
     const product = await this.prisma.product.findUnique({
       where: { id: dto.productId },
       select: { id: true, userId: true, status: true, productName: true, isLadder: true, ladderExpiresAt: true },
@@ -319,9 +385,16 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       where: { id: user.id },
       select: { walletBalance: true },
     });
-    if (!me || me.walletBalance < LADDER_MONTHLY_PRICE) {
+    const insufficient = (needed: number, label: string) =>
+      me && me.walletBalance < needed
+        ? `موجودی کیف پول برای نردبان ${label} کافی نیست — برای این گزینه ${needed.toLocaleString(
+            'fa-IR',
+          )} تومان شارژ لازم دارید.`
+        : null;
+    const msg = insufficient(cost, monthsLabel(months));
+    if (!me || msg) {
       throw AppError.badRequest(
-        'موجودی کیف پول برای نردبان کافی نیست — ابتدا کیف پول خود را شارژ کنید.',
+        msg ?? 'موجودی کیف پول برای نردبان کافی نیست — ابتدا کیف پول خود را شارژ کنید.',
         'WALLET_INSUFFICIENT',
       );
     }
@@ -329,14 +402,14 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     // تمدید = امتداد از انقضای فعلی (اگر هنوز زنده است)، وگرنه از الان
     const now = new Date();
     const currentExpiry = product.ladderExpiresAt && product.ladderExpiresAt > now ? product.ladderExpiresAt : null;
-    const expiresAt = new Date((currentExpiry ?? now).getTime() + LADDER_DURATION_MS);
+    const expiresAt = new Date((currentExpiry ?? now).getTime() + months * LADDER_MONTH_MS);
 
     try {
       await this.prisma.$transaction([
         // گارد شرطی اتمیک: فقط اگر موجودی هنوز کافی باشد کم می‌شود (P2025 → کافی نیست)
         this.prisma.user.update({
-          where: { id: user.id, walletBalance: { gte: LADDER_MONTHLY_PRICE } },
-          data: { walletBalance: { decrement: LADDER_MONTHLY_PRICE } },
+          where: { id: user.id, walletBalance: { gte: cost } },
+          data: { walletBalance: { decrement: cost } },
         }),
         this.prisma.product.update({
           where: { id: product.id },
@@ -346,7 +419,8 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
           data: {
             productId: product.id,
             userId: user.id,
-            amount: LADDER_MONTHLY_PRICE,
+            amount: cost,
+            months,
             startsAt: now,
             expiresAt,
           },
@@ -355,7 +429,9 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
         throw AppError.badRequest(
-          'موجودی کیف پول برای نردبان کافی نیست — ابتدا کیف پول خود را شارژ کنید.',
+          `موجودی کیف پول برای نردبان ${monthsLabel(months)} کافی نیست — برای این گزینه ${cost.toLocaleString(
+            'fa-IR',
+          )} تومان شارژ لازم دارید.`,
           'WALLET_INSUFFICIENT',
         );
       }
@@ -375,8 +451,9 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       productId: product.id,
       productName: product.productName,
       isLadder: true,
+      months,
       ladderExpiresAt: expiresAt,
-      balance: after?.walletBalance ?? me.walletBalance - LADDER_MONTHLY_PRICE,
+      balance: after?.walletBalance ?? me.walletBalance - cost,
     };
   }
 

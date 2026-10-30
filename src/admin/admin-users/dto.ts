@@ -41,6 +41,11 @@ export class GetUserListDto {
   @IsBoolean()
   seller?: boolean;
 
+  /** فقط کاربران ویژه (بسته اشتراک فعال — خواسته مالک ۳۱-۱۰) */
+  @IsOptional()
+  @IsBoolean()
+  special?: boolean;
+
   /** فقط کاربران آنلاین (نبض تازه‌تر از پنجره ۹۰ ثانیه) */
   @IsOptional()
   @IsBoolean()

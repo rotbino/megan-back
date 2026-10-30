@@ -1,12 +1,20 @@
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
-/** POST /wallet/ladderProduct — خرید نردبان یک‌ماهه برای آگهی خودِ کاربر */
+/** POST /wallet/ladderProduct — خرید نردبان برای آگهی خودِ کاربر
+ *  months: ۱ تا ۴ (پیش‌فرض ۱ — خواسته مالک ۳۱-۱۰) */
 export class LadderProductDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
   productId!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(4)
+  months?: number;
 }
 
 /** POST /wallet/getChargeOrders (ادمین) */

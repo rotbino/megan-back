@@ -16,9 +16,9 @@ export class PackagesController {
   constructor(private readonly packages: PackagesService) {}
 
   @Post('getPlans')
-  @ApiOperation({ summary: 'پلن‌های اشتراک + امکانات بسته رایگان + کارت واریز (عمومی)' })
+  @ApiOperation({ summary: 'پلن‌های اشتراک + کمپین جاری + امکانات بسته رایگان + کارت واریز (عمومی)' })
   async getPlans() {
-    return ok(this.packages.getPlans());
+    return ok(await this.packages.getPlans());
   }
 
   @UseGuards(JwtAuthGuard)

@@ -78,6 +78,10 @@ model User {
   activePakageType Int        @default(0) @map("active_pakage_type")
   /// انقضای بسته فعال — null یعنی هیچ بسته‌ای خریداری نشده
   packageExpiresAt DateTime?  @map("package_expires_at")
+  /// شروع دوره بسته جاری (مبنای نمودار دایره‌ای «ایمچ من» — کل دوره =
+  /// expiresAt − startedAt). هنگام تأیید سفارش روی مبنا (اکنون یا انقضای
+  /// زنده فعلی در تمدید/رزرو) ست می‌شود؛ null = دوره قدیمی بدون مبنای ثبت‌شده.
+  packageStartedAt DateTime?  @map("package_started_at")
 
   files        File[]         @relation("FileOwner")
   products     Product[]      @relation("ProductOwner")
@@ -572,6 +576,64 @@ model ChargeOrder {
   @@index([userId, createdAt(sort: Desc)])
 }
 
+/// بسته اشتراک قابل تعریف توسط ادمین (جدول بسته‌ها + ویژگی‌ها — خواسته مالک
+/// ۳۱-۱۰): قیمت/مدت/عنوان/ویژگی‌ها همه از DB می‌آیند؛ ادمین می‌تواند بسته جدید
+/// بسازد یا ویژگی‌های موجود را کم و زیاد کند. سفارش‌ها فقط planKey را ارجاع
+/// می‌دهند + snapshot مبلغ تا تاریخچه پس از تغییر قیمت سالم بماند.
+model Plan {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// کلید یکتا — p2m | p6m | p12m | … (ادمین تعیین می‌کند)
+  key       String   @unique
+  title     String
+  /// مدت (ماه) — ماه تجاری ۳۰ روزه
+  months    Int
+  /// قیمت پایه (تومان) — قبل از تخفیف کمپین؛ قیمت نهایی = پایه × (۱ − ٪تخفیف)
+  amount    Int
+  /// سطح بسته — ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله (روی activePakageType کاربر)
+  pakageType Int
+  bestSeller Boolean @default(false)
+  /// ویژگی‌های بسته — رشته[] (ردیف‌های کارت قیمت در صفحه بسته‌ها)
+  features  Json?
+  /// نمایش در صفحه بسته‌ها
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+  /// تعداد فروش این بسته (خواسته مالک: تعداد جذب در جدول بسته‌ها)
+  soldCount Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+}
+
+/// کمپین فروش (خواسته مالک ۳۱-۱۰) — دو نوع:
+///  • زمانی (time): درصد ثابت تا تاریخ پایان (مثلاً ۵۰٪ سالگرد فعالیت).
+///  • تعدادی (quantity): پله‌ای بر اساس شمار خریداران — «۱۰ نفر اول ۷۰٪،
+///    ۳۰ نفر بعدی ۵۰٪، ۱۰۰ نفر بعدی ۳۰٪، تا پایان کمپین ۳۰٪». تخفیف جاری
+///    از purchaseCount محاسبه می‌شود؛ manualDiscountPercent برای دست‌کاری
+///    مستقیم ادمین (null = خودکار پله‌ای).
+model SalesCampaign {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  title     String
+  /// شعار/توضیح — بالای بسته‌ها در صفحه قیمت‌ها نمایش داده می‌شود
+  description String?
+  /// time | quantity
+  type      String   @default("time")
+  /// درصد تخفیف (پایه — در نوع زمانی همان جاری)
+  discountPercent Int @default(0)
+  /// override دستی درصد جاری — null = محاسبه خودکار پله‌ای
+  manualDiscountPercent Int? @map("manual_discount_percent")
+  startsAt  DateTime @default(now()) @map("starts_at")
+  /// پایان کمپین — null یعنی بی‌پایان (تا غیرفعال شود)
+  endsAt    DateTime? @map("ends_at")
+  isActive  Boolean  @default(true)
+  /// پله‌های کمپین تعدادی — [{from:1,to:10,percent:70}, …] (to=null = تا پایان)
+  tiers     Json?
+  /// شمار خریدهای ثبت‌شده در این کمپین (خواسته مالک: در جدول کمپین ذخیره شود)
+  purchaseCount Int @default(0) @map("purchase_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+}
+
 /// سفارش خرید بسته اشتراک (عین ChargeOrder ولی برای اشتراک، نه شارژ کیف پول):
 /// کاربر مبلغ پلن را کارت‌به‌کارت می‌کند + فیش را می‌فرستد → ادمین تأیید می‌کند
 /// → activePakageType کاربر روی پلن تنظیم و packageExpiresAt تمدید می‌شود.
@@ -581,12 +643,19 @@ model PackageOrder {
   userId    String   @map("user_id") @db.ObjectId
   user      User     @relation("PackageOrderOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  /// کلید پلن — p2m | p6m | p12m
+  /// کلید پلن — p2m | p6m | p12m | …
   planKey   String  @map("plan_key")
-  /// مدت پلن (ماه) — ۲ | ۶ | ۱۲
+  /// مدت پلن (ماه) — ۲ | ۶ | ۱۲ | …
   months    Int
-  /// مبلغ واریزی کارت‌به‌کارت (تومان)
+  /// مبلغ واریزی کارت‌به‌کارت (تومان) — پس از تخفیف کمپین (قابل پرداخت)
   amount    Int
+  /// قیمت پایه قبل از تخفیف — برای نمایش خط‌خورده در تاریخچه (snapshot)
+  baseAmount Int    @default(0) @map("base_amount")
+  /// درصد تخفیف کمپین لحظه خرید (snapshot — ۰ = بدون کمپین)
+  discountPercent Int @default(0) @map("discount_percent")
+  /// کمپین لحظه خرید (snapshot عنوان برای نمایش تاریخچه)
+  campaignId    String? @map("campaign_id")
+  campaignTitle String? @map("campaign_title")
 
   /// pending | approved | rejected
   status         String  @default("pending")
@@ -639,8 +708,10 @@ model LadderOrder {
   userId    String   @map("user_id") @db.ObjectId
   user      User     @relation("LadderOrderOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  /// مبلغ پرداختی از کیف پول (تومان) — ثابت ۱۰۰هزار
+  /// مبلغ پرداختی از کیف پول (تومان) — ۵۰ هزار × تعداد ماه
   amount    Int
+  /// تعداد ماه نردبان — ۱ تا ۴ (خواسته مالک ۳۱-۱۰؛ پیش‌فرض ۱)
+  months    Int      @default(1)
   startsAt  DateTime @map("starts_at")
   expiresAt DateTime @map("expires_at")
 

@@ -37,6 +37,10 @@ export interface AdminUserRow {
   city_id: number | null;
   product_count: number;
   request_count: number;
+  /** کاربر ویژه — بسته اشتراک فعال دارد (خواسته مالک ۳۱-۱۰) */
+  is_special: boolean;
+  /** انقضای بسته فعال — null یعنی هیچ/منقضی */
+  package_expires_at: Date | null;
   /** pending | verified | none — برای چیپ وضعیت احراز */
   verification: 'pending' | 'verified' | 'none';
   last_login_at: Date | null;
@@ -87,6 +91,19 @@ export class AdminUsersService {
       ...(dto.active !== undefined ? { isActive: dto.active } : {}),
       ...(dto.verified !== undefined ? { isVerified: dto.verified } : {}),
       ...(dto.seller !== undefined ? { isSeller: dto.seller } : {}),
+      // کاربر ویژه = بسته فعال (سطح > ۰ و انقضای آینده) — خواسته مالک ۳۱-۱۰
+      ...(dto.special === true
+        ? { activePakageType: { gt: 0 }, packageExpiresAt: { gt: new Date() } }
+        : {}),
+      ...(dto.special === false
+        ? {
+            OR: [
+              { activePakageType: 0 },
+              { packageExpiresAt: null },
+              { packageExpiresAt: { lte: new Date() } },
+            ],
+          }
+        : {}),
       ...(dto.online === true ? { id: { in: onlineIds } } : {}),
       ...(dto.online === false ? { id: { notIn: onlineIds } } : {}),
       ...(s
@@ -153,6 +170,9 @@ export class AdminUsersService {
         city_id: u.cityId,
         product_count: productMap.get(u.id) ?? 0,
         request_count: requestMap.get(u.id) ?? 0,
+        is_special:
+          u.activePakageType > 0 && u.packageExpiresAt != null && u.packageExpiresAt > new Date(),
+        package_expires_at: u.packageExpiresAt,
         verification: u.isVerified ? 'verified' : pendingSet.has(u.id) ? 'pending' : 'none',
         last_login_at: u.lastLoginAt,
         // آنلاین از حضور واقعی — خروج صریح (سوکت/بیکن) هم همین‌جا می‌نشیند
@@ -213,6 +233,14 @@ export class AdminUsersService {
         is_active: user.isActive,
         has_password: Boolean(user.passwordHash),
         wallet_balance: user.walletBalance,
+        /** ویژه — بسته فعال + سطح/انقضای آن (خواسته مالک ۳۱-۱۰) */
+        active_pakage_type: user.activePakageType,
+        package_expires_at: user.packageExpiresAt,
+        package_started_at: user.packageStartedAt,
+        is_special:
+          user.activePakageType > 0 &&
+          user.packageExpiresAt != null &&
+          user.packageExpiresAt > new Date(),
         avatar_url: user.avatarUrl,
         business_desc: user.businessDesc,
         province_id: user.provinceId,

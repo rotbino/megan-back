@@ -6,9 +6,18 @@ import { AdminId } from '../admin-auth/admin-auth.controller';
 import { AdminUsername } from '../admin-wallet/admin-wallet.controller';
 import { AdminPackagesService } from './admin-packages.service';
 import { ok } from '../../common/api-response';
-import { GetAdminPackageOrdersDto, ReviewAdminPackageOrderDto } from './dto';
+import {
+  DeleteCampaignDto,
+  DeletePlanDto,
+  GetAdminPackageOrdersDto,
+  GetCampaignsDto,
+  ReviewAdminPackageOrderDto,
+  SetCampaignDiscountDto,
+  UpsertCampaignDto,
+  UpsertPlanDto,
+} from './dto';
 
-/** صف بررسی فیش‌های خرید بسته اشتراک — منبع واحد (admin/packages/*) */
+/** مدیریت بسته‌های اشتراک و کمپین‌های فروش — منبع واحد (admin/packages/*) */
 @ApiTags('admin-packages')
 @UseGuards(AdminJwtAuthGuard)
 @ApiBearerAuth()
@@ -16,6 +25,8 @@ import { GetAdminPackageOrdersDto, ReviewAdminPackageOrderDto } from './dto';
 @Controller('admin/packages')
 export class AdminPackagesController {
   constructor(private readonly packages: AdminPackagesService) {}
+
+  // ─── سفارش‌ها (صف فیش‌ها) ────────────────────────────────────────────────
 
   @Post('getPackageOrders')
   @ApiOperation({ summary: 'صف بررسی فیش‌های بسته — فیلتر وضعیت + صفحه‌بندی' })
@@ -33,6 +44,64 @@ export class AdminPackagesController {
     return ok(
       await this.packages.reviewPackageOrder(adminId, adminUsername, dto),
       dto.approve ? 'بسته اشتراک کاربر تأیید و فعال شد.' : 'سفارش بسته رد شد.',
+    );
+  }
+
+  // ─── بسته‌ها (CRUD — خواسته مالک ۳۱-۱۰) ─────────────────────────────────
+
+  @Post('getPlans')
+  @ApiOperation({ summary: 'همه بسته‌ها + آمار فروش/جذب هر بسته' })
+  async getPlans() {
+    return ok(await this.packages.getPlans());
+  }
+
+  @Post('upsertPlan')
+  @ApiOperation({ summary: 'ساخت/ویرایش بسته — قیمت و ویژگی‌ها قابل تغییر (id خالی = ساخت)' })
+  async upsertPlan(@Body() dto: UpsertPlanDto) {
+    return ok(
+      await this.packages.upsertPlan(dto),
+      dto.id ? 'بسته به‌روزرسانی شد.' : 'بسته جدید ساخته شد.',
+    );
+  }
+
+  @Post('deletePlan')
+  @ApiOperation({ summary: 'حذف بسته — اگر سفارش دارد فقط غیرفعال می‌شود' })
+  async deletePlan(@Body() dto: DeletePlanDto) {
+    return ok(
+      await this.packages.deletePlan(dto),
+      dto.id ? undefined : undefined,
+    );
+  }
+
+  // ─── کمپین‌های فروش (خواسته مالک ۳۱-۱۰) ─────────────────────────────────
+
+  @Post('getCampaigns')
+  @ApiOperation({ summary: 'لیست کمپین‌ها + وضعیت جاری + شمار خرید هر کمپین' })
+  async getCampaigns(@Body() dto: GetCampaignsDto) {
+    return ok(await this.packages.getCampaigns(dto));
+  }
+
+  @Post('upsertCampaign')
+  @ApiOperation({ summary: 'ساخت/ویرایش کمپین زمانی/تعدادی (id خالی = ساخت)' })
+  async upsertCampaign(@Body() dto: UpsertCampaignDto) {
+    return ok(
+      await this.packages.upsertCampaign(dto),
+      dto.id ? 'کمپین به‌روزرسانی شد.' : 'کمپین جدید ساخته شد.',
+    );
+  }
+
+  @Post('deleteCampaign')
+  @ApiOperation({ summary: 'حذف کمپین' })
+  async deleteCampaign(@Body() dto: DeleteCampaignDto) {
+    return ok(await this.packages.deleteCampaign(dto), 'کمپین حذف شد.');
+  }
+
+  @Post('setCampaignDiscount')
+  @ApiOperation({ summary: 'تغییر سریع درصد تخفیف جاری کمپین (null = خودکار پله‌ای)' })
+  async setCampaignDiscount(@Body() dto: SetCampaignDiscountDto) {
+    return ok(
+      await this.packages.setCampaignDiscount(dto),
+      'درصد تخفیف جاری کمپین به‌روزرسانی شد.',
     );
   }
 }

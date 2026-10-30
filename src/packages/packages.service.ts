@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
@@ -14,23 +15,64 @@ import type { GetPackageOrdersDto } from './dto';
  * مدل درآمدی دو لایه (خواسته مالک):
  *  • بسته رایگانِ همیشگی — ثبت تا ۱۰ محصول + درخواست خرید نامحدود؛
  *    اما «خریداران» (شماره تماس / خریداران پیشنهادی) دیده نمی‌شود.
- *  • بسته‌های پولی (۲/۶/۱۲ ماهه) — ثبت نامحدود محصول + دسترسی نامحدود به
- *    همه خریداران + نشان فروشنده ویژه + اولویت نمایش.
+ *  • بسته‌های پولی (از جدول Plan — ادمین تعریف/ویرایش می‌کند) — ثبت نامحدود
+ *    محصول + دسترسی نامحدود به همه خریداران + نشان فروشنده ویژه.
+ *
+ * کمپین فروش (خواسته مالک ۳۱-۱۰):
+ *  • زمانی — درصد ثابت تا تاریخ پایان (مثلاً جشنواره ۵۰٪ آغاز فعالیت).
+ *  • تعدادی — پله‌ای بر اساس شمار خریداران؛ تخفیف جاری از purchaseCount
+ *    محاسبه می‌شود و ادمین می‌تواند manualDiscountPercent را دستی ست کند.
+ *  • عنوان/شعار کمپین بالای بسته‌ها در صفحه قیمت‌ها نمایش داده می‌شود؛
+ *    قیمت نهایی = قیمت پایه × (۱ − درصد تخفیف جاری).
  *
  * پرداخت: کارت‌به‌کارت + فیش (عین B9) → تأیید ادمین در /admin/packages/* →
- * activePakageType کاربر روی پلن تنظیم و packageExpiresAt تمدید می‌شود.
- * انقضای گذشته عملاً رایگان است (effectivePakageType) — فیلد خام دست
- * نمی‌خورد تا با تمدید، باقیمانده اعتبار قبلی هدر نرود.
+ * activePakageType کاربر روی پلن تنظیم و packageExpiresAt تمدید می‌شود
+ * (خرید در حین بسته فعال = رزرو — امتداد از انقضای فعلی؛ مالکان فعلی از
+ * جشنواره‌ها محروم نمی‌شوند).
  */
 
-/** پلن‌های اشتراک — قیمت‌ها حدود یک‌بیستم باسکول (خواسته مالک) */
-export const MEMBERSHIP_PLANS = [
-  { key: 'p2m', months: 2, amount: 199_000, title: 'دو ماهه', pakageType: 1 },
-  { key: 'p6m', months: 6, amount: 499_000, title: 'شش ماهه', pakageType: 2, bestSeller: true },
-  { key: 'p12m', months: 12, amount: 799_000, title: 'یک‌ساله', pakageType: 3 },
+/** بذر پیش‌فرض بسته‌ها — فقط بار اول/خالی بودن جدول. قیمت پایه دوبرابر قیمت
+ *  قبلی است و کمپین ۵۰٪ آغاز فعالیت آن را به قیمت قبلی برمی‌گرداند (خواسته
+ *  مالک ۳۱-۱۰: «قیمت‌ها دو برابر + ۵۰٪ تخفیف = قیمت فعلی»). */
+export const SEED_PLANS = [
+  {
+    key: 'p2m',
+    months: 2,
+    amount: 398_000,
+    title: 'دو ماهه',
+    pakageType: 1,
+    bestSeller: false,
+    sortOrder: 1,
+  },
+  {
+    key: 'p6m',
+    months: 6,
+    amount: 998_000,
+    title: 'شش ماهه',
+    pakageType: 2,
+    bestSeller: true,
+    sortOrder: 2,
+  },
+  {
+    key: 'p12m',
+    months: 12,
+    amount: 1_598_000,
+    title: 'یک‌ساله',
+    pakageType: 3,
+    bestSeller: false,
+    sortOrder: 3,
+  },
 ] as const;
 
-export type MembershipPlanKey = (typeof MEMBERSHIP_PLANS)[number]['key'];
+/** ویژگی‌های پیش‌فرض بسته‌های پولی — ردیف‌های کارت قیمت */
+export const DEFAULT_PLAN_FEATURES = [
+  'ثبت تعداد نامحدود محصول',
+  'دسترسی نامحدود به همه خریداران',
+  'ثبت درخواست خرید نامحدود',
+  'درج نشان فروشنده ویژه روی محصولات و پروفایل',
+  'نمایش محصولات بالاتر از رقبا',
+  'اولویت بررسی و پشتیبانی ویژه',
+];
 
 /** ظرفیت ثبت محصول بسته رایگان — قبلاً ۵ بود؛ خواسته مالک: ۱۰ */
 export const FREE_PRODUCT_CAPACITY = 10;
@@ -42,6 +84,32 @@ const MONTH_MS = 30 * 86_400_000;
 const ORDERS_LIMIT = 100;
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
+
+/** پله کمپین تعدادی — to=null یعنی تا پایان کمپین */
+export interface CampaignTier {
+  from: number;
+  to: number | null;
+  percent: number;
+}
+
+/** شکل امن خوانده‌شده tiers از Json */
+export function readTiers(raw: unknown): CampaignTier[] {
+  if (!Array.isArray(raw)) return [];
+  const tiers: CampaignTier[] = [];
+  for (const t of raw) {
+    if (!t || typeof t !== 'object') continue;
+    const o = t as Record<string, unknown>;
+    const from = Number(o.from);
+    const percent = Number(o.percent);
+    const to = o.to == null ? null : Number(o.to);
+    if (!Number.isFinite(from) || !Number.isFinite(percent)) continue;
+    if (to != null && !Number.isFinite(to)) continue;
+    if (from < 1 || percent < 0 || percent > 100) continue;
+    if (to != null && to < from) continue;
+    tiers.push({ from, to, percent: Math.round(percent) });
+  }
+  return tiers.sort((a, b) => a.from - b.from);
+}
 
 /**
  * بسته مؤثر — انقضای گذشته/نبودِ بسته = رایگان (۰).
@@ -57,6 +125,38 @@ export function effectivePakageType(
   return packageExpiresAt.getTime() > Date.now() ? activePakageType : 0;
 }
 
+/** ردیف بسته برای خروجی عمومی — قیمت پایه + تخفیف جاری + قیمت نهایی */
+export interface PublicPlan {
+  key: string;
+  title: string;
+  months: number;
+  /** قیمت پایه (خط‌خورده در UI اگر تخفیف فعال باشد) */
+  amount: number;
+  /** درصد تخفیف جاری کمپین — ۰ = بدون کمپین */
+  discountPercent: number;
+  /** قیمت نهایی قابل پرداخت = amount × (۱ − discountPercent) */
+  finalAmount: number;
+  pakageType: number;
+  bestSeller: boolean;
+  features: string[];
+}
+
+/** کمپین فعال + تخفیف جاری — شکل خروجی عمومی */
+export interface ActiveCampaignInfo {
+  id: string;
+  title: string;
+  description: string | null;
+  type: 'time' | 'quantity';
+  /** درصد جاری — در تعدادی از پله/override دستی، در زمانی همان discountPercent */
+  discountPercent: number;
+  endsAt: Date | null;
+  /** شمار خریدهای ثبت‌شده تاکنون */
+  purchaseCount: number;
+  /** پله جاری (فقط تعدادی) + برچسب انسانی مثل «۷ نفر از ۱۰ نفر اول» */
+  currentTier: { from: number; to: number | null; percent: number; boughtInTier: number } | null;
+  tiers: CampaignTier[];
+}
+
 @Injectable()
 export class PackagesService {
   constructor(
@@ -65,10 +165,132 @@ export class PackagesService {
     private readonly cache: CacheService,
   ) {}
 
-  /** POST /packages/getPlans — عمومی: پلن‌ها + امکانات بسته رایگان (صفحه قیمتها) */
-  getPlans() {
+  // ─── بسته‌ها (جدول Plan) ──────────────────────────────────────────────────
+
+  /** بذر اولیه — فقط وقتی جدول خالی است (idempotent) */
+  private async ensureSeeded(): Promise<void> {
+    const count = await this.prisma.plan.count();
+    if (count > 0) return;
+    await this.prisma.plan.createMany({
+      data: SEED_PLANS.map((p) => ({
+        ...p,
+        features: DEFAULT_PLAN_FEATURES,
+        isActive: true,
+        soldCount: 0,
+      })),
+    });
+  }
+
+  /** بسته‌های فعال از DB — مرتب بر اساس sortOrder؛ خالی → بذر می‌ریزد */
+  private async activePlans() {
+    await this.ensureSeeded();
+    return this.prisma.plan.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
+  }
+
+  /** یافتن بسته با key — فعال یا غیرفعال (برای تاریخچه سفارش‌ها) */
+  async findPlanByKey(key: string) {
+    return this.prisma.plan.findUnique({ where: { key } });
+  }
+
+  // ─── کمپین‌ها ─────────────────────────────────────────────────────────────
+
+  /** کمپین فعالِ جاری — جدیدترین کمپینِ فعال که شروع شده و منقضی نشده */
+  async activeCampaign() {
+    const now = new Date();
+    return this.prisma.salesCampaign.findFirst({
+      where: {
+        isActive: true,
+        startsAt: { lte: now },
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** پله جاری کمپین تعدادی بر اساس شمار خرید — خرید بعدی = count+1 */
+  static tierFor(tiers: CampaignTier[], nextBuyerIndex: number): CampaignTier | null {
+    for (const t of tiers) {
+      if (nextBuyerIndex >= t.from && (t.to == null || nextBuyerIndex <= t.to)) return t;
+    }
+    return null;
+  }
+
+  /** درصد تخفیف جاری کمپین — override دستی مقدم بر محاسبه پله‌ای */
+  currentPercent(
+    campaign: { type: string; discountPercent: number; manualDiscountPercent: number | null; tiers: Prisma.JsonValue | null },
+    purchaseCount: number,
+  ): number {
+    if (campaign.manualDiscountPercent != null) {
+      return Math.max(0, Math.min(100, Math.round(campaign.manualDiscountPercent)));
+    }
+    if (campaign.type === 'quantity') {
+      const tier = PackagesService.tierFor(readTiers(campaign.tiers), purchaseCount + 1);
+      if (tier) return tier.percent;
+    }
+    return Math.max(0, Math.min(100, Math.round(campaign.discountPercent)));
+  }
+
+  /** شکل عمومی کمپین فعال — برای getPlans و getMyPackage */
+  private campaignInfo(
+    c: {
+      id: string;
+      title: string;
+      description: string | null;
+      type: string;
+      discountPercent: number;
+      manualDiscountPercent: number | null;
+      endsAt: Date | null;
+      tiers: Prisma.JsonValue | null;
+      purchaseCount: number;
+    } | null,
+  ): ActiveCampaignInfo | null {
+    if (!c) return null;
+    const tiers = readTiers(c.tiers);
+    const percent = this.currentPercent(c, c.purchaseCount);
+    let currentTier: ActiveCampaignInfo['currentTier'] = null;
+    if (c.type === 'quantity') {
+      const tier = PackagesService.tierFor(tiers, c.purchaseCount + 1);
+      if (tier) {
+        const boughtInTier = Math.max(0, c.purchaseCount - (tier.from - 1));
+        currentTier = { ...tier, boughtInTier };
+      }
+    }
     return {
-      plans: MEMBERSHIP_PLANS,
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      type: c.type === 'quantity' ? 'quantity' : 'time',
+      discountPercent: percent,
+      endsAt: c.endsAt,
+      purchaseCount: c.purchaseCount,
+      currentTier,
+      tiers,
+    };
+  }
+
+  // ─── عمومی ────────────────────────────────────────────────────────────────
+
+  /** POST /packages/getPlans — عمومی: بسته‌ها (با تخفیف جاری) + کمپین + کارت واریز */
+  async getPlans() {
+    const [plans, campaign] = await Promise.all([this.activePlans(), this.activeCampaign()]);
+    const info = this.campaignInfo(campaign);
+    const percent = info?.discountPercent ?? 0;
+
+    const publicPlans: PublicPlan[] = plans.map((p) => ({
+      key: p.key,
+      title: p.title,
+      months: p.months,
+      amount: p.amount,
+      discountPercent: percent,
+      finalAmount: Math.round((p.amount * (100 - percent)) / 100),
+      pakageType: p.pakageType,
+      bestSeller: p.bestSeller,
+      features: readFeatures(p.features),
+    }));
+
+    return {
+      plans: publicPlans,
+      campaign: info,
       cardNumber: walletEnv.CARD_NUMBER,
       cardOwner: walletEnv.CARD_OWNER,
       free: {
@@ -83,7 +305,11 @@ export class PackagesService {
   private async myPackage(userId: string) {
     const me = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { activePakageType: true, packageExpiresAt: true },
+      select: {
+        activePakageType: true,
+        packageExpiresAt: true,
+        packageStartedAt: true,
+      },
     });
     if (!me) throw AppError.notFound('حساب کاربری یافت نشد.');
 
@@ -94,19 +320,49 @@ export class PackagesService {
     return { me, active, pendingCount };
   }
 
-  /** POST /packages/getMyPackage — وضعیت بسته من (پنل + گیت صفحات) */
+  /** POST /packages/getMyPackage — وضعیت بسته من (پنل + گیت صفحات + نمودار دایره‌ای) */
   async getMyPackage(userId: string) {
     const { me, active, pendingCount } = await this.myPackage(userId);
-    const expiresAt = me.packageExpiresAt && me.packageExpiresAt > new Date() ? me.packageExpiresAt : null;
+    const expiresAt =
+      me.packageExpiresAt && me.packageExpiresAt > new Date() ? me.packageExpiresAt : null;
+
+    // دوره جاری برای نمودار دایره‌ای «ایمچ من»: کل = انقضا − شروع.
+    // startedAt قدیمی‌ها null است → از سطح بسته برش می‌زنیم (۲/۶/۱۲ ماه).
+    let startedAt = me.packageStartedAt;
+    let totalDays: number | null = null;
+    if (expiresAt) {
+      const fallbackMonths = me.activePakageType === 3 ? 12 : me.activePakageType === 2 ? 6 : 2;
+      if (!startedAt || startedAt >= expiresAt) {
+        startedAt = new Date(expiresAt.getTime() - fallbackMonths * MONTH_MS);
+      }
+      totalDays = Math.max(
+        1,
+        Math.round((expiresAt.getTime() - startedAt.getTime()) / 86_400_000),
+      );
+    }
     const daysLeft = expiresAt
       ? Math.max(1, Math.ceil((expiresAt.getTime() - Date.now()) / 86_400_000))
       : null;
+
+    // عنوان بسته جاری از جدول Plan (برای «اشتراک {عنوان}»)
+    let planTitle: string | null = null;
+    if (active > 0) {
+      const plan = await this.prisma.plan.findFirst({
+        where: { pakageType: active, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+      });
+      planTitle = plan?.title ?? null;
+    }
+
     return {
       /** ۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله (مؤثر — انقضا لحاظ شده) */
       pakageType: active,
       isActive: active > 0,
       expiresAt,
+      startedAt: active > 0 ? startedAt : null,
+      totalDays,
       daysLeft,
+      planTitle,
       pendingCount,
       features: {
         /** -1 = نامحدود */
@@ -117,13 +373,14 @@ export class PackagesService {
     };
   }
 
-  /** POST /packages/createPackageOrder (multipart: planKey + receipt) — فیش خرید بسته */
+  /** POST /packages/createPackageOrder (multipart: planKey + receipt) — فیش خرید بسته.
+   *  تخفیف کمپین جاری snapshot می‌شود؛ مبلغ قابل پرداخت = قیمت نهایی. */
   async createPackageOrder(user: AuthUser, req: FastifyRequest) {
-    // ۱) پلن + فیش — فقط این دو فیلد پذیرفته می‌شوند (عین B9)
+    // ۱) بسته + فیش — فقط این دو فیلد پذیرفته می‌شوند (عین B9)
     const { fields, files } = await this.uploads.readMultipartMulti(req, ['receipt']);
     const planKey = (fields.planKey || '').trim();
-    const plan = MEMBERSHIP_PLANS.find((p) => p.key === planKey);
-    if (!plan) {
+    const plan = await this.findPlanByKey(planKey);
+    if (!plan || !plan.isActive) {
       throw AppError.badRequest('بسته انتخابی نامعتبر است.', 'PACKAGE_INVALID');
     }
     const receipt = files.get('receipt');
@@ -131,10 +388,39 @@ export class PackagesService {
       throw AppError.badRequest('تصویر فیش واریزی الزامی است.', 'RECEIPT_MISSING');
     }
 
+    // تخفیف کمپین جاری — snapshot روی سفارش
+    const campaign = await this.activeCampaign();
+    const percent = campaign ? this.currentPercent(campaign, campaign.purchaseCount) : 0;
+    const finalAmount = Math.round((plan.amount * (100 - percent)) / 100);
+
     // ۲) سفارش (ردیف مرجع) → ۳) چسباندن فیش با جبران کامل در خطا
-    const order = await this.prisma.packageOrder.create({
-      data: { userId: user.id, planKey: plan.key, months: plan.months, amount: plan.amount },
+    //    شمارنده‌های جذب (کمپین + بسته) اتمیک با سفارش بالا می‌روند
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.packageOrder.create({
+        data: {
+          userId: user.id,
+          planKey: plan.key,
+          months: plan.months,
+          amount: finalAmount,
+          baseAmount: plan.amount,
+          discountPercent: percent,
+          campaignId: campaign?.id ?? null,
+          campaignTitle: percent > 0 && campaign ? campaign.title : null,
+        },
+      });
+      if (campaign) {
+        await tx.salesCampaign.update({
+          where: { id: campaign.id },
+          data: { purchaseCount: { increment: 1 } },
+        });
+      }
+      await tx.plan.update({
+        where: { id: plan.id },
+        data: { soldCount: { increment: 1 } },
+      });
+      return created;
     });
+
     try {
       await this.uploads.upload(
         user,
@@ -143,7 +429,16 @@ export class PackagesService {
       );
     } catch (err) {
       await this.uploads.removeAllForModel('PackageOrder', order.id).catch(() => undefined);
+      // جبران شمارنده‌ها + سفارش (هرکدام مستقل — خطای یکی نباید بقیه را بگذراند)
       await this.prisma.packageOrder.delete({ where: { id: order.id } }).catch(() => undefined);
+      if (campaign) {
+        await this.prisma.salesCampaign
+          .update({ where: { id: campaign.id }, data: { purchaseCount: { decrement: 1 } } })
+          .catch(() => undefined);
+      }
+      await this.prisma.plan
+        .update({ where: { id: plan.id }, data: { soldCount: { decrement: 1 } } })
+        .catch(() => undefined);
       throw err;
     }
 
@@ -151,7 +446,9 @@ export class PackagesService {
       orderId: order.id,
       planKey: plan.key,
       months: plan.months,
-      amount: plan.amount,
+      amount: finalAmount,
+      baseAmount: plan.amount,
+      discountPercent: percent,
       status: 'pending' as const,
     };
   }
@@ -182,6 +479,9 @@ export class PackagesService {
           planKey: r.planKey,
           months: r.months,
           amount: r.amount,
+          baseAmount: r.baseAmount,
+          discountPercent: r.discountPercent,
+          campaignTitle: r.campaignTitle,
           rejectionReason: r.status === 'rejected' ? r.rejectionReason : null,
           reviewedAt: r.reviewedAt,
           startsAt: r.startsAt,
@@ -242,6 +542,9 @@ export class PackagesService {
           planKey: r.planKey,
           months: r.months,
           amount: r.amount,
+          baseAmount: r.baseAmount,
+          discountPercent: r.discountPercent,
+          campaignTitle: r.campaignTitle,
           rejectionReason: r.rejectionReason,
           reviewedAt: r.reviewedAt,
           startsAt: r.startsAt,
@@ -262,7 +565,9 @@ export class PackagesService {
 
   /**
    * POST /admin/packages/reviewPackageOrder — تأیید → اعمال/تمدید بسته؛ رد → دلیل.
-   * تمدید = امتداد از انقضای زنده فعلی (اگر بسته فعال دارد)، وگرنه از الان.
+   * تمدید/رزرو = امتداد از انقضای زنده فعلی (اگر بسته فعال دارد)، وگرنه از الان.
+   * packageStartedAT روی مبنا ست می‌شود تا نمودار دایره‌ای «ایمچ من» دوره را
+   * کامل نشان دهد.
    */
   async reviewPackageOrder(
     admin: AuthUser,
@@ -277,8 +582,13 @@ export class PackagesService {
       throw AppError.conflict('این سفارش قبلاً بررسی شده است.', 'ALREADY_REVIEWED');
     }
 
-    const plan = MEMBERSHIP_PLANS.find((p) => p.key === order.planKey);
-    if (!plan) throw AppError.badRequest('پلن این سفارش معتبر نیست.', 'PACKAGE_INVALID');
+    // بسته از DB (یا بذر) — سفارش‌های قدیمی هم پوشیده می‌شوند
+    let plan = await this.findPlanByKey(order.planKey);
+    if (!plan) {
+      const seed = SEED_PLANS.find((p) => p.key === order.planKey);
+      if (!seed) throw AppError.badRequest('پلن این سفارش معتبر نیست.', 'PACKAGE_INVALID');
+      plan = { ...seed, id: '', features: null, isActive: true, soldCount: 0, createdAt: new Date(), updatedAt: new Date() };
+    }
 
     const reason = dto.rejectionReason?.trim();
     if (!dto.approve && !reason) {
@@ -286,7 +596,7 @@ export class PackagesService {
     }
 
     if (dto.approve) {
-      // مبنا: انقضای زنده فعلی (تمدید) یا اکنون (بسته تازه)
+      // مبنا: انقضای زنده فعلی (تمدید/رزرو) یا اکنون (بسته تازه)
       const now = new Date();
       const buyer = await this.prisma.user.findUnique({
         where: { id: order.userId },
@@ -309,7 +619,11 @@ export class PackagesService {
         }),
         this.prisma.user.update({
           where: { id: order.userId },
-          data: { activePakageType: plan.pakageType, packageExpiresAt: expiresAt },
+          data: {
+            activePakageType: plan.pakageType,
+            packageExpiresAt: expiresAt,
+            packageStartedAt: base,
+          },
         }),
         // فروشنده ویژه شد — همه آگهی‌های تاییدشده‌اش elevated می‌شوند تا در
         // سورت «مرتبط‌ترین» بالاتر از رقبا دیده شوند (خواسته مالک ۳۰-۱۰)
@@ -320,7 +634,7 @@ export class PackagesService {
       ]);
       // کش لیست‌ها بیات شود — ترتیب نمایش عوض شده
       this.cache.invalidateTag('products');
-      return { id: updated.id, status: updated.status, expiresAt };
+      return { id: updated.id, status: updated.status, expiresAt, startsAt: base };
     }
 
     const updated = await this.prisma.packageOrder.update({
@@ -329,4 +643,10 @@ export class PackagesService {
     });
     return { id: updated.id, status: updated.status };
   }
+}
+
+/** خواندن امن features (Json) — رشته[] */
+export function readFeatures(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return DEFAULT_PLAN_FEATURES;
+  return raw.filter((f): f is string => typeof f === 'string' && f.trim().length > 0);
 }

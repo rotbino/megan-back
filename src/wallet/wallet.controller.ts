@@ -56,11 +56,13 @@ export class WalletController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('ladderProduct')
-  @ApiOperation({ summary: 'نردبان آگهی برای یک ماه — ۱۰۰هزار تومان از کیف پول' })
+  @ApiOperation({ summary: 'نردبان آگهی ۱ تا ۴ ماه — ۵۰ هزار تومان در ماه از کیف پول' })
   async ladderProduct(@CurrentUser() user: AuthUser, @Body() dto: LadderProductDto) {
+    const res = await this.wallet.ladderProduct(user, dto);
+    const label = res.months === 1 ? 'یک ماه' : res.months === 2 ? 'دو ماه' : res.months === 3 ? 'سه ماه' : 'چهار ماه';
     return ok(
-      await this.wallet.ladderProduct(user, dto),
-      'نردبان آگهی شما برای یک ماه فعال شد و هزینه آن از کیف پولتان کسر شد.',
+      res,
+      `نردبان آگهی شما برای ${label} فعال شد و هزینه آن از کیف پولتان کسر شد.`,
     );
   }
 
