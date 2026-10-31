@@ -8,8 +8,11 @@ import {
   SaveMyBookDto,
   SendSupplyOfferDto,
 } from './dto';
-import { JwtAuthGuard } from '../common/guards';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
+import {
+  CurrentUser,
+  MaybeCurrentUser,
+} from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
@@ -42,10 +45,15 @@ export class BuyersController {
 
   // ─── دایرکتوری عمومی ────────────────────────────────────────────────────────
 
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
   @Post('directory')
-  @ApiOperation({ summary: 'فهرست خریداران — فیلتر دسته/استان/شهر + صفحه‌بندی (بی نام و تماس)' })
-  async directory(@Body() dto: GetBuyerDirectoryDto) {
-    return ok(await this.buyers.directory(dto));
+  @ApiOperation({
+    summary:
+      'فهرست خریداران — فیلتر دسته/استان/شهر + صفحه‌بندی؛ اگر توکن باشد کارت‌های خود بیننده حذف می‌شود',
+  })
+  async directory(@MaybeCurrentUser() viewer: AuthUser | null, @Body() dto: GetBuyerDirectoryDto) {
+    return ok(await this.buyers.directory(dto, viewer?.id ?? null));
   }
 
   // ─── پیشنهاد تامین ─────────────────────────────────────────────────────────

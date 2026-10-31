@@ -177,8 +177,10 @@ export class BuyersService {
 
   /** POST /buyers/directory — آیتم‌محور: یک کارت برای هر کالای دفتر خرید.
    *  فیلتر: دسته (زیردرخت) + جستجو + دوره + استان/شهر + صفحه.
-   *  نام نمایشی خریدار روی کارت می‌آید؛ تماس فقط از مسیر چت (خواستهٔ مالک ۱-۱۱). */
-  async directory(dto: GetBuyerDirectoryDto) {
+   *  نام نمایشی خریدار روی کارت می‌آید؛ تماس فقط از مسیر چت (خواستهٔ مالک ۱-۱۱).
+   *  کارت‌های خودِ بینندهٔ واردشده حذف می‌شود — به خودش پیشنهاد نمی‌فرستد
+   *  (رفع باگ «خریدار یافت نشد» ۱-۱۱: فروشنده روی کارت خودش می‌زد). */
+  async directory(dto: GetBuyerDirectoryDto, viewerId: string | null = null) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(48, Math.max(1, dto.perPage ?? 12));
 
@@ -193,6 +195,7 @@ export class BuyersService {
       where: {
         ...(leafSet ? { categoryId: { in: [...leafSet] } } : {}),
         ...(dto.period ? { period: dto.period } : {}),
+        ...(viewerId ? { userId: { not: viewerId } } : {}),
       },
       select: {
         id: true,
@@ -344,12 +347,20 @@ export class BuyersService {
     const gates = await this.offerGates(user, 1);
     const message = dto.message.trim();
 
+    // به خودت پیشنهاد نفرست — پیام شفاف، نه «خریدار یافت نشد» (رفع باگ ۱-۱۱)
+    if (dto.buyerId === user.id) {
+      throw AppError.badRequest(
+        'این کارتِ خود شماست؛ پیشنهاد تامین به خریداران دیگر ارسال می‌شود.',
+        'SELF_OFFER',
+      );
+    }
+
     // خریدار هدف — باید دفتر خرید پر داشته باشد و فعال باشد
     const target = await this.prisma.user.findUnique({
       where: { id: dto.buyerId },
       select: { id: true, isActive: true },
     });
-    if (!target || !target.isActive || target.id === user.id) {
+    if (!target || !target.isActive) {
       throw AppError.notFound('خریدار یافت نشد.');
     }
     const targetBook = await this.prisma.buyerCategory.count({ where: { userId: target.id } });
