@@ -18,8 +18,8 @@ import {
 /** سقف دسته‌های دفتر خرید — عملیات فوق‌ساده بماند (خواسته مالک) */
 export const BUYER_BOOK_MAX = 15;
 
-/** دوره‌های خرید — ترتیب نمایش در همه‌جا یکسان است: ماهیانه، سالیانه، هفتگی، موردی */
-export const BUYER_PERIODS = ['monthly', 'yearly', 'weekly', 'occasional'] as const;
+/** دوره‌های خرید — ترتیب نمایش در همه‌جا یکسان است: روزانه، هفتگی، ماهیانه، سالیانه، موردی */
+export const BUYER_PERIODS = ['daily', 'weekly', 'monthly', 'yearly', 'occasional'] as const;
 
 /** ردیف دفتر خرید — دستهٔ برگ + حداقل حجم + دوره؛ واحد از خود دسته می‌آید */
 export class BuyerBookItemDto {

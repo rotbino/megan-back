@@ -1008,7 +1008,7 @@ model BuyerCategory {
   categoryId Int  @map("category_id")
   /// حداقل حجم خرید در هر دوره (به واحد دسته)
   volumeMin  Int  @map("volume_min")
-  /// دوره خرید — monthly | yearly | weekly | occasional
+  /// دوره خرید — daily | weekly | monthly | yearly | occasional
   period     String @default("monthly") @map("period")
   /// واحد دسته (denorm برای نمایش) — کیلوگرم | تن | عدد | بسته | لیتر
   unit       String @default("کیلوگرم")
