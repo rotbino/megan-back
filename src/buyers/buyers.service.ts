@@ -23,9 +23,9 @@ import {
  * ─── خریداران ایمچ (خواسته مالک ۳۱-۱۰) ───────────────────────────────────────
  *
  * «خریدار» = کاربری که در «دفتر خرید من» دسته‌های برگ + بازهٔ حجم خرید ماهانه
- * ثبت کرده است. دایرکتوری عمومی فقط نقش/دسته‌ها/استان‌وشهر/بازهٔ حجم/فعالیت
- * را نشان می‌دهد — نه نام و نه تماس (حریم خصوصی؛ دفتر خرید ربطی به تبلیغات
- * ندارد و آگهی‌ها را ترویج نمی‌کند).
+ * ثبت کرده است. دایرکتوری عمومی نام نمایشی خریدار + دسته‌ها/استان‌وشهر/
+ * بازهٔ حجم/دوره/فعالیت را نشان می‌دهد (خواستهٔ مالک ۱-۱۱: نام خریدار روی
+ * کارت بیاید) — شمارهٔ تماس هرگز افشا نمی‌شود؛ تماس فقط از مسیر چت است.
  *
  * تنها راه تماس با خریداران: «پیشنهاد تامین» توسط فروشندهٔ دارندهٔ بستهٔ
  * فعال — روزانه تا سقف سطح بسته (از تنظیمات پویا). تحویل به‌صورت پیام چت
@@ -65,8 +65,10 @@ function buyerRole(unit: string, volumeMin: number): 'عمده‌خریدار' |
 export interface BuyerDirectoryEntry {
   /** ObjectId ردیف — برای انتخاب گروهی */
   id: string;
-  /** ObjectId خریدار — برای sendSupplyOffer؛ نام/تماس هرگز افشا نمی‌شود */
+  /** ObjectId خریدار — برای sendSupplyOffer */
   buyerId: string;
+  /** نام نمایشی خریدار — «علی مرادی» (خواستهٔ مالک ۱-۱۱) */
+  buyerName: string;
   role: string;
   categoryId: number;
   categoryName: string;
@@ -175,7 +177,7 @@ export class BuyersService {
 
   /** POST /buyers/directory — آیتم‌محور: یک کارت برای هر کالای دفتر خرید.
    *  فیلتر: دسته (زیردرخت) + جستجو + دوره + استان/شهر + صفحه.
-   *  حریم خصوصی: فقط نقش/دسته/مکان/حداقل حجم/دوره/فعالیت — بی نام و تماس. */
+   *  نام نمایشی خریدار روی کارت می‌آید؛ تماس فقط از مسیر چت (خواستهٔ مالک ۱-۱۱). */
   async directory(dto: GetBuyerDirectoryDto) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(48, Math.max(1, dto.perPage ?? 12));
@@ -238,6 +240,8 @@ export class BuyersService {
           },
           select: {
             id: true,
+            firstName: true,
+            lastName: true,
             provinceId: true,
             cityId: true,
             lastSeenAt: true,
@@ -263,6 +267,7 @@ export class BuyersService {
       items.push({
         id: r.id,
         buyerId: u.id,
+        buyerName: `${u.firstName} ${u.lastName}`.trim() || 'خریدار ایمچ',
         role: buyerRole(r.unit, r.volumeMin),
         categoryId: r.categoryId,
         categoryName: cat?.name ?? `دسته ${r.categoryId}`,
