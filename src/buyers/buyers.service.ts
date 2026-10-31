@@ -14,9 +14,11 @@ import {
   BUYER_PERIODS,
   BuyerBookItemDto,
   GetBuyerDirectoryDto,
+  GetMyReceivedOffersDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
+  SupplyOfferTermsDto,
 } from './dto';
 
 /**
@@ -86,6 +88,18 @@ export interface BuyerDirectoryEntry {
   /** غایب بیش از ۹۰ روز — در UI کم‌رنگ و انتهای فهرست */
   stale: boolean;
 }
+
+/** شرایط ساختاریافتهٔ تامین — خروجی normalizeTerms (آمادهٔ spread در create) */
+type OfferTerms = {
+  categoryId?: number;
+  productType?: string;
+  checkAccepted: boolean;
+  checkPercent?: number;
+  checkMaxDays?: number;
+  deliveryToBuyer: boolean;
+  shippingCostBy?: string;
+  minOrderAmount?: number;
+};
 
 @Injectable()
 export class BuyersService {
@@ -342,10 +356,15 @@ export class BuyersService {
     };
   }
 
-  /** POST /buyers/sendSupplyOffer — تکی، رایگان تا سقف روزانهٔ سطح بسته */
+  /** POST /buyers/sendSupplyOffer — تکی، رایگان تا سقف روزانهٔ سطح بسته.
+   *  دکمهٔ ارسال سمت سایت فقط با دستهٔ آخر (برگ) فعال می‌شود؛ همین گیت اینجا
+   *  هم تکرار می‌شود و دستهٔ هر پیشنهاد ذخیره می‌شود تا خریدار بتواند
+   *  پیشنهادهای دریافتی را بر اساس دسته/نوع کالا فیلتر و مقایسه کند. */
   async sendSupplyOffer(user: AuthUser, dto: SendSupplyOfferDto) {
     const gates = await this.offerGates(user, 1);
     const message = dto.message.trim();
+    const terms = this.normalizeTerms(dto);
+    await this.assertLeafCategory(terms.categoryId);
 
     // به خودت پیشنهاد نفرست — پیام شفاف، نه «خریدار یافت نشد» (رفع باگ ۱-۱۱)
     if (dto.buyerId === user.id) {
@@ -367,6 +386,18 @@ export class BuyersService {
     if (targetBook === 0) {
       throw AppError.notFound('خریدار یافت نشد.');
     }
+    // پیشنهادِ دسته‌دار فقط به خریداری که در همان دسته نیاز ثبت کرده است
+    if (terms.categoryId != null) {
+      const inCat = await this.prisma.buyerCategory.count({
+        where: { userId: target.id, categoryId: terms.categoryId },
+      });
+      if (inCat === 0) {
+        throw AppError.badRequest(
+          'این خریدار در دستهٔ انتخابی شما نیاز خرید ثبت نکرده است.',
+          'BUYER_NOT_IN_CATEGORY',
+        );
+      }
+    }
 
     // سهمیهٔ خریدارانِ متمایز امروز — تکرار به همان خریدار سهمیه نمی‌گیرد
     const contacted = await this.contactedBuyerIdsToday(user.id);
@@ -377,10 +408,16 @@ export class BuyersService {
       );
     }
 
+    // تحویل پیام چت (متن + بلوک شرایط تامین) — بعد ذخیرهٔ ردیف با threadId
+    const unit = await this.unitOfCategory(terms.categoryId);
+    const threadId = await this.deliverOfferMessage(
+      user.id,
+      target.id,
+      message + this.termsBlock(terms, unit),
+    );
     const offer = await this.prisma.supplyOffer.create({
-      data: { sellerId: user.id, buyerId: target.id, message, isGroup: false, fee: 0 },
+      data: { sellerId: user.id, buyerId: target.id, message, isGroup: false, fee: 0, threadId, ...terms },
     });
-    const threadId = await this.deliverOfferMessage(user.id, target.id, message);
 
     const left = Math.max(0, gates.limit - gates.usedToday - (contacted.has(target.id) ? 0 : 1));
     return { offerId: offer.id, threadId, quotaLeft: left };
@@ -392,6 +429,8 @@ export class BuyersService {
     const ids = [...new Set(dto.buyerIds)];
     const gates = await this.offerGates(user, ids.length);
     const message = dto.message.trim();
+    const terms = this.normalizeTerms(dto);
+    await this.assertLeafCategory(terms.categoryId);
 
     if (ids.length > billing.groupSend.maxBatch) {
       throw AppError.badRequest(
@@ -406,14 +445,20 @@ export class BuyersService {
       );
     }
 
-    // اهداف — فعال + دفتر خرید پر
+    // اهداف — فعال + دفتر خرید پر؛ اگر دسته ارسال شده، دفتر باید همان دسته را داشته باشد
     const targets = await this.prisma.user.findMany({
       where: { id: { in: ids }, isActive: true },
       select: { id: true },
     });
-    const books = await this.prisma.buyerCategory.groupBy({ by: ['userId'] }).then((g) =>
-      new Set(g.map((x) => x.userId)),
-    );
+    const books = await this.prisma.buyerCategory
+      .groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: ids },
+          ...(terms.categoryId != null ? { categoryId: terms.categoryId } : {}),
+        },
+      })
+      .then((g) => new Set(g.map((x) => x.userId)));
     const valid = targets.filter((t) => t.id !== user.id && books.has(t.id));
     if (valid.length === 0) {
       throw AppError.badRequest('خریدار معتبری برای ارسال انتخاب نشده است.', 'NO_VALID_BUYER');
@@ -440,15 +485,18 @@ export class BuyersService {
           data: { walletBalance: { decrement: fee } },
         });
         balance = updated.walletBalance;
-        await tx.supplyOffer.createMany({
-          data: valid.map((t) => ({
-            sellerId: user.id,
-            buyerId: t.id,
-            message,
-            isGroup: true,
-            fee: billing.groupSend.perRecipientPrice,
-          })),
-        });
+        for (const t of valid) {
+          await tx.supplyOffer.create({
+            data: {
+              sellerId: user.id,
+              buyerId: t.id,
+              message,
+              isGroup: true,
+              fee: billing.groupSend.perRecipientPrice,
+              ...terms,
+            },
+          });
+        }
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
@@ -460,9 +508,25 @@ export class BuyersService {
       throw err;
     }
 
-    // تحویل پیام چت — پس از تراکنش؛ بهترین‌حالتی (خطای یکی مانع بقیه نمی‌شود)
+    // تحویل پیام چت — پس از تراکنش؛ بهترین‌حالتی (خطای یکی مانع بقیه نمی‌شود).
+    // threadId هر ردیف بعد از تحویل با id همان جفت پر می‌شود؛ گفتگوی هر جفت
+    // (فروشنده، خریدار) یکتاست پس به‌روزرسانی همهٔ ردیف‌های همین جفت با یک
+    // threadId همیشه درست است. (فیلتر threadId:null استفاده نمی‌شود — مونگوی
+    // پرایسما سندِ بی‌فیلد را با null نمی‌گیرد؛ مستند در directory)
+    const unit = await this.unitOfCategory(terms.categoryId);
+    const fullText = message + this.termsBlock(terms, unit);
     for (const t of valid) {
-      await this.deliverOfferMessage(user.id, t.id, message).catch(() => undefined);
+      const threadId = await this.deliverOfferMessage(user.id, t.id, fullText).catch(
+        () => null,
+      );
+      if (threadId) {
+        await this.prisma.supplyOffer
+          .updateMany({
+            where: { sellerId: user.id, buyerId: t.id },
+            data: { threadId },
+          })
+          .catch(() => undefined);
+      }
     }
 
     return {
@@ -471,6 +535,87 @@ export class BuyersService {
       perRecipient: billing.groupSend.perRecipientPrice,
       balance,
       groupLeft: Math.max(0, billing.groupSend.maxPerDay - gates.groupUsedToday - valid.length),
+    };
+  }
+
+  /** POST /buyers/getMyReceivedOffers — پیشنهادهای تامین دریافتی من (پنل
+   *  خریدار): فیلتر دسته/نوع کالا/چک/ارسال + صفحه‌بندی؛ برای مقایسه و
+   *  انتخاب آسان‌تر بین فروشندگان (خواستهٔ مالک ۱-۱۱). */
+  async myReceivedOffers(userId: string, dto: GetMyReceivedOffersDto) {
+    const page = Math.max(1, dto.page ?? 1);
+    const perPage = Math.min(24, Math.max(1, dto.perPage ?? 10));
+    const productType = dto.productType?.trim();
+
+    const where: Prisma.SupplyOfferWhereInput = {
+      buyerId: userId,
+      ...(dto.categoryId != null ? { categoryId: dto.categoryId } : {}),
+      ...(productType ? { productType: { contains: productType } } : {}),
+      ...(dto.hasCheck ? { checkAccepted: true } : {}),
+      ...(dto.hasDelivery ? { deliveryToBuyer: true } : {}),
+    };
+
+    const [rows, total, catRows] = await Promise.all([
+      this.prisma.supplyOffer.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      this.prisma.supplyOffer.count({ where }),
+      // دسته‌های یکتای پیشنهادهای این خریدار — برای فیلتر انتخابی بالای صفحه
+      this.prisma.supplyOffer.findMany({
+        where: { buyerId: userId, categoryId: { not: null } },
+        select: { categoryId: true },
+        distinct: ['categoryId'],
+      }),
+    ]);
+
+    const catIds = catRows.map((r) => r.categoryId).filter((x): x is number => x != null);
+    const cats = await this.categoriesWithPath(catIds);
+
+    const sellerIds = [...new Set(rows.map((r) => r.sellerId))];
+    const sellers = sellerIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: sellerIds } },
+          select: { id: true, firstName: true, lastName: true, isVerified: true },
+        })
+      : [];
+    const sellerById = new Map(sellers.map((s) => [s.id, s]));
+
+    const items = rows.map((r) => {
+      const s = sellerById.get(r.sellerId);
+      const cat = r.categoryId != null ? cats.get(r.categoryId) : undefined;
+      return {
+        id: r.id,
+        sellerId: r.sellerId,
+        sellerName: `${s?.firstName ?? ''} ${s?.lastName ?? ''}`.trim() || 'فروشنده ایمچ',
+        sellerVerified: s?.isVerified ?? false,
+        categoryId: r.categoryId,
+        categoryName: cat?.name ?? null,
+        categoryPath: cat ? [cat.rootName, cat.parentName].filter(Boolean).join(' / ') : null,
+        productType: r.productType,
+        message: r.message,
+        checkAccepted: r.checkAccepted,
+        checkPercent: r.checkPercent,
+        checkMaxDays: r.checkMaxDays,
+        deliveryToBuyer: r.deliveryToBuyer,
+        shippingCostBy: r.shippingCostBy,
+        minOrderAmount: r.minOrderAmount,
+        unit: cat?.unit ?? 'کیلوگرم',
+        isGroup: r.isGroup,
+        threadId: r.threadId,
+        createdAt: r.createdAt,
+      };
+    });
+
+    return {
+      items,
+      total,
+      page,
+      perPage,
+      categories: [...cats.entries()]
+        .map(([id, c]) => ({ id, name: c.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'fa')),
     };
   }
 
@@ -503,6 +648,86 @@ export class BuyersService {
       groupUsedToday,
       batch,
     };
+  }
+
+  /** شرایط ساختاریافتهٔ تامین (خواستهٔ مالک ۱-۱۱): اعتبارسنجیِ وابستگی
+   *  سوییچ‌ها — چک روشن است ولی درصد/سرسید ندارد؟ ارسال به محل روشن است ولی
+   *  پرداخت‌کنندهٔ حمل ندارد؟ همین‌جا خطای شفاف؛ فیلدهای سوییچِ خاموش همیشه
+   *  خالی می‌شوند تا فیلتر خریدار هیچ‌وقت روی دادهٔ ناقص نیفتد. */
+  private normalizeTerms(dto: SupplyOfferTermsDto): OfferTerms {
+    const checkAccepted = dto.checkAccepted === true;
+    const deliveryToBuyer = dto.deliveryToBuyer === true;
+    if (checkAccepted && (dto.checkPercent == null || dto.checkMaxDays == null)) {
+      throw AppError.badRequest(
+        'برای پرداخت چکی، «درصد مبلغ با چک» و «حداکثر سرسید چک» را مشخص کنید.',
+        'CHECK_TERMS_INCOMPLETE',
+      );
+    }
+    if (
+      deliveryToBuyer &&
+      dto.shippingCostBy !== 'seller' &&
+      dto.shippingCostBy !== 'customer'
+    ) {
+      throw AppError.badRequest(
+        'پرداخت‌کنندهٔ هزینهٔ حمل (فروشنده یا مشتری) را مشخص کنید.',
+        'SHIPPING_PAYER_REQUIRED',
+      );
+    }
+    const productType = dto.productType?.trim();
+    return {
+      ...(dto.categoryId != null ? { categoryId: dto.categoryId } : {}),
+      ...(productType ? { productType: productType.slice(0, 60) } : {}),
+      checkAccepted,
+      ...(checkAccepted ? { checkPercent: dto.checkPercent!, checkMaxDays: dto.checkMaxDays! } : {}),
+      deliveryToBuyer,
+      ...(deliveryToBuyer ? { shippingCostBy: dto.shippingCostBy! } : {}),
+      ...(dto.minOrderAmount != null && dto.minOrderAmount > 0
+        ? { minOrderAmount: dto.minOrderAmount }
+        : {}),
+    };
+  }
+
+  /** گیت دستهٔ آخر — دکمهٔ ارسال سمت سایت فقط با انتخاب برگ فعال می‌شود؛
+   *  همین‌جا هم تکرار می‌شود تا هیچ راهی دستهٔ میانی را ثبت نکند. */
+  private async assertLeafCategory(categoryId?: number) {
+    if (categoryId == null) return;
+    const children = await this.prisma.category.count({ where: { parentId: categoryId } });
+    if (children > 0) {
+      throw AppError.badRequest(
+        'برای ارسال پیشنهاد تامین، دستهٔ آخر کالا را انتخاب کنید.',
+        'CATEGORY_NOT_LEAF',
+      );
+    }
+  }
+
+  /** واحد دسته — برای جملهٔ «حداقل خرید: ۵۰۰ کیلوگرم» در بلوک شرایط */
+  private async unitOfCategory(categoryId?: number): Promise<string> {
+    if (categoryId == null) return 'کیلوگرم';
+    const cats = await this.categoriesWithPath([categoryId]);
+    return cats.get(categoryId)?.unit ?? 'کیلوگرم';
+  }
+
+  /** بلوک «شرایط تامین» که به انتهای پیام چت می‌چسبد — خریدار همهٔ مزایا را
+   *  همان‌جا در چت می‌بیند؛ پنل خریدار همین شرایط را به‌صورت فیلتر/چیپ دارد. */
+  private termsBlock(terms: OfferTerms, unit: string): string {
+    const fa = (n: number) => n.toLocaleString('fa-IR');
+    const lines: string[] = [];
+    if (terms.productType) lines.push(`نوع کالا: ${terms.productType}`);
+    if (terms.minOrderAmount != null) {
+      lines.push(`حداقل خرید: ${fa(terms.minOrderAmount)} ${unit}`);
+    }
+    if (terms.checkAccepted && terms.checkPercent != null && terms.checkMaxDays != null) {
+      lines.push(
+        `پرداخت با چک: تا ${fa(terms.checkPercent)}٪ مبلغ، سرسید حداکثر ${fa(terms.checkMaxDays)} روز`,
+      );
+    }
+    if (terms.deliveryToBuyer) {
+      lines.push(
+        `ارسال: به محل شما؛ هزینهٔ حمل با ${terms.shippingCostBy === 'seller' ? 'فروشنده' : 'مشتری'}`,
+      );
+    }
+    if (lines.length === 0) return '';
+    return `\n\n— شرایط تامین —\n${lines.map((l) => `• ${l}`).join('\n')}`;
   }
 
   /** شمار خریداران متمایزِ امروز (ارسال تکی) */
@@ -604,14 +829,24 @@ export class BuyersService {
           select: { id: true, categoryName: true, parentId: true },
         })
       : [];
+    // جدّها (ریشهٔ درخت) — سطح سوم؛ بدون این کوئری rootName اشتباه می‌شد
+    // (باگ قدیمی: «میوه / میوه» به‌جای «کشاورزی / میوه»)
+    const grandIds = [...new Set(parents.map((p) => p.parentId).filter((x): x is number => x != null))];
+    const grands = grandIds.length
+      ? await this.prisma.category.findMany({
+          where: { id: { in: grandIds } },
+          select: { id: true, categoryName: true },
+        })
+      : [];
     const parentById = new Map(parents.map((p) => [p.id, p]));
+    const grandById = new Map(grands.map((g) => [g.id, g]));
     const out = new Map<
       number,
       { name: string; rootName: string; parentName: string; unit: string }
     >();
     for (const r of rows) {
       const parent = r.parentId != null ? parentById.get(r.parentId) : undefined;
-      const root = parent?.parentId != null ? parentById.get(parent.parentId) : undefined;
+      const root = parent?.parentId != null ? grandById.get(parent.parentId) : undefined;
       out.set(r.id, {
         name: r.categoryName,
         unit: r.unit ?? 'کیلوگرم',

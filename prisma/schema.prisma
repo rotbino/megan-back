@@ -1025,6 +1025,10 @@ model BuyerCategory {
 /// (۶ماهه → ۱۰ خریدار/روز، یک‌ساله → ۲۰ — هر دو از تنظیمات پویا).
 /// تحویل: پیام چت در گفتگوی مستقیم با خریدار (خریدار در «پیام ها» می‌بیند).
 /// ارسال گروهی پولی است: هر گیرنده از کیف پول فروشنده کسر می‌شود (fee).
+/// ── شرایط ساختاریافتهٔ تامین (خواستهٔ مالک): دکمهٔ ارسال سمت سایت فقط با
+/// انتخاب دستهٔ آخر (برگ) فعال می‌شود → categoryId همیشه برگ است؛ نوع کالا و
+/// شرایط چک/ارسال/حداقل خرید فیلد جدا دارند تا خریدار در پنل خود بتواند
+/// پیشنهادهای دریافتی را بر اساس دسته، نوع کالا و مزایا فیلتر و مقایسه کند.
 model SupplyOffer {
   id       String @id @default(auto()) @map("_id") @db.ObjectId
   sellerId String @map("seller_id") @db.ObjectId
@@ -1039,8 +1043,28 @@ model SupplyOffer {
   /// هزینهٔ این ردیف از کیف پول فروشنده — تکی 0، گروهی perRecipientPrice
   fee      Int     @default(0)
 
+  /// دستهٔ کالای پیشنهاد — همیشه آخرین سطح (برگ)؛ گیت سمت سرور هم تکرار می‌شود
+  categoryId Int?
+  /// نوع کالا از زبان فروشنده — اختیاری (مثل «آگریا» برای سیب زمینی)
+  productType String?
+  /// پرداخت با چک پذیرفته می‌شود
+  checkAccepted Boolean @default(false) @map("check_accepted")
+  /// درصد مبلغ قابل پرداخت با چک (۱۰ تا ۱۰۰) — فقط با checkAccepted
+  checkPercent  Int?
+  /// حداکثر سرسید چک (روز) — فقط با checkAccepted
+  checkMaxDays  Int? @map("check_max_days")
+  /// ارسال به محل خریدار انجام می‌شود
+  deliveryToBuyer Boolean @default(false) @map("delivery_to_buyer")
+  /// پرداخت‌کنندهٔ هزینهٔ حمل — 'seller' | 'customer' (فقط با deliveryToBuyer)
+  shippingCostBy String? @map("shipping_cost_by")
+  /// حداقل مقدار خرید این پیشنهاد (به واحد دسته)
+  minOrderAmount Int? @map("min_order_amount")
+  /// گفتگوی تحویل پیشنهاد — لینک «مشاهدهٔ گفتگو» در پنل خریدار
+  threadId String? @map("thread_id") @db.ObjectId
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([sellerId, createdAt(sort: Desc)])
   @@index([buyerId, createdAt(sort: Desc)])
+  @@index([buyerId, categoryId])
 }

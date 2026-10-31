@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BuyersService } from './buyers.service';
 import {
   GetBuyerDirectoryDto,
+  GetMyReceivedOffersDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
@@ -88,5 +89,15 @@ export class BuyersController {
       await this.buyers.groupSendSupplyOffer(user, dto),
       'ارسال گروهی انجام شد — هزینه از کیف پول شما کسر شد.',
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMyReceivedOffers')
+  @ApiOperation({
+    summary: 'پیشنهادهای تامین دریافتی من — فیلتر دسته/نوع کالا/چک/ارسال (پنل خریدار)',
+  })
+  async getMyReceivedOffers(@CurrentUser() user: AuthUser, @Body() dto: GetMyReceivedOffersDto) {
+    return ok(await this.buyers.myReceivedOffers(user.id, dto));
   }
 }

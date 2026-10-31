@@ -34,6 +34,26 @@ async function main() {
   const messages = await prisma.chatMessage.deleteMany({ where: { threadId: { in: threadIds } } });
   const threads = await prisma.chatThread.deleteMany({ where: { id: { in: threadIds } } });
 
+  // یداچ‌های تستی جلسات قبل — میرعلی (09144133782) به‌عنوان فروشندهٔ آزمایشی به
+  // سعید پیشنهاد فرستاده بود؛ همان یک ردیف + گفتگوی مستقیمشان پاک می‌شود
+  // (دفتر خرید و بستهٔ میرعلی دست‌نخورده می‌ماند)
+  const mirali = await prisma.user.findFirst({ where: { phone: '09144133782' } });
+  let oldTest = { offers: 0, threads: 0, messages: 0 };
+  if (mirali) {
+    const oldOffers = await prisma.supplyOffer.findMany({
+      where: { sellerId: mirali.id },
+      select: { threadId: true },
+    });
+    const oldThreadIds = [
+      ...new Set(oldOffers.map((o) => o.threadId).filter(Boolean)),
+    ];
+    oldTest = {
+      offers: (await prisma.supplyOffer.deleteMany({ where: { sellerId: mirali.id } })).count,
+      messages: (await prisma.chatMessage.deleteMany({ where: { threadId: { in: oldThreadIds } } })).count,
+      threads: (await prisma.chatThread.deleteMany({ where: { id: { in: oldThreadIds } } })).count,
+    };
+  }
+
   await prisma.user.update({
     where: { id: sellerId },
     data: {
@@ -47,7 +67,13 @@ async function main() {
 
   console.log(
     JSON.stringify(
-      { products: products.count, offers: offers.count, threads: threads.count, messages: messages.count },
+      {
+        products: products.count,
+        offers: offers.count,
+        threads: threads.count,
+        messages: messages.count,
+        oldMiraliTest: oldTest,
+      },
       null,
       2,
     ),
