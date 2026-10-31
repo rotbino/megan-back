@@ -116,6 +116,12 @@ model User {
   favoriteSellers  FavoriteSeller[]  @relation("FavoriteSellerOwner")
   /// کاربرانی که این فروشنده را ذخیره کرده‌اند
   favoritedBy      FavoriteSeller[]  @relation("FavoriteSellerTarget")
+  /// دفتر خرید من — دسته‌های برگ + بازه حجم خرید ماهانه (خریداران — ۳۱-۱۰)
+  buyerCategories  BuyerCategory[]   @relation("BuyerCategoryOwner")
+  /// پیشنهادهای تامین ارسالی این کاربر (به‌عنوان فروشندهٔ دارندهٔ بسته)
+  supplyOffersSent SupplyOffer[]     @relation("SupplyOfferSeller")
+  /// پیشنهادهای تامین دریافتی این کاربر (به‌عنوان خریدار)
+  supplyOffersReceived SupplyOffer[] @relation("SupplyOfferBuyer")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -966,4 +972,74 @@ model ProductView {
 
   @@index([productId, createdAt(sort: Desc)])
   @@index([productId, viewerId])
+}
+
+// ─── خریداران — دفتر خرید، دایرکتوری و پیشنهاد تامین (خواسته مالک ۳۱-۱۰) ────
+
+/// تنظیمات پویای صورتحساب — سند واحد با id ثابت «main». همه هزینه‌ها/درصدها/
+/// سقف‌های مصرف (پکیج شارژ، شارژ دلخواه، نردبان، سقف روزانه پیشنهاد تامین،
+/// قیمت ارسال گروهی و هر نیاز آینده) از این‌جا خوانده می‌شوند؛ ادمین در
+/// «تنظیمات کیف شارژ و مصرف شارژ» ویرایش می‌کند — هیچ عددی در کد hardcode
+/// نمی‌ماند (خواسته مالک ۳۱-۱۰). اولین خواندن، سند را با پیش‌فرض‌های فعلی
+/// می‌سازد تا رفتار سایت بدون هیچ تغییری ادامه یابد.
+model SiteSetting {
+  id String @id @default("main") @map("_id")
+
+  /// JSON با کلیدهای: chargePackages · customCharge · ladder · supplyOffer · groupSend
+  /// (شکل دقیق در src/site-settings/billing.ts — تک منبع حقیقت تایپ‌ها)
+  data Json
+
+  /// کاربر ادمین آخرین ویرایش‌کننده — برای لاگ عملیات
+  updatedBy String? @map("updated_by") @db.ObjectId
+  updatedAt DateTime @updatedAt
+}
+
+/// دفتر خرید من — هر ردیف یک دستهٔ برگ درخت کالا + بازهٔ حجم خرید ماهانه.
+/// «خریدار» یعنی کاربری که حداقل یک ردیف دارد؛ در دایرکتوری عمومی خریداران
+/// فقط نقش/دسته‌ها/استان‌وشهر/بازهٔ حجم/فعالیت نمایش داده می‌شود — نه نام و
+/// تماس (حریم خصوصی). این جدول هیچ ربطی به تبلیغات/ترویج آگهی ندارد.
+model BuyerCategory {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("BuyerCategoryOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// دستهٔ برگ درخت کالا (Category بدون فرزند) — id عددی باسکول
+  categoryId Int  @map("category_id")
+  /// حداقل حجم خرید ماهانه (به واحد زیر)
+  volumeMin  Int  @map("volume_min")
+  /// حداکثر حجم خرید ماهانه — 0 یعنی «بیشتر» (بدون سقف)
+  volumeMax  Int  @map("volume_max")
+  /// واحد — کیلوگرم | تن | عدد | بسته | لیتر
+  unit       String @default("کیلوگرم")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, categoryId])
+  @@index([categoryId])
+}
+
+/// پیشنهاد تامین — تنها راه تماس با خریداران دایرکتوری: فروشندهٔ دارندهٔ
+/// بستهٔ فعال، روزانه تا سقفِ سطح بسته‌اش به خریداران پیشنهاد می‌فرستد
+/// (۶ماهه → ۱۰ خریدار/روز، یک‌ساله → ۲۰ — هر دو از تنظیمات پویا).
+/// تحویل: پیام چت در گفتگوی مستقیم با خریدار (خریدار در «پیام ها» می‌بیند).
+/// ارسال گروهی پولی است: هر گیرنده از کیف پول فروشنده کسر می‌شود (fee).
+model SupplyOffer {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  sellerId String @map("seller_id") @db.ObjectId
+  seller   User   @relation("SupplyOfferSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyerId  String @map("buyer_id") @db.ObjectId
+  buyer    User   @relation("SupplyOfferBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  /// متن پیشنهاد — شرایط ویژه/تخفیف داخل متن (فرم فوق‌ساده)
+  message  String
+  /// ارسال گروهی (پولی) یا تکی (سهمیهٔ روزانه)
+  isGroup  Boolean @default(false) @map("is_group")
+  /// هزینهٔ این ردیف از کیف پول فروشنده — تکی 0، گروهی perRecipientPrice
+  fee      Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([sellerId, createdAt(sort: Desc)])
+  @@index([buyerId, createdAt(sort: Desc)])
 }

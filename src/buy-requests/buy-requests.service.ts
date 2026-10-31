@@ -197,6 +197,11 @@ export class BuyRequestsService {
         ...(catIds.length > 0 ? [{ categoryId: { in: catIds } }] : []),
       ];
     }
+    // فیلتر درختی دسته — تب دوم صفحه خریداران (خود دسته + زیر‌شاخه‌ها)
+    if (dto.categoryId != null) {
+      const subtree = await this.categories.getSubtreeIds(dto.categoryId);
+      where.categoryId = { in: subtree.length > 0 ? subtree : [-1] };
+    }
     if (dto.provinceId) where.provinceId = dto.provinceId;
 
     const [total, rows] = await Promise.all([

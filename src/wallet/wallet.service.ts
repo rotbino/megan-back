@@ -8,32 +8,36 @@ import { UploadsService } from '../uploads/uploads.service';
 import { wallet as walletEnv } from '../common/config/env';
 import type { AuthUser } from '../common/guards';
 import { GetChargeOrdersDto, LadderProductDto, ReviewChargeOrderDto } from './dto';
+import { SiteSettingsService } from '../site-settings/site-settings.service';
+import { customBonusPercent, customChargeMin } from '../site-settings/billing';
 
-/** پکیج‌های شارژ کارت‌به‌کارت — عین UI باسکول (۳ پکیج؛ ۲۰۰ و ۴۰۰ با شارژ اضافه) */
-export const CHARGE_PACKAGES = [
-  { key: 'p100', amount: 100_000, bonusPercent: 0, charge: 100_000 },
-  { key: 'p200', amount: 200_000, bonusPercent: 10, charge: 220_000 },
-  { key: 'p400', amount: 400_000, bonusPercent: 20, charge: 480_000 },
+/** پکیج‌های شارژ — پیش‌فرض تاریخی؛ مقادیر زنده از SiteSetting (ادمین ویرایش
+ *  می‌کند — «تنظیمات کیف شارژ و مصرف شارژ»، خواسته مالک ۳۱-۱۰). */
+export const DEFAULT_CHARGE_PACKAGES = [
+  { key: 'p100', amount: 100_000, bonusPercent: 0 },
+  { key: 'p200', amount: 200_000, bonusPercent: 10 },
+  { key: 'p400', amount: 400_000, bonusPercent: 20 },
 ] as const;
 
-/** شارژ دلخواه (دکمه «سایر» — خواسته مالک ۳۱-۱۰):
- *  • حداقل ۴۰۰ هزار تومان — کمتر رد می‌شود.
- *  • ۴۰۰ هزار تا ۱ میلیون → ۳۰٪ شارژ اضافه؛ بیش از ۱ میلیون → ۵۰٪. */
+/** @deprecated از تنظیمات پویا استفاده کنید — settings.getBilling() */
+export const CHARGE_PACKAGES = DEFAULT_CHARGE_PACKAGES;
+
+/** @deprecated حداقل شارژ دلخواه = مبلغ گران‌ترین پکیج (محاسبه از تنظیمات) */
 export const CUSTOM_CHARGE_MIN = 400_000;
-/** سقف منطقی شارژ دلخواه — جلوگیری از اشتباه سه‌رقمی در فیش */
+/** @deprecated سقف شارژ دلخواه از تنظیمات پویا */
 export const CUSTOM_CHARGE_MAX = 100_000_000;
-/** آستانه ۵۰٪ — بالای این مبلغ */
+/** @deprecated آستانه پله دوم — از تنظیمات پویا */
 export const CUSTOM_CHARGE_TIER2_AT = 1_000_000;
 
-/** درصد شارژ اضافه مبلغ دلخواه — ۳۰٪ تا ۱ میلیون، ۵۰٪ بالاتر */
-export function customBonusPercent(amount: number): number {
+/** @deprecated درصد شارژ اضافه مبلغ دلخواه — از پله‌های تنظیمات پویا */
+export function customBonusPercentLegacy(amount: number): number {
   return amount > CUSTOM_CHARGE_TIER2_AT ? 50 : 30;
 }
 
-/** هزینه نردبان هر آگهی برای یک ماه — خواسته مالک (۳۰-۱۰): ۵۰ هزار تومان */
+/** @deprecated هزینه ماهانه نردبان — از تنظیمات پویا */
 export const LADDER_MONTHLY_PRICE = 50_000;
 
-/** حداکثر ماه نردبان (خواسته مالک ۳۱-۱۰: تا ۴ ماه) */
+/** @deprecated حداکثر ماه نردبان — از تنظیمات پویا */
 export const LADDER_MAX_MONTHS = 4;
 
 /** مدت نردبان: ۳۰ روز در هر ماه */
@@ -55,9 +59,10 @@ export interface WalletTransactionDto {
   title: string;
   amount: number;
   incoming: boolean;
-  /** نوع تراکنش — «card» واریز کارت‌به‌کارت تأییدشده؛ «ladder» نردبان؛ «adjust» اصلاح ادمین.
+  /** نوع تراکنش — «card» واریز کارت‌به‌کارت تأییدشده؛ «ladder» نردبان؛ «adjust» اصلاح ادمین؛
+   * «offer» هزینهٔ ارسال گروهی پیشنهاد تامین.
    * آینده: «online» درگاه آنلاین — همین قرارداد، فقط مقدار جدید. */
-  type: 'card' | 'ladder' | 'adjust';
+  type: 'card' | 'ladder' | 'adjust' | 'offer';
   at: Date;
 }
 
@@ -86,6 +91,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly cache: CacheService,
     private readonly uploads: UploadsService,
+    private readonly settings: SiteSettingsService,
   ) {}
 
   /** پاک‌سازی نردبان‌های منقضی — یک‌بار دیرهنگام بعد از بوت، بعد هر ساعت */
@@ -149,30 +155,37 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
   // ─── کیف پول ────────────────────────────────────────────────────────────────
 
-  /** POST /wallet/getWallet — موجودی + کارت واریز + پکیج‌ها + قیمت نردبان */
+  /** POST /wallet/getWallet — موجودی + کارت واریز + پکیج‌ها + قیمت نردبان.
+   *  همه اعداد از تنظیمات پویا (خواسته مالک ۳۱-۱۰ — هیچ چیز hardcode نیست). */
   async getWallet(userId: string) {
-    const me = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { walletBalance: true },
-    });
+    const [me, billing] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { walletBalance: true },
+      }),
+      this.settings.getBilling(),
+    ]);
     if (!me) throw AppError.notFound('حساب کاربری یافت نشد.');
 
+    const customMin = customChargeMin(billing);
     return {
       balance: me.walletBalance,
       /** حداقل شارژ پکیجی — برابر هزینه نردبان یک‌ماهه (عین باسکول) */
-      minCharge: LADDER_MONTHLY_PRICE,
-      ladderMonthlyPrice: LADDER_MONTHLY_PRICE,
-      ladderMaxMonths: LADDER_MAX_MONTHS,
+      minCharge: billing.ladder.monthlyPrice,
+      ladderMonthlyPrice: billing.ladder.monthlyPrice,
+      ladderMaxMonths: billing.ladder.maxMonths,
       cardNumber: walletEnv.CARD_NUMBER,
       cardOwner: walletEnv.CARD_OWNER,
-      packages: CHARGE_PACKAGES,
-      /** قواعد شارژ دلخواه (دکمه «سایر») — فرانت همان را نمایش می‌دهد */
+      packages: billing.chargePackages.map((p) => ({
+        ...p,
+        charge: Math.round(p.amount * (1 + p.bonusPercent / 100)),
+      })),
+      /** قواعد شارژ دلخواه (دکمه «سایر») — فرانت همان را نمایش می‌دهد.
+       *  حداقل = مبلغ گران‌ترین پکیج شارژ (خواسته مالک ۳۱-۱۰). */
       custom: {
-        min: CUSTOM_CHARGE_MIN,
-        max: CUSTOM_CHARGE_MAX,
-        tier2At: CUSTOM_CHARGE_TIER2_AT,
-        tier1Percent: 30,
-        tier2Percent: 50,
+        min: customMin,
+        max: billing.customCharge.maxAmount,
+        tiers: billing.customCharge.tiers,
       },
     };
   }
@@ -183,7 +196,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
    *    محل زندگی آنهاست تا کاربر وضعیت فیش خود را با دلیل رد پیگیری کند.
    *  (خواسته مالک TEST-D6 — کیف پول مرتب: تراکنش = واقعی، کارت‌به‌کارت = صف فیش‌ها) */
   async getWalletTransactions(userId: string): Promise<{ items: WalletTransactionDto[] }> {
-    const [charges, ladders, adjustments] = await Promise.all([
+    const [charges, ladders, adjustments, offers] = await Promise.all([
       this.prisma.chargeOrder.findMany({
         where: { userId, status: 'approved' },
         orderBy: { createdAt: 'desc' },
@@ -201,6 +214,12 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         orderBy: { createdAt: 'desc' },
         take: TRANSACTIONS_LIMIT,
         select: { id: true, amount: true, reason: true, createdAt: true },
+      }),
+      this.prisma.supplyOffer.findMany({
+        where: { sellerId: userId, fee: { gt: 0 } },
+        orderBy: { createdAt: 'desc' },
+        take: TRANSACTIONS_LIMIT,
+        select: { id: true, fee: true, createdAt: true },
       }),
     ]);
 
@@ -238,6 +257,14 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         incoming: a.amount > 0,
         type: 'adjust' as const,
         at: a.createdAt,
+      })),
+      ...offers.map((o) => ({
+        id: `offer:${o.id}`,
+        title: 'ارسال گروهی پیشنهاد تامین',
+        amount: o.fee,
+        incoming: false,
+        type: 'offer' as const,
+        at: o.createdAt,
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
@@ -283,32 +310,35 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
   /** POST /wallet/createChargeOrder (multipart: packageKey [+ amount] + receipt) —
    *  فیش واریزی. packageKey='custom' + amount = شارژ دلخواه (دکمه «سایر»):
-   *  حداقل ۴۰۰ هزار؛ ۳۰٪ شارژ اضافه تا ۱ میلیون و ۵۰٪ بالاتر (خواسته مالک ۳۱-۱۰). */
+   *  حداقل = مبلغ گران‌ترین پکیج؛ درصد اضافه از پله‌های تنظیمات پویا
+   *  (خواسته مالک ۳۱-۱۰ — همه از «تنظیمات کیف شارژ و مصرف شارژ»). */
   async createChargeOrder(user: AuthUser, req: FastifyRequest) {
     // ۱) پکیج + مبلغ — اول اعتبار پکیج/مبلغ، بعد فیش (پیام درست به کاربر)
     const { fields, files } = await this.uploads.readMultipartMulti(req, ['receipt']);
     const packageKey = (fields.packageKey || '').trim();
+    const billing = await this.settings.getBilling();
 
     let amount: number;
     let bonusPercent: number;
     if (packageKey === 'custom') {
       // شارژ دلخواه — «سایر»
       amount = Math.round(Number(fields.amount));
-      if (!Number.isFinite(amount) || amount < CUSTOM_CHARGE_MIN) {
+      const minAmount = customChargeMin(billing);
+      if (!Number.isFinite(amount) || amount < minAmount) {
         throw AppError.badRequest(
-          `حداقل مبلغ شارژ دلخواه ${CUSTOM_CHARGE_MIN.toLocaleString('fa-IR')} تومان است.`,
+          `حداقل مبلغ شارژ دلخواه ${minAmount.toLocaleString('fa-IR')} تومان است.`,
           'CUSTOM_CHARGE_MIN',
         );
       }
-      if (amount > CUSTOM_CHARGE_MAX) {
+      if (amount > billing.customCharge.maxAmount) {
         throw AppError.badRequest(
-          `حداکثر مبلغ شارژ دلخواه ${CUSTOM_CHARGE_MAX.toLocaleString('fa-IR')} تومان است.`,
+          `حداکثر مبلغ شارژ دلخواه ${billing.customCharge.maxAmount.toLocaleString('fa-IR')} تومان است.`,
           'CUSTOM_CHARGE_MAX',
         );
       }
-      bonusPercent = customBonusPercent(amount);
+      bonusPercent = customBonusPercent(amount, billing.customCharge.tiers);
     } else {
-      const pkg = CHARGE_PACKAGES.find((p) => p.key === packageKey);
+      const pkg = billing.chargePackages.find((p) => p.key === packageKey);
       if (!pkg) {
         throw AppError.badRequest('پکیج شارژ نامعتبر است.', 'PACKAGE_INVALID');
       }
@@ -357,12 +387,14 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
   // ─── نردبان ─────────────────────────────────────────────────────────────────
 
-  /** POST /wallet/ladderProduct — نردبان ۱ تا ۴ ماه از کیف پول (اتمیک).
-   *  پیش‌فرض ۱ ماه؛ اگر موجودی برای ماه‌های انتخابی کافی نباشد پیام دقیق همان
-   * بازه می‌آید: «شارژ برای دو ماهه کافی نیست» (خواسته مالک ۳۱-۱۰). */
+  /** POST /wallet/ladderProduct — نردبان ۱ تا maxMonths ماه از کیف پول (اتمیک).
+   *  قیمت ماهانه و سقف ماه از تنظیمات پویا؛ اگر موجودی برای ماه‌های انتخابی
+   * کافی نباشد پیام دقیق همان بازه می‌آید: «شارژ برای دو ماهه کافی نیست»
+   * (خواسته مالک ۳۱-۱۰). */
   async ladderProduct(user: AuthUser, dto: LadderProductDto) {
-    const months = Math.min(LADDER_MAX_MONTHS, Math.max(1, Math.round(dto.months ?? 1)));
-    const cost = LADDER_MONTHLY_PRICE * months;
+    const billing = await this.settings.getBilling();
+    const months = Math.min(billing.ladder.maxMonths, Math.max(1, Math.round(dto.months ?? 1)));
+    const cost = billing.ladder.monthlyPrice * months;
     const product = await this.prisma.product.findUnique({
       where: { id: dto.productId },
       select: { id: true, userId: true, status: true, productName: true, isLadder: true, ladderExpiresAt: true },

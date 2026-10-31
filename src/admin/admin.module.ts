@@ -18,6 +18,7 @@ import { AdminCallsModule } from './admin-calls/admin-calls.module';
 import { AdminSurveysModule } from './admin-surveys/admin-surveys.module';
 import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
 import { AdminActivitiesModule } from './admin-activities/admin-activities.module';
+import { AdminSettingsModule } from './admin-settings/admin-settings.module';
 
 /**
  * ریشه پنل ادمین — تمام کد ادمین بک‌اند فقط در همین فولدر زندگی می‌کند
@@ -46,6 +47,7 @@ import { AdminActivitiesModule } from './admin-activities/admin-activities.modul
     AdminSurveysModule,
     AdminReviewsModule,
     AdminActivitiesModule, // فعالیت کاربران — جستجو/دسته/صفحه
+    AdminSettingsModule, // تنظیمات کیف شارژ و مصرف شارژ (پویا — ۳۱-۱۰)
   ],
   providers: [
     // ثبت خودکار لاگ عملیات ادمین — سراسری ولی فقط برای درخواست‌های ادمین

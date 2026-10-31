@@ -19,6 +19,8 @@ import { SurveyModule } from './survey/survey.module';
 import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PackagesModule } from './packages/packages.module';
+import { SiteSettingsModule } from './site-settings/site-settings.module';
+import { BuyersModule } from './buyers/buyers.module';
 import { PushModule } from './push/push.module';
 import { ActivityModule } from './activity/activity.module';
 import { FavoritesModule } from './favorites/favorites.module';
@@ -48,6 +50,8 @@ import { AdminModule } from './admin/admin.module';
     CallsModule,
     WalletModule,
     PackagesModule, // بسته‌های اشتراک — خرید کارت‌به‌کارت + گیت‌ها
+    SiteSettingsModule, // تنظیمات پویای صورتحساب — Global (سند واحد SiteSetting)
+    BuyersModule, // خریداران — دفتر خرید + دایرکتوری + پیشنهاد تامین (۳۱-۱۰)
     PushModule,
     ActivityModule, // فعالیت کاربران — جستجو/دسته/صفحه (۳۰-۱۰)
     FavoritesModule, // علاقه‌مندی‌ها — آگهی + فروشنده (۳۰-۱۰)

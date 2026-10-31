@@ -53,6 +53,12 @@ export class GetBuyRequestListDto {
   @IsString()
   s?: string;
 
+  /** فیلتر درختی دسته — خود دسته + همه زیر‌شاخه‌ها (تب دوم صفحه خریداران) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  categoryId?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
