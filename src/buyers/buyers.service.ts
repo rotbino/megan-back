@@ -11,7 +11,7 @@ import { PushService } from '../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../chat/io-holder';
 import {
   BUYER_BOOK_MAX,
-  BUYER_UNITS,
+  BUYER_PERIODS,
   BuyerBookItemDto,
   GetBuyerDirectoryDto,
   GroupSendSupplyOfferDto,
@@ -35,8 +35,10 @@ import {
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
 
-/** پنجرهٔ فعال بودن دایرکتوری — خریدار خاموشِ بیش از ۹۰ روز حذف می‌شود */
+/** مرز کم‌رنگ‌شدن — خریدار غایبِ بیش از ۹۰ روز «کم‌رنگ» می‌شود (نه حذف) */
 const ACTIVE_WINDOW_MS = 90 * 86_400_000;
+/** پنجرهٔ کامل دایرکتوری — ردیف‌های قدیمی‌تر از این مدت اصلاً نمی‌آیند */
+const STALE_WINDOW_MS = 180 * 86_400_000;
 /** نشان «فعال در ۷ روز اخیر» */
 const RECENT_WINDOW_MS = 7 * 86_400_000;
 
@@ -50,37 +52,37 @@ function startOfTehranDay(): Date {
 }
 
 /** نقش نمایشی از حجم خرید — تن یا ≥۱ تن کیلو = عمده */
-function buyerRole(
-  unit: string,
-  volumeMin: number,
-  volumeMax: number,
-): 'عمده‌خریدار' | 'خرده‌خریدار' {
+function buyerRole(unit: string, volumeMin: number): 'عمده‌خریدار' | 'خرده‌خریدار' {
   if (unit === 'تن') return 'عمده‌خریدار';
-  if (unit === 'کیلوگرم' && Math.max(volumeMin, volumeMax) >= 1000) return 'عمده‌خریدار';
-  if ((unit === 'عدد' || unit === 'بسته' || unit === 'متر' || unit === 'لیتر') && Math.max(volumeMin, volumeMax) >= 5000) {
+  if (unit === 'کیلوگرم' && volumeMin >= 1000) return 'عمده‌خریدار';
+  if ((unit === 'عدد' || unit === 'بسته' || unit === 'متر' || unit === 'لیتر') && volumeMin >= 5000) {
     return 'عمده‌خریدار';
   }
   return 'خرده‌خریدار';
 }
 
-/** ردیف دستهٔ دایرکتوری — نام + بازهٔ حجم خوانا */
-interface DirectoryCategory {
-  id: number;
-  name: string;
-  /** «۱ تا ۵ تن در ماه» — بازه، نه عدد دقیق (حریم خصوصی) */
-  range: string;
-}
-
-export interface BuyerDirectoryItem {
-  /** ObjectId خریدار — برای sendSupplyOffer؛ نام/تماس هرگز افشا نمی‌شود */
+/** آیتم دایرکتوری — یک کارت برای هر کالای دفتر خرید (مرور آیتم‌محور) */
+export interface BuyerDirectoryEntry {
+  /** ObjectId ردیف — برای انتخاب گروهی */
   id: string;
+  /** ObjectId خریدار — برای sendSupplyOffer؛ نام/تماس هرگز افشا نمی‌شود */
+  buyerId: string;
   role: string;
-  categories: DirectoryCategory[];
-  moreCategories: number;
+  categoryId: number;
+  categoryName: string;
+  /** نام دستهٔ ریشه — برای آیکون کارت */
+  rootName: string;
+  /** مسیر دسته — «کشاورزی / میوه» */
+  categoryPath: string;
+  unit: string;
+  minAmount: number;
+  period: string;
   province: string | null;
   city: string | null;
   lastActiveAt: Date;
   activeRecently: boolean;
+  /** غایب بیش از ۹۰ روز — در UI کم‌رنگ و انتهای فهرست */
+  stale: boolean;
 }
 
 @Injectable()
@@ -94,31 +96,35 @@ export class BuyersService {
 
   // ─── دفتر خرید من ──────────────────────────────────────────────────────────
 
-  /** POST /buyers/getMyBook — ردیف‌های دفتر خرید من با نام دسته */
+  /** POST /buyers/getMyBook — ردیف‌های دفتر خرید من با نام دسته و مسیر */
   async getMyBook(userId: string) {
     const rows = await this.prisma.buyerCategory.findMany({
       where: { userId },
       orderBy: { createdAt: 'asc' },
     });
-    const cats = await this.categoriesById(rows.map((r) => r.categoryId));
+    const cats = await this.categoriesWithPath(rows.map((r) => r.categoryId));
     return {
       max: BUYER_BOOK_MAX,
-      units: BUYER_UNITS,
-      items: rows.map((r) => ({
-        categoryId: r.categoryId,
-        name: cats.get(r.categoryId)?.categoryName ?? `دسته ${r.categoryId}`,
-        volumeMin: r.volumeMin,
-        volumeMax: r.volumeMax,
-        unit: r.unit,
-      })),
+      items: rows.map((r) => {
+        const cat = cats.get(r.categoryId);
+        return {
+          categoryId: r.categoryId,
+          name: cat?.name ?? `دسته ${r.categoryId}`,
+          rootName: cat?.rootName ?? '',
+          parentName: cat?.parentName ?? '',
+          unit: r.unit,
+          minAmount: r.volumeMin,
+          period: r.period,
+        };
+      }),
     };
   }
 
-  /** POST /buyers/saveMyBook — جایگزینی کامل (فرم فوق‌ساده: چیپ + بازه) */
+  /** POST /buyers/saveMyBook — جایگزینی کامل (تیک برگ‌ها + حداقل + دوره) */
   async saveMyBook(userId: string, dto: SaveMyBookDto) {
     const items = dto.items ?? [];
     if (items.length > BUYER_BOOK_MAX) {
-      throw AppError.badRequest(`حداکثر ${BUYER_BOOK_MAX} دسته در دفتر خرید 가능 است.`, 'BOOK_MAX');
+      throw AppError.badRequest(`حداکثر ${BUYER_BOOK_MAX} دسته در دفتر خرید ممکن است.`, 'BOOK_MAX');
     }
     // یکتایی دسته‌ها
     const seen = new Set<number>();
@@ -127,12 +133,6 @@ export class BuyersService {
         throw AppError.badRequest('هر دسته فقط یک‌بار قابل انتخاب است.', 'DUPLICATE_CATEGORY');
       }
       seen.add(it.categoryId);
-      if (it.volumeMax !== 0 && it.volumeMax < it.volumeMin) {
-        throw AppError.badRequest(
-          'حداکثر حجم خرید باید بیشتر از حداقل باشد (یا صفر = بدون سقف).',
-          'VOLUME_RANGE',
-        );
-      }
     }
     // فقط دستهٔ برگ (بدون فرزند) — دفتر خرید کالای مشخص است نه شاخه
     if (items.length > 0) {
@@ -147,19 +147,25 @@ export class BuyersService {
       }
     }
 
+    // واحد از خود دسته — قابل انتخاب کاربر نیست
+    const cats = await this.categoriesWithPath([...seen]);
+    const periodOf = (p: string) =>
+      (BUYER_PERIODS as readonly string[]).includes(p) ? p : 'monthly';
+
     await this.prisma.$transaction([
       this.prisma.buyerCategory.deleteMany({ where: { userId } }),
-      ...items.map((it: BuyerBookItemDto) =>
-        this.prisma.buyerCategory.create({
+      ...items.map((it: BuyerBookItemDto) => {
+        const cat = cats.get(it.categoryId);
+        return this.prisma.buyerCategory.create({
           data: {
             userId,
             categoryId: it.categoryId,
             volumeMin: it.volumeMin,
-            volumeMax: it.volumeMax,
-            unit: it.unit,
+            period: periodOf(it.period),
+            unit: cat?.unit ?? 'کیلوگرم',
           },
-        }),
-      ),
+        });
+      }),
     ]);
 
     return { saved: items.length };
@@ -167,42 +173,64 @@ export class BuyersService {
 
   // ─── دایرکتوری عمومی ────────────────────────────────────────────────────────
 
-  /** POST /buyers/directory — فیلتر مثل لیست آگهی‌ها: دسته/استان/شهر + صفحه.
-   *  حریم خصوصی: فقط نقش/دسته‌ها/مکان/بازهٔ حجم/فعالیت — بی نام و تماس. */
+  /** POST /buyers/directory — آیتم‌محور: یک کارت برای هر کالای دفتر خرید.
+   *  فیلتر: دسته (زیردرخت) + جستجو + دوره + استان/شهر + صفحه.
+   *  حریم خصوصی: فقط نقش/دسته/مکان/حداقل حجم/دوره/فعالیت — بی نام و تماس. */
   async directory(dto: GetBuyerDirectoryDto) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(48, Math.max(1, dto.perPage ?? 12));
 
     // مجموعهٔ دسته‌های زیر دستهٔ انتخابی (خودش + زیر‌شاخه‌ها) — ردیف‌های دفتر
-    // خرید و درخواست‌ها همیشه برگ‌اند؛ فیلتر درختی درست درمی‌آید
+    // خرید همیشه برگ‌اند؛ فیلتر درختی درست درمی‌آید
     const leafSet = dto.categoryId
       ? new Set(await this.categories.getSubtreeIds(dto.categoryId))
       : null;
 
-    // ردیف‌های دفتر خرید در این دسته‌ها → گروه‌بندی بر کاربر
-    // (سقف اطمینان ۵۰۰۰ ردیف — دایرکتوری سبک می‌ماند)
+    // ردیف‌های دفتر خرید در این دسته‌ها (سقف اطمینان ۵۰۰۰ — دایرکتوری سبک می‌ماند)
     const rows = await this.prisma.buyerCategory.findMany({
-      where: leafSet ? { categoryId: { in: [...leafSet] } } : undefined,
-      select: { userId: true, categoryId: true, volumeMin: true, volumeMax: true, unit: true },
+      where: {
+        ...(leafSet ? { categoryId: { in: [...leafSet] } } : {}),
+        ...(dto.period ? { period: dto.period } : {}),
+      },
+      select: {
+        id: true,
+        userId: true,
+        categoryId: true,
+        volumeMin: true,
+        period: true,
+        unit: true,
+      },
       take: 5000,
     });
 
-    const byUser = new Map<string, typeof rows>();
-    for (const r of rows) {
-      const list = byUser.get(r.userId) ?? [];
-      list.push(r);
-      byUser.set(r.userId, list);
-    }
+    // نام دسته‌ها + مسیر — برای نمایش و جستجو
+    const cats = await this.categoriesWithPath(rows.map((r) => r.categoryId));
 
-    // کاربران فعالِ اخیر + فیلتر مکان
+    // جستجوی متنی روی نام/مسیر دسته
+    const needle = dto.s?.trim() ?? '';
+    const matched = needle
+      ? rows.filter((r) => {
+          const cat = cats.get(r.categoryId);
+          return (
+            !!cat &&
+            (cat.name.includes(needle) ||
+              cat.parentName.includes(needle) ||
+              cat.rootName.includes(needle))
+          );
+        })
+      : rows;
+
+    // کاربران فعال + فیلتر مکان
     // ⚠️ مونگو: فیلتر null فیلدِ غایب را نمی‌گیرد → پنجرهٔ فعالیت =
     // lastSeenAt (هست) یا createdAt (هیچ‌وقت نبض نزده) — چون lastSeenAt
     // همیشه ≥ createdAt است، این دقیقاً max(هر دو) است.
-    const cutoff = new Date(Date.now() - ACTIVE_WINDOW_MS);
-    const users = byUser.size
+    // غایب‌های بیش از ۹۰ روز «کم‌رنگ» می‌شوند (نه حذف) — پنجرهٔ کامل ۱۸۰ روز.
+    const cutoff = new Date(Date.now() - STALE_WINDOW_MS);
+    const userIds = [...new Set(matched.map((r) => r.userId))];
+    const users = userIds.length
       ? await this.prisma.user.findMany({
           where: {
-            id: { in: [...byUser.keys()] },
+            id: { in: userIds },
             isActive: true,
             OR: [{ lastSeenAt: { gte: cutoff } }, { createdAt: { gte: cutoff } }],
             ...(dto.provinceId != null ? { provinceId: dto.provinceId } : {}),
@@ -218,42 +246,40 @@ export class BuyersService {
         })
       : [];
 
-    // نام دسته‌ها + مکان‌ها — یک‌جا
-    const catIds = new Set<number>();
-    for (const list of byUser.values()) for (const r of list) catIds.add(r.categoryId);
-    const [cats, locations] = await Promise.all([
-      this.categoriesById([...catIds]),
-      this.locationNames(
-        users.flatMap((u) => [u.provinceId, u.cityId].filter((x): x is number => x != null)),
-      ),
-    ]);
+    // مکان‌ها — یک‌جا
+    const locations = await this.locationNames(
+      users.flatMap((u) => [u.provinceId, u.cityId].filter((x): x is number => x != null)),
+    );
 
-    // کارت‌ها — فعال‌ترها اول
+    // کارت‌ها — فعال‌ترها اول؛ غایب‌های ۹۰ روزه آخر و کم‌رنگ
     const now = Date.now();
-    const items: BuyerDirectoryItem[] = users.map((u) => {
-      const list = (byUser.get(u.id) ?? []).slice(0, 3);
-      const role = (byUser.get(u.id) ?? []).some((r) =>
-        buyerRole(r.unit, r.volumeMin, r.volumeMax) === 'عمده‌خریدار',
-      )
-        ? 'عمده‌خریدار'
-        : 'خرده‌خریدار';
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const items: BuyerDirectoryEntry[] = [];
+    for (const r of matched) {
+      const u = userById.get(r.userId);
+      if (!u) continue; // ردیف کاربر غیرفعال/غایب — رها
+      const cat = cats.get(r.categoryId);
       const last = u.lastSeenAt ?? u.createdAt;
-      return {
-        id: u.id,
-        role,
-        categories: list.map((r) => ({
-          id: r.categoryId,
-          name: cats.get(r.categoryId)?.categoryName ?? `دسته ${r.categoryId}`,
-          range: volumeRangeFa(r.volumeMin, r.volumeMax, r.unit),
-        })),
-        moreCategories: Math.max(0, (byUser.get(u.id) ?? []).length - 3),
+      items.push({
+        id: r.id,
+        buyerId: u.id,
+        role: buyerRole(r.unit, r.volumeMin),
+        categoryId: r.categoryId,
+        categoryName: cat?.name ?? `دسته ${r.categoryId}`,
+        rootName: cat?.rootName ?? '',
+        categoryPath: [cat?.rootName, cat?.parentName].filter(Boolean).join(' / '),
+        unit: r.unit,
+        minAmount: r.volumeMin,
+        period: r.period,
         province: u.provinceId != null ? (locations.get(`p${u.provinceId}`) ?? null) : null,
         city: u.cityId != null ? (locations.get(`c${u.cityId}`) ?? null) : null,
         lastActiveAt: last,
         activeRecently: now - last.getTime() < RECENT_WINDOW_MS,
-      };
-    });
+        stale: now - last.getTime() >= ACTIVE_WINDOW_MS,
+      });
+    }
     items.sort((a, b) => {
+      if (a.stale !== b.stale) return a.stale ? 1 : -1;
       if (a.activeRecently !== b.activeRecently) return a.activeRecently ? -1 : 1;
       return b.lastActiveAt.getTime() - a.lastActiveAt.getTime();
     });
@@ -545,14 +571,39 @@ export class BuyersService {
 
   /** تحویل پیشنهاد به‌صورت پیام چت در گفتگوی مستقیم + push/WS */
 
-  /** نام دسته‌ها بر اساس id — یک کوئری */
-  private async categoriesById(ids: number[]) {
-    if (ids.length === 0) return new Map<number, { categoryName: string }>();
+  /** نام دسته + مسیر (ریشه/پدر) و واحد بر اساس id — دو کوئری حداکثر */
+  private async categoriesWithPath(ids: number[]) {
+    if (ids.length === 0) {
+      return new Map<number, { name: string; rootName: string; parentName: string; unit: string }>();
+    }
+    const uniq = [...new Set(ids)];
     const rows = await this.prisma.category.findMany({
-      where: { id: { in: [...new Set(ids)] } },
-      select: { id: true, categoryName: true },
+      where: { id: { in: uniq } },
+      select: { id: true, categoryName: true, parentId: true, unit: true },
     });
-    return new Map(rows.map((r) => [r.id, r]));
+    const parentIds = [...new Set(rows.map((r) => r.parentId).filter((x): x is number => x != null))];
+    const parents = parentIds.length
+      ? await this.prisma.category.findMany({
+          where: { id: { in: parentIds } },
+          select: { id: true, categoryName: true, parentId: true },
+        })
+      : [];
+    const parentById = new Map(parents.map((p) => [p.id, p]));
+    const out = new Map<
+      number,
+      { name: string; rootName: string; parentName: string; unit: string }
+    >();
+    for (const r of rows) {
+      const parent = r.parentId != null ? parentById.get(r.parentId) : undefined;
+      const root = parent?.parentId != null ? parentById.get(parent.parentId) : undefined;
+      out.set(r.id, {
+        name: r.categoryName,
+        unit: r.unit ?? 'کیلوگرم',
+        parentName: parent?.categoryName ?? '',
+        rootName: root?.categoryName ?? parent?.categoryName ?? '',
+      });
+    }
+    return out;
   }
 
   /** نام استان/شهر — پیشوند p (استان) و c (شهر) برای تفکیک buskolId */
@@ -567,10 +618,3 @@ export class BuyersService {
   }
 }
 
-/** بازهٔ حجم خوانا — «۱ تا ۵ تن در ماه» (عدد دقیق افشا نمی‌شود) */
-function volumeRangeFa(min: number, max: number, unit: string): string {
-  const fa = (n: number) => n.toLocaleString('fa-IR');
-  if (max === 0) return `${fa(min)} ${unit} و بیشتر در ماه`;
-  if (min === max) return `${fa(min)} ${unit} در ماه`;
-  return `${fa(min)} تا ${fa(max)} ${unit} در ماه`;
-}

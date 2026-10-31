@@ -15,33 +15,27 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-/** واحدهای مجاز دفتر خرید */
-export const BUYER_UNITS = ['کیلوگرم', 'تن', 'عدد', 'بسته', 'لیتر', 'متر'] as const;
-
 /** سقف دسته‌های دفتر خرید — عملیات فوق‌ساده بماند (خواسته مالک) */
 export const BUYER_BOOK_MAX = 15;
 
-/** ردیف دفتر خرید — دستهٔ برگ + بازهٔ حجم خرید ماهانه */
+/** دوره‌های خرید — ترتیب نمایش در همه‌جا یکسان است: ماهیانه، سالیانه، هفتگی، موردی */
+export const BUYER_PERIODS = ['monthly', 'yearly', 'weekly', 'occasional'] as const;
+
+/** ردیف دفتر خرید — دستهٔ برگ + حداقل حجم + دوره؛ واحد از خود دسته می‌آید */
 export class BuyerBookItemDto {
   @Type(() => Number)
   @IsInt()
   categoryId!: number;
 
+  /** حداقل خرید در هر دوره */
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1_000_000_000)
   volumeMin!: number;
 
-  /** 0 = بدون سقف («بیشتر») */
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @Max(1_000_000_000)
-  volumeMax!: number;
-
-  @IsIn(BUYER_UNITS)
-  unit!: string;
+  @IsIn(BUYER_PERIODS)
+  period!: string;
 }
 
 /** POST /buyers/saveMyBook — جایگزینی کامل دفتر خرید من */
@@ -60,6 +54,17 @@ export class GetBuyerDirectoryDto {
   @Type(() => Number)
   @IsInt()
   categoryId?: number;
+
+  /** جستجو در نام کالا/مسیر دسته */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  s?: string;
+
+  /** دوره خرید — ماهیانه | سالیانه | هفتگی | موردی */
+  @IsOptional()
+  @IsIn(BUYER_PERIODS)
+  period?: string;
 
   @IsOptional()
   @Type(() => Number)
