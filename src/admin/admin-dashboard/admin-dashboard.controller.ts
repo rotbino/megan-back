@@ -19,6 +19,12 @@ export class AdminDashboardController {
     return ok(await this.dashboard.getStats());
   }
 
+  @Post('getQueues')
+  @ApiOperation({ summary: 'فقط شمار صف‌های در انتظار — سبک برای نشان‌های قرمز سایدبار' })
+  async getQueues() {
+    return ok(await this.dashboard.getQueues());
+  }
+
   @Post('getRecentActivity')
   @ApiOperation({ summary: 'آخرین عملیات ادمین‌ها + آخرین ثبت‌نام‌ها (فید داشبورد)' })
   async getRecentActivity() {

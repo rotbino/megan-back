@@ -52,6 +52,7 @@ export class AdminDashboardService {
       walletTotal,
       pendingVerifications,
       pendingCharges,
+      pendingPackages,
       ladderOrders,
       // روند ۳۰ روزه — فقط createdAt (حجم سبک؛ ادمین)
       newUsers,
@@ -76,6 +77,7 @@ export class AdminDashboardService {
       this.prisma.user.aggregate({ _sum: { walletBalance: true } }),
       this.prisma.verificationOrder.count({ where: { status: 'pending' } }),
       this.prisma.chargeOrder.count({ where: { status: 'pending' } }),
+      this.prisma.packageOrder.count({ where: { status: 'pending' } }),
       this.prisma.ladderOrder.count(),
       this.prisma.user.findMany({
         where: { createdAt: { gte: since } },
@@ -149,6 +151,9 @@ export class AdminDashboardService {
         pendingBuyRequests: buyRequestsPending,
         pendingVerifications,
         pendingCharges,
+        // فیش‌های خرید بسته — همان صف «بسته‌ها و کمپین‌ها»؛ ادمین باید
+        // فیش خودش را هم مثل بقیه کاربران همین‌جا ببیند و تأیید کند.
+        pendingPackages,
         ladderOrders,
       },
       // درآمد (تومان) — نردبان پرداختی + شارژ تأییدشده (هدیه ادمین amount=0 است)
@@ -168,6 +173,24 @@ export class AdminDashboardService {
       chats: await this.chatsStats.getChatStats(),
       calls: await this.callsStats.getCallStats(),
     };
+  }
+
+  /**
+   * POST /admin/dashboard/getQueues — فقط شمار صف‌های در انتظار.
+   * سبک و بدون aggregate سنگین: برای نشان‌های قرمز سایدبار پنل ادمین
+   * (خواستهٔ مالک ۱-۱۱) — فیش خرید بسته هم باید همان‌جا دیده شود تا
+   * ادمین فیش خودش را مثل بقیه کاربران پیدا و تأیید کند.
+   */
+  async getQueues() {
+    const [pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages] =
+      await Promise.all([
+        this.prisma.product.count({ where: { status: 'pending' } }),
+        this.prisma.buyRequest.count({ where: { status: 'pending' } }),
+        this.prisma.verificationOrder.count({ where: { status: 'pending' } }),
+        this.prisma.chargeOrder.count({ where: { status: 'pending' } }),
+        this.prisma.packageOrder.count({ where: { status: 'pending' } }),
+      ]);
+    return { pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages };
   }
 
   /**
