@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { CacheService } from '../../common/cache/cache.module';
 import { AppError } from '../../common/errors/app-error';
+import type { ReviewStatus } from './dto';
 
 export interface ReviewAdminRow {
   id: string;
   rating: number;
   text: string;
+  status: ReviewStatus;
   createdAt: Date;
   updatedAt: Date;
   author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null };
@@ -21,6 +23,8 @@ export interface ReviewListPage {
   pageCount: number;
   stats: {
     total: number;
+    /** نظرهای در صف بررسی — صف کاری ادمین (خواسته مالک ۲-۱۱) */
+    pending: number;
     avg: number;
     distribution: Array<{ rating: number; count: number }>;
     last7Days: number;
@@ -29,9 +33,10 @@ export interface ReviewListPage {
 
 /**
  * ─── مدیریت نظرات فروشندگان (پنل ادمین) ────────────────────────────────────
- * نظرات واقعی کاربران روی پروفایل فروشنده‌ها تا حالا هیچ معادل مدیریتی نداشت؛
- * این ماژول فهرست/آمار/حذف را می‌دهد. حذف کش getSeller فروشنده را هم
- * می‌شکند تا میانگین سرصفحه پروفایل همان لحظه اصلاح شود.
+ * نظرات واقعی کاربران روی پروفایل فروشنده‌ها. قانون انتشار (خواسته مالک
+ * ۲-۱۱): نظر ثبت‌شده pending است و فقط برای نویسنده‌اش نمایش داده می‌شود؛
+ * ادمین پس از «تحقیق» آن را تأیید (عمومی) یا رد می‌کند. حذف و تأیید/رد،
+ * کش getSeller فروشنده را هم می‌شکند تا میانگین پروفایل همان لحظه اصلاح شود.
  */
 @Injectable()
 export class AdminReviewsService {
@@ -40,8 +45,12 @@ export class AdminReviewsService {
     private readonly cache: CacheService,
   ) {}
 
-  /** POST /admin/reviews/getReviewList — فهرست + آمار */
-  async getReviewList(dto: { search?: string; rating?: number; page?: number; perPage?: number }): Promise<ReviewListPage> {
+  private toStatus(s: string | null | undefined): ReviewStatus {
+    return s === 'approved' || s === 'rejected' ? s : 'pending';
+  }
+
+  /** POST /admin/reviews/getReviewList — فهرست + آمار (فیلتر وضعیت) */
+  async getReviewList(dto: { search?: string; rating?: number; status?: ReviewStatus; page?: number; perPage?: number }): Promise<ReviewListPage> {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? 20));
     const s = dto.search?.trim();
@@ -51,6 +60,7 @@ export class AdminReviewsService {
       : undefined;
 
     const where = {
+      ...(dto.status ? { status: dto.status } : {}),
       ...(dto.rating ? { rating: dto.rating } : {}),
       ...(s
         ? {
@@ -62,11 +72,14 @@ export class AdminReviewsService {
           }
         : {}),
     };
+    // آمار کل سایت مستقل از فیلتر جاری — میانگین/توزیع فقط از تأییدشده‌ها
+    const approvedWhere = { status: 'approved' };
 
-    const [total, agg, dist, last7Days, rows] = await Promise.all([
+    const [total, pending, agg, dist, last7Days, rows] = await Promise.all([
       this.prisma.sellerReview.count({ where }),
-      this.prisma.sellerReview.aggregate({ _avg: { rating: true }, where: {} }),
-      this.prisma.sellerReview.groupBy({ by: ['rating'], _count: { _all: true }, where: {} }),
+      this.prisma.sellerReview.count({ where: { status: 'pending' } }),
+      this.prisma.sellerReview.aggregate({ _avg: { rating: true }, where: approvedWhere }),
+      this.prisma.sellerReview.groupBy({ by: ['rating'], _count: { _all: true }, where: approvedWhere }),
       this.prisma.sellerReview.count({ where: { createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) } } }),
       this.prisma.sellerReview.findMany({
         where,
@@ -85,6 +98,7 @@ export class AdminReviewsService {
         id: r.id,
         rating: r.rating,
         text: r.text,
+        status: this.toStatus(r.status),
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
         author: r.author,
@@ -96,6 +110,7 @@ export class AdminReviewsService {
       pageCount: Math.max(1, Math.ceil(total / perPage)),
       stats: {
         total,
+        pending,
         avg: agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : 0,
         distribution: [5, 4, 3, 2, 1].map((rt) => ({
           rating: rt,
@@ -104,6 +119,25 @@ export class AdminReviewsService {
         last7Days,
       },
     };
+  }
+
+  /** POST /admin/reviews/setReviewStatus — تأیید/رد نظر (تنها راه عمومی شدن) */
+  async setReviewStatus(id: string, status: ReviewStatus): Promise<{ id: string; status: ReviewStatus }> {
+    const row = await this.prisma.sellerReview.findUnique({
+      where: { id },
+      select: { id: true, seller: { select: { userName: true } } },
+    });
+    if (!row) throw AppError.notFound('نظر یافت نشد.');
+
+    const updated = await this.prisma.sellerReview.update({
+      where: { id },
+      data: { status },
+    });
+    // میانگین امتیاز پروفایل کش شده — هم‌زمان با تأیید/رد تازه شود
+    if (row.seller?.userName) {
+      this.cache.invalidateTag(`seller:${row.seller.userName.trim()}`);
+    }
+    return { id: updated.id, status: this.toStatus(updated.status) };
   }
 
   /** POST /admin/reviews/deleteReview — حذف نظر + شکستن کش پروفایل فروشنده */

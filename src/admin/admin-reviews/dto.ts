@@ -2,6 +2,10 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
+export type ReviewStatus = 'pending' | 'approved' | 'rejected';
+
+export const REVIEW_STATUSES: ReviewStatus[] = ['pending', 'approved', 'rejected'];
+
 export class GetReviewListDto {
   @ApiPropertyOptional({ description: 'جستجو: متن نظر / نام نویسنده / نام فروشنده / یوزرنیم' })
   @IsOptional()
@@ -17,6 +21,11 @@ export class GetReviewListDto {
   @Max(5)
   rating?: number;
 
+  @ApiPropertyOptional({ enum: REVIEW_STATUSES, description: 'فیلتر وضعیت انتشار (پیش‌فرض: در انتظار تأیید)' })
+  @IsOptional()
+  @IsIn(REVIEW_STATUSES)
+  status?: ReviewStatus;
+
   @ApiPropertyOptional({ description: 'صفحه (پیش‌فرض ۱)' })
   @IsOptional()
   @Type(() => Number)
@@ -31,6 +40,16 @@ export class GetReviewListDto {
   @Min(1)
   @Max(50)
   perPage?: number;
+}
+
+export class SetReviewStatusDto {
+  @IsString()
+  @MaxLength(40)
+  id: string;
+
+  @ApiPropertyOptional({ enum: REVIEW_STATUSES, description: 'approved = تأیید و انتشار | rejected = رد' })
+  @IsIn(REVIEW_STATUSES)
+  status: ReviewStatus;
 }
 
 export class DeleteReviewDto {

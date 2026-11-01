@@ -182,15 +182,17 @@ export class AdminDashboardService {
    * ادمین فیش خودش را مثل بقیه کاربران پیدا و تأیید کند.
    */
   async getQueues() {
-    const [pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages] =
+    const [pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages, pendingReviews] =
       await Promise.all([
         this.prisma.product.count({ where: { status: 'pending' } }),
         this.prisma.buyRequest.count({ where: { status: 'pending' } }),
         this.prisma.verificationOrder.count({ where: { status: 'pending' } }),
         this.prisma.chargeOrder.count({ where: { status: 'pending' } }),
         this.prisma.packageOrder.count({ where: { status: 'pending' } }),
+        // نظرات در انتظار تحقیق و تأیید (قانون انتشار مالک ۲-۱۱)
+        this.prisma.sellerReview.count({ where: { status: 'pending' } }),
       ]);
-    return { pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages };
+    return { pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages, pendingReviews };
   }
 
   /**

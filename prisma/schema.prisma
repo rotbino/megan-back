@@ -855,11 +855,18 @@ model SellerReview {
   /// متن نظر — حداکثر ~۱۰۰۰ نویسه
   text   String
 
+  /// وضعیت انتشار (خواسته مالک ۲-۱۱): نظر فقط پس از «تحقیق و تأیید» ادمین
+  /// عمومی می‌شود؛ تا آن زمان فقط خودِ نویسنده آن را می‌بیند (زیرش نوشته
+  /// «نظر شما بعد از تحقیق و تایید منتشر میشود»). ویرایش نظر = بازگشت به
+  /// صف بررسی. ردشده هم فقط برای نویسنده visible است (برای اصلاح دوباره).
+  status  String @default("pending") // pending | approved | rejected
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([authorId, sellerId])
   @@index([sellerId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
 }
 
 /// نظرسنجی عملکرد ایمچ (عین نظرسنجی باسکول): امتیاز ۵گانه + متن دلخواه.

@@ -28,8 +28,10 @@ export class ReviewsController {
   @ApiBearerAuth()
   @Throttle({ default: { limit: 10, ttl: 60_000 } }) // ثبت/ویرایش نظر محدود
   @Post('addSellerReview')
-  @ApiOperation({ summary: 'ثبت/ویرایش نظر من درباره فروشنده (upsert)' })
+  @ApiOperation({ summary: 'ثبت/ویرایش نظر من درباره فروشنده (upsert — در انتظار تأیید ادمین)' })
   async addSellerReview(@CurrentUser() user: AuthUser, @Body() dto: AddSellerReviewDto) {
-    return ok(await this.reviews.addSellerReview(user.id, dto), 'نظر شما ثبت شد.');
+    // قانون انتشار (مالک ۲-۱۱): نظر بلافاصله فقط برای خود نویسنده نمایش
+    // داده می‌شود؛ عمومی شدن فقط پس از تحقیق و تأیید ادمین.
+    return ok(await this.reviews.addSellerReview(user.id, dto), 'نظر شما ثبت شد؛ پس از تحقیق و تأیید منتشر می‌شود.');
   }
 }

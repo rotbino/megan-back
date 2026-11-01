@@ -871,8 +871,10 @@ export class ProductsService {
         seller.provinceId != null ? [seller.provinceId] : [],
         seller.cityId != null ? [seller.cityId] : [],
       ),
+      // میانگین امتیاز سرصفحه پروفایل — فقط از نظرهای تأییدشدهٔ ادمین
+      // (قانون انتشار مالک ۲-۱۱؛ pending/rejected در امتیاز عمومی حساب نمی‌شوند)
       this.prisma.sellerReview.aggregate({
-        where: { sellerId: seller.id },
+        where: { sellerId: seller.id, status: 'approved' },
         _avg: { rating: true },
         _count: { _all: true },
       }),
