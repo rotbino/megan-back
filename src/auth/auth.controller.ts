@@ -28,9 +28,15 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('setPassword')
-  @ApiOperation({ summary: 'تعیین/تغییر رمز عبور پنل (اولین بار بدون رمز فعلی)' })
+  @ApiOperation({
+    summary:
+      'تعیین/تغییر رمز عبور پنل (اولین بار بدون رمز فعلی) — شماره موبایل هم‌زمان قابل ویرایش است؛ پس از موفقیت همه نشست‌ها باطل می‌شوند',
+  })
   async setPassword(@CurrentUser() user: { id: string }, @Body() dto: SetPasswordDto) {
-    return ok(await this.auth.setPassword(user.id, dto.password, dto.currentPassword), 'رمز عبور پنل شما تعیین شد.');
+    return ok(
+      await this.auth.setPassword(user.id, dto.password, dto.currentPassword, dto.newPhone),
+      'رمز عبور پنل شما تعیین شد.',
+    );
   }
 
   // ── OTP — ساختار برای پنل پیامک آینده (فعلاً فرانت از login استفاده می‌کند) ──

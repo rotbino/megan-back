@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { Prisma, User } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
@@ -128,12 +129,21 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** POST /auth/setPassword — تعیین/تغییر رمز پنل (کاربر احرازشده).
-   *  اولین تعیین بدون رمز فعلی؛ تغییرهای بعدی نیازمند رمز فعلی. */
+   *  اولین تعیین بدون رمز فعلی؛ تغییرهای بعدی نیازمند رمز فعلی.
+   *
+   *  خواسته مالک (۱-۱۱ دور هشتم) — شماره موبایل هم‌زمان قابل ویرایش است:
+   *   • شمارهٔ جدید از قبل «رمزدار» است → خطای دقیق + شمارهٔ پشتیبانی
+   *     (مالکیت شماره با اولین رمز ثبت می‌شود؛ ادعای شمارهٔ دیگری پذیرفته نیست)؛
+   *   • شمارهٔ جدید متعلق به حساب «بی‌رمز» (آرتیفکت ورود سشن) → آن حساب جذب
+   *     می‌شود: همهٔ داده‌هایش به این حساب منتقل و خودش حذف می‌شود؛
+   *   • پس از موفقیت همهٔ نشست‌ها باطل می‌شوند تا ورود دوباره با رمز جدید
+   *     انجام شود (امنیت: رمز تازه = نشست تازه؛ کلاینت قدیمی هم بی‌خطا خارج می‌شود). */
   async setPassword(
     userId: string,
     password: string,
     currentPassword?: string,
-  ): Promise<{ hasPassword: true }> {
+    newPhone?: string,
+  ): Promise<{ hasPassword: true; phone: string }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw AppError.notFound('کاربر یافت نشد.');
 
@@ -143,11 +153,289 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    let phone = user.phone;
+    if (newPhone && newPhone !== user.phone) {
+      const clash = await this.prisma.user.findUnique({ where: { phone: newPhone } });
+      if (clash) {
+        if (clash.passwordHash) {
+          throw AppError.badRequest(
+            'برای این شماره موبایل قبلاً رمز تعیین شده است. اگر این شماره موبایل متعلق به شماست و رمز آن را نمی‌دانید، با شماره پشتیبانی 09196421264 تماس بگیرید.',
+            'PHONE_HAS_PASSWORD',
+          );
+        }
+        await this.absorbUser(clash, user);
+      }
+      phone = newPhone;
+    }
+
     await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await hashPassword(password) },
+      data: { phone, passwordHash: await hashPassword(password) },
     });
-    return { hasPassword: true };
+
+    // تعیین/تغییر رمز = ابطال همهٔ نشست‌ها (همان منطق logout سرور)
+    const now = new Date();
+    await this.prisma.refreshToken
+      .updateMany({ where: { userId }, data: { revokedAt: now } })
+      .catch(() => undefined);
+    await this.prisma.user
+      .update({ where: { id: userId }, data: { sessionsRevokedAt: now } })
+      .catch(() => undefined);
+    this.cache.invalidate(`user:alive:${userId}`);
+    forceUserDeparture(userId);
+
+    return { hasPassword: true, phone };
+  }
+
+  /** جذب حساب بی‌رمزِ شمارهٔ ویرایش‌شده در حساب فعلی (از setPassword).
+   *  «بی‌رمز» یعنی هنوز کسی مالکیتش را با رمز claim نکرده — آرتیفکت ورود
+   *  سشن است. همهٔ رابطه‌های مالکیت‌دار به مالک جدید منتقل می‌شوند؛ ردیف‌های
+   *  تصادم‌کننده با قید یکتای حساب جدید حذف می‌شوند (معنایش با ردیف موجود
+   *  یکی است)؛ کیف پول/پرچم‌ها ادغام و فیلدهای خالی از حساب پرمحتوا پر
+   *  می‌شوند؛ در پایان ردیف کاربر قدیمی حذف می‌شود. */
+  private async absorbUser(stale: User, keeper: User): Promise<void> {
+    const sid = stale.id;
+    const kid = keeper.id;
+    const p = this.prisma;
+
+    // ۱) رابطه‌های سادهٔ مالکیت — فقط جابه‌جایی مالک (بدون قید یکتا)
+    await p.product.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.buyRequest.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.chargeOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.packageOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.walletAdjustment.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.ladderOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.verificationOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.adminMessage.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.activityLog.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    await p.productView.updateMany({ where: { viewerId: sid }, data: { viewerId: kid } });
+    await p.file.updateMany({ where: { ownerId: sid }, data: { ownerId: kid } });
+    await p.supplyOffer.updateMany({ where: { sellerId: sid }, data: { sellerId: kid } });
+    await p.supplyOffer.updateMany({ where: { buyerId: sid }, data: { buyerId: kid } });
+    await p.callLog.updateMany({ where: { callerId: sid }, data: { callerId: kid } });
+    await p.callLog.updateMany({ where: { calleeId: sid }, data: { calleeId: kid } });
+
+    // ۲) علاقه‌مندی کالا — قید یکتای (userId, productId): تکراری حذف
+    {
+      const rows = await p.favoriteProduct.findMany({
+        where: { userId: sid },
+        select: { id: true, productId: true },
+      });
+      if (rows.length) {
+        const keeperKeys = new Set(
+          (
+            await p.favoriteProduct.findMany({
+              where: { userId: kid },
+              select: { productId: true },
+            })
+          ).map((r) => r.productId),
+        );
+        const dupIds = rows.filter((r) => keeperKeys.has(r.productId)).map((r) => r.id);
+        if (dupIds.length) await p.favoriteProduct.deleteMany({ where: { id: { in: dupIds } } });
+        await p.favoriteProduct.updateMany({ where: { userId: sid }, data: { userId: kid } });
+      }
+    }
+
+    // ۳) علاقه‌مندی فروشنده — دو سمت: مالک (userId) و هدف (sellerId)
+    {
+      const owned = await p.favoriteSeller.findMany({
+        where: { userId: sid },
+        select: { id: true, sellerId: true },
+      });
+      for (const r of owned) {
+        const dup = await p.favoriteSeller.findUnique({
+          where: { userId_sellerId: { userId: kid, sellerId: r.sellerId } },
+        });
+        if (dup) await p.favoriteSeller.delete({ where: { id: r.id } }).catch(() => undefined);
+        else
+          await p.favoriteSeller
+            .update({ where: { id: r.id }, data: { userId: kid } })
+            .catch(() => undefined);
+      }
+      const received = await p.favoriteSeller.findMany({
+        where: { sellerId: sid },
+        select: { id: true, userId: true },
+      });
+      for (const r of received) {
+        if (r.userId === kid) continue; // خودِ مالک جدید — بی‌معنا
+        const dup = await p.favoriteSeller.findUnique({
+          where: { userId_sellerId: { userId: r.userId, sellerId: kid } },
+        });
+        if (dup) await p.favoriteSeller.delete({ where: { id: r.id } }).catch(() => undefined);
+        else
+          await p.favoriteSeller
+            .update({ where: { id: r.id }, data: { sellerId: kid } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۴) دسته‌های دفتر خرید — قید یکتای (userId, categoryId)
+    {
+      const rows = await p.buyerCategory.findMany({
+        where: { userId: sid },
+        select: { id: true, categoryId: true },
+      });
+      for (const r of rows) {
+        const dup = await p.buyerCategory.findUnique({
+          where: { userId_categoryId: { userId: kid, categoryId: r.categoryId } },
+        });
+        if (dup) await p.buyerCategory.delete({ where: { id: r.id } }).catch(() => undefined);
+        else
+          await p.buyerCategory
+            .update({ where: { id: r.id }, data: { userId: kid } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۵) لیست‌های نشان‌شده — نام تکراری با پسوند شماره یکتا می‌شود
+    {
+      const staleLists = await p.savedList.findMany({ where: { userId: sid } });
+      if (staleLists.length) {
+        const keeperNames = new Set(
+          (await p.savedList.findMany({ where: { userId: kid }, select: { name: true } })).map(
+            (l) => l.name,
+          ),
+        );
+        for (const l of staleLists) {
+          if (!keeperNames.has(l.name)) continue;
+          let i = 2;
+          let name = `${l.name} (${i})`;
+          while (keeperNames.has(name)) name = `${l.name} (${++i})`;
+          await p.savedList.update({ where: { id: l.id }, data: { name } });
+          keeperNames.add(name);
+        }
+        await p.savedList.updateMany({ where: { userId: sid }, data: { userId: kid } });
+      }
+    }
+    // کسانی که کاربر قدیمی را نشان کرده بودند → نشانِ کاربر جدید
+    {
+      const marks = await p.savedUser.findMany({
+        where: { targetUserId: sid },
+        select: { id: true, savedListId: true },
+      });
+      for (const m of marks) {
+        const dup = await p.savedUser.findFirst({
+          where: { savedListId: m.savedListId, targetUserId: kid },
+        });
+        if (dup) await p.savedUser.delete({ where: { id: m.id } }).catch(() => undefined);
+        else
+          await p.savedUser
+            .update({ where: { id: m.id }, data: { targetUserId: kid } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۶) نظرات فروشنده — دو سمت (نویسنده/فروشنده) + ممنوعیت خودفروشی
+    {
+      const written = await p.sellerReview.findMany({
+        where: { authorId: sid },
+        select: { id: true, sellerId: true },
+      });
+      for (const r of written) {
+        if (r.sellerId === kid) {
+          await p.sellerReview.delete({ where: { id: r.id } }).catch(() => undefined);
+          continue;
+        }
+        const dup = await p.sellerReview.findUnique({
+          where: { authorId_sellerId: { authorId: kid, sellerId: r.sellerId } },
+        });
+        if (dup) await p.sellerReview.delete({ where: { id: r.id } }).catch(() => undefined);
+        else
+          await p.sellerReview
+            .update({ where: { id: r.id }, data: { authorId: kid } })
+            .catch(() => undefined);
+      }
+      const received = await p.sellerReview.findMany({
+        where: { sellerId: sid },
+        select: { id: true, authorId: true },
+      });
+      for (const r of received) {
+        if (r.authorId === kid) {
+          await p.sellerReview.delete({ where: { id: r.id } }).catch(() => undefined);
+          continue;
+        }
+        const dup = await p.sellerReview.findUnique({
+          where: { authorId_sellerId: { authorId: r.authorId, sellerId: kid } },
+        });
+        if (dup) await p.sellerReview.delete({ where: { id: r.id } }).catch(() => undefined);
+        else
+          await p.sellerReview
+            .update({ where: { id: r.id }, data: { sellerId: kid } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۷) گفتگوها — کاربر قدیمی در هر سمت؛ تصادم کلید یکتا = حذف تکراری
+    {
+      const threads = await p.chatThread.findMany({
+        where: { OR: [{ sellerId: sid }, { buyerId: sid }] },
+        select: { id: true, sellerId: true, buyerId: true, productId: true },
+      });
+      for (const t of threads) {
+        const sellerId = t.sellerId === sid ? kid : t.sellerId;
+        const buyerId = t.buyerId === sid ? kid : t.buyerId;
+        if (sellerId === buyerId) {
+          // گفتگوی میان همان دو حسابِ در حال ادغام — بی‌معنا شده
+          await p.chatThread.delete({ where: { id: t.id } }).catch(() => undefined);
+          continue;
+        }
+        const dup = await p.chatThread.findFirst({
+          where: { id: { not: t.id }, sellerId, buyerId, productId: t.productId },
+        });
+        if (dup) await p.chatThread.delete({ where: { id: t.id } }).catch(() => undefined);
+        else
+          await p.chatThread
+            .update({ where: { id: t.id }, data: { sellerId, buyerId } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۸) نظرسنجی — هر کاربر یک پاسخ: پاسخ حساب فعلی برتر است
+    {
+      const staleSurvey = await p.surveyResponse.findUnique({ where: { userId: sid } });
+      if (staleSurvey) {
+        const keeperSurvey = await p.surveyResponse.findUnique({ where: { userId: kid } });
+        if (keeperSurvey)
+          await p.surveyResponse.delete({ where: { id: staleSurvey.id } }).catch(() => undefined);
+        else
+          await p.surveyResponse
+            .update({ where: { id: staleSurvey.id }, data: { userId: kid } })
+            .catch(() => undefined);
+      }
+    }
+
+    // ۹) ادغام پرچم‌ها/کیف پول/بسته — فیلدهای خالی از حساب جذب‌شده پر می‌شوند
+    const betterPackage =
+      (stale.packageExpiresAt?.getTime() ?? 0) > (keeper.packageExpiresAt?.getTime() ?? 0);
+    await p.user.update({
+      where: { id: kid },
+      data: {
+        walletBalance: { increment: stale.walletBalance },
+        isSeller: keeper.isSeller || stale.isSeller,
+        isBuyer: keeper.isBuyer || stale.isBuyer,
+        isVerified: keeper.isVerified || stale.isVerified,
+        activePakageType: Math.max(keeper.activePakageType, stale.activePakageType),
+        ...(betterPackage
+          ? { packageExpiresAt: stale.packageExpiresAt, packageStartedAt: stale.packageStartedAt }
+          : {}),
+        firstName: keeper.firstName || stale.firstName,
+        lastName: keeper.lastName || stale.lastName,
+        sex: keeper.sex ?? stale.sex,
+        avatarUrl: keeper.avatarUrl ?? stale.avatarUrl,
+        businessDesc: keeper.businessDesc ?? stale.businessDesc,
+        provinceId: keeper.provinceId ?? stale.provinceId,
+        cityId: keeper.cityId ?? stale.cityId,
+        ...(keeper.profile !== null
+          ? { profile: keeper.profile as Prisma.InputJsonValue }
+          : stale.profile !== null
+            ? { profile: stale.profile as Prisma.InputJsonValue }
+            : {}),
+      },
+    });
+
+    // ۱۰) حذف ردیف کاربر قدیمی — نشست‌ها/پوش‌ها کاسکید می‌شوند؛
+    //     بقیهٔ رابطه‌ها در بالا منتقل شده‌اند
+    await p.user.delete({ where: { id: sid } });
   }
 
   // ─── OTP (پنل پیامک — ساختار برای آینده) ──────────────────────────────────

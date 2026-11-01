@@ -27,6 +27,14 @@ export class SetPasswordDto {
   @IsOptional()
   @IsString()
   currentPassword?: string;
+
+  /** شماره موبایل ویرایش‌شده در مودال تعیین رمز (خواسته مالک ۱-۱۱):
+   *  کاربر می‌تواند شماره‌ای که با آن وارد شده را قبل از تعیین رمز اصلاح کند
+   *  (مثلاً غلط تایپی هنگام ورود سشن). فقط وقتی فرستاده شود که تغییر کرده است. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^09\d{9}$/, { message: 'شماره موبایل معتبر نیست.' })
+  newPhone?: string;
 }
 
 export class VerifyOtpDto {
