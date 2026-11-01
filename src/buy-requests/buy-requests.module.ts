@@ -4,10 +4,11 @@ import { BuyRequestsService } from './buy-requests.service';
 import { AuthModule } from '../auth/auth.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { LocationsModule } from '../locations/locations.module';
+import { CallsModule } from '../calls/calls.module';
 
 /** ماژول درخواست‌های خرید (RFQ) — B7 */
 @Module({
-  imports: [AuthModule, CategoriesModule, LocationsModule],
+  imports: [AuthModule, CategoriesModule, LocationsModule, CallsModule], // CallsService: سهمیهٔ روزانهٔ آشکارسازی شمارهٔ خریدار
   controllers: [BuyRequestsController],
   providers: [BuyRequestsService],
   exports: [BuyRequestsService], // ماژول saved برای نشان‌کردن خریدار

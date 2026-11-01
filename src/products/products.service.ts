@@ -6,8 +6,9 @@ import { AppError } from '../common/errors/app-error';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
-import { CallsService } from '../calls/calls.service';
+import { CallsService, dailyCallLimit } from '../calls/calls.service';
 import { PresenceService } from '../presence/presence.service';
+import { SecurityService } from '../security/security.service';
 import type { AuthUser } from '../common/guards';
 import type { CreateProductDto, GetProductListDto, UpdateMyProductDto } from './dto';
 import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages.service';
@@ -92,6 +93,7 @@ export class ProductsService {
     private readonly uploads: UploadsService,
     private readonly calls: CallsService,
     private readonly presence: PresenceService,
+    private readonly security: SecurityService,
   ) {}
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
@@ -641,13 +643,17 @@ export class ProductsService {
   // ─── فروشنده عمومی ─────────────────────────────────────────────────────────
 
   /**
-   * POST /products/getSellerPhone — شماره تماس فروشنده (مدل lead-gen):
-   * فقط برای کاربر واردشده (گارد Jwt)؛ شماره/قیمت مهمان پنهان — عین باسکول.
-   * دو مسیر: آگهی (id) یا پروفایل فروشنده (userName — دکمه شماره تماس پروفایل).
-   * خریدار واردشده همان لحظه به‌عنوان «تماس» ثبت می‌شود تا ادمین بداند کی به کی
-   * زنگ زده. خود فروشنده شماره خودش را می‌بیند بدون ثبت.
+   * POST /products/getSellerPhone — سرویس اختصاصی شماره تماس فروشنده
+   * (امنیت ۱-۱۱): شمارهٔ موبایل فقط از همین مسیرِ توکندار بیرون می‌آید و
+   * هرگز در لیست/جزئیات عمومی نیست. دو مسیر: آگهی (id) یا پروفایل (userName).
+   *
+   * سهمیهٔ روزانه: رایگان ۱۰ کاربر / بستهٔ فعال ۳۰ کاربر — دیدن دوبارهٔ
+   * همان فروشنده امروز سهمیه نمی‌سوزاند. تلاش‌ها در سرویس امنیت شمرده
+   * می‌شوند؛ چکش‌کاری = بلاک خودکار کاربر و شماره‌اش.
+   * خریدار واردشده همان لحظه به‌عنوان «تماس» ثبت می‌شود تا ادمین بداند کی به
+   * کی زنگ زده. خودِ فروشنده شمارهٔ خودش را بدون سهمیه و ثبت می‌بیند.
    */
-  async getSellerPhone(caller: AuthUser | null, dto: { id?: number; userName?: string }) {
+  async getSellerPhone(caller: AuthUser, dto: { id?: number; userName?: string }, ip?: string) {
     let sellerId: string;
     let productId: number | null = null;
     const source = dto.userName ? 'profile' : 'product';
@@ -677,6 +683,20 @@ export class ProductsService {
     });
     if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
 
+    // سهمیهٔ بستهٔ تماس‌گیرنده — بستهٔ فعال لحاظ شده (۱-۱۱)
+    const me = await this.prisma.user.findUnique({
+      where: { id: caller.id },
+      select: { activePakageType: true, packageExpiresAt: true },
+    });
+    const myPakage = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt);
+    const limit = dailyCallLimit(myPakage);
+
+    // ردپای امنیتی تلاش‌ها — چکش‌کاری = بلاک خودکار (ممکن است خطا بدهد)
+    await this.security.noteContactReveal(caller.id, ip, limit);
+
+    // گیت سهمیهٔ روزانه — کاربرهای متمایزِ امروز (خود فروشنده معاف است)
+    await this.calls.assertDailyQuota(caller, seller.id, myPakage);
+
     // ثبت تماس — فقط برای خریدار واردشده و غیر از خود فروشنده؛ best-effort
     let callLogged = false;
     if (caller && caller.id !== seller.id) {
@@ -688,6 +708,10 @@ export class ProductsService {
       }
     }
 
+    // تماس‌های باقی‌ماندهٔ امروز — کلاینت می‌تواند به کاربر نشان بدهد
+    const contacted = await this.calls.contactedToday(caller.id);
+    const callsLeftToday = Math.max(0, limit - contacted.size);
+
     return {
       sellerId: seller.id,
       phone: seller.phone,
@@ -695,6 +719,7 @@ export class ProductsService {
       lastName: seller.lastName,
       userName: seller.userName,
       callLogged,
+      callsLeftToday,
     };
   }
 
@@ -802,7 +827,8 @@ export class ProductsService {
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
         // ── فیلدهای پروفایل کسب‌وکار (embedded myuser_profiles باسکول) ──
         address: (seller.profile as { address?: string } | null)?.address ?? null,
-        publicPhone: (seller.profile as { publicPhone?: string } | null)?.publicPhone ?? null,
+        // publicPhone حذف شد (امنیت ۱-۱۱): شمارهٔ موبایل هرگز در دیتای عمومی
+        // نیست — فقط سرویس اختصاصی getSellerPhone آن را برمی‌گرداند.
         isCompany: Boolean((seller.profile as { isCompany?: boolean } | null)?.isCompany),
         companyName: (seller.profile as { companyName?: string } | null)?.companyName ?? null,
         gallery: userGallery.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),

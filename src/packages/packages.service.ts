@@ -69,6 +69,7 @@ export const DEFAULT_PLAN_FEATURES = [
   'ثبت تعداد نامحدود محصول',
   'دسترسی نامحدود به همه خریداران',
   'ثبت درخواست خرید نامحدود',
+  'تماس روزانه با تا ۳۰ کاربر ایمچ',
   'درج نشان فروشنده ویژه روی محصولات و پروفایل',
   'نمایش محصولات بالاتر از رقبا',
   'اولویت بررسی و پشتیبانی ویژه',
@@ -76,6 +77,11 @@ export const DEFAULT_PLAN_FEATURES = [
 
 /** ظرفیت ثبت محصول بسته رایگان — قبلاً ۵ بود؛ خواسته مالک: ۱۰ */
 export const FREE_PRODUCT_CAPACITY = 10;
+
+/** سهمیهٔ تماس روزانه (امنیت شماره‌ها ۱-۱۱) — رایگان ۱۰ کاربر، بستهٔ فعال ۳۰ کاربر.
+ *  منبع یکسان در CallsService — اینجا فقط برای خروجی پکیج تکرار می‌شود. */
+export const FREE_DAILY_CALL_LIMIT = 10;
+export const PAID_DAILY_CALL_LIMIT = 30;
 
 /** ماه تجاری ۳۰ روزه — هم‌راستا با نردبان (LADDER_DURATION_MS) */
 const MONTH_MS = 30 * 86_400_000;
@@ -354,6 +360,7 @@ export class PackagesService {
         productCapacity: FREE_PRODUCT_CAPACITY,
         canSeeBuyers: false,
         unlimitedBuyRequests: true,
+        dailyCallLimit: FREE_DAILY_CALL_LIMIT,
       },
     };
   }
@@ -426,6 +433,8 @@ export class PackagesService {
         productCapacity: active > 0 ? -1 : FREE_PRODUCT_CAPACITY,
         canSeeBuyers: active > 0,
         unlimitedBuyRequests: true,
+        /** سهمیهٔ تماس روزانه — کاربرهای متمایز (امنیت ۱-۱۱) */
+        dailyCallLimit: active > 0 ? PAID_DAILY_CALL_LIMIT : FREE_DAILY_CALL_LIMIT,
       },
     };
   }

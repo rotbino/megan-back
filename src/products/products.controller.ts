@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
@@ -117,13 +117,18 @@ export class ProductsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } }) // آشکارسازی شماره — حساس (امنیت ۱-۱۱)
   @Post('getSellerPhone')
   @ApiOperation({
     summary:
-      'شماره تماس فروشنده (آگهی یا پروفایل) — نیاز به ورود (مدل lead-gen)؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
+      'سرویس اختصاصی شماره تماس فروشنده (آگهی یا پروفایل) — نیاز به ورود؛ سهمیهٔ روزانه: رایگان ۱۰ کاربر، بستهٔ فعال ۳۰ کاربر؛ خریدار واردشده خودکار در گزارش تماس‌ها ثبت می‌شود',
   })
-  async getSellerPhone(@CurrentUser() user: AuthUser, @Body() dto: GetSellerPhoneDto) {
-    return ok(await this.products.getSellerPhone(user, dto));
+  async getSellerPhone(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: GetSellerPhoneDto,
+    @Req() req: { ip?: string },
+  ) {
+    return ok(await this.products.getSellerPhone(user, dto, req.ip));
   }
 
   @Post('searchSuggestions')

@@ -825,7 +825,7 @@ model CallLog {
   callee   User   @relation("CallCallee", fields: [calleeId], references: [id])
 
   /// زمینه آشکارسازی شماره — صفحه آگهی / پروفایل / چت
-  source    String   @default("product") // product | profile | chat
+  source    String   @default("product") // product | profile | chat | buyer_request
   productId Int?     @map("product_id")
   product   Product? @relation("CallLogProduct", fields: [productId], references: [id])
 

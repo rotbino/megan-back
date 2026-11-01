@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BuyRequestsService } from './buy-requests.service';
@@ -71,10 +71,18 @@ export class BuyRequestsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } }) // آشکارسازی شماره — حساس (امنیت ۱-۱۱)
   @Post('getBuyRequestContact')
-  @ApiOperation({ summary: 'شماره تماس خریدار — نیازمند ورود (مدل Lead-gen باسکول)' })
-  async getBuyRequestContact(@CurrentUser() user: AuthUser, @Body() dto: GetBuyRequestContactDto) {
-    return ok(await this.buyRequests.getBuyRequestContact(user, dto.id));
+  @ApiOperation({
+    summary:
+      'سرویس اختصاصی شماره تماس خریدار — نیازمند ورود + بستهٔ فعال؛ سهمیهٔ روزانهٔ تماس (رایگان ۱۰ / بستهٔ فعال ۳۰ کاربر) مشترک با شمارهٔ فروشندگان است',
+  })
+  async getBuyRequestContact(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: GetBuyRequestContactDto,
+    @Req() req: { ip?: string },
+  ) {
+    return ok(await this.buyRequests.getBuyRequestContact(user, dto.id, req.ip));
   }
 
   @UseGuards(JwtAuthGuard)

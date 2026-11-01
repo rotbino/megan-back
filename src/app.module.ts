@@ -3,6 +3,8 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { CommonModule } from './common/common.module';
 import { HealthController } from './health.controller';
+import { SecurityModule } from './security/security.module';
+import { SecurityGuard } from './security/security.guard';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -29,11 +31,13 @@ import { AdminModule } from './admin/admin.module';
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
  * (Prisma + کش). حد نرخ سراسری: ۳۰۰ درخواست/دقیقه/IP (کنترلر auth سخت‌تر).
+ * SecurityGuard: بلاک‌لیست IPهای سوءاستفاده‌گر (امنیت شماره‌ها ۱-۱۱).
  */
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     CommonModule,
+    SecurityModule, // امنیت داده‌های تماس — بلاک خودکار کاربر/IP سوءاستفاده‌گر
     AuthModule,
     UsersModule,
     CategoriesModule,
@@ -58,6 +62,9 @@ import { AdminModule } from './admin/admin.module';
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: SecurityGuard },
+  ],
 })
 export class AppModule {}

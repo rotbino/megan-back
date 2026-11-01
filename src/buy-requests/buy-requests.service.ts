@@ -4,6 +4,8 @@ import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
+import { CallsService, dailyCallLimit } from '../calls/calls.service';
+import { SecurityService } from '../security/security.service';
 import { effectivePakageType } from '../packages/packages.service';
 import type { AuthUser } from '../common/guards';
 import {
@@ -82,6 +84,8 @@ export class BuyRequestsService {
     private readonly cache: CacheService,
     private readonly categories: CategoriesService,
     private readonly locations: LocationsService,
+    private readonly calls: CallsService,
+    private readonly security: SecurityService,
   ) {}
 
   // ─── ثبت درخواست ───────────────────────────────────────────────────────────
@@ -236,8 +240,13 @@ export class BuyRequestsService {
 
   /** POST /buy-requests/getBuyRequestContact — شماره خریدار (لاگین لازم).
    *  گیت بسته (خواسته مالک): بسته رایگان شماره خریداران را نمی‌بیند —
-   *  فقط با بسته فعال (۱/۲/۳) اطلاعات تماس آشکار می‌شود. */
-  async getBuyRequestContact(user: AuthUser, id: number) {
+   *  فقط با بسته فعال (۱/۲/۳) اطلاعات تماس آشکار می‌شود.
+   *
+   *  امنیت ۱-۱۱: این هم سرویس اختصاصی آشکارسازی شماره است — سهمیهٔ روزانهٔ
+   *  مشترک (رایگان ۱۰ / بستهٔ فعال ۳۰ کاربر در روز) با سرویس شمارهٔ فروشندگان،
+   *  تلاش‌ها در سرویس امنیت شمرده می‌شوند و آشکارسازی در گزارش تماس‌های
+   *  ادمین هم ثبت می‌شود (source=buyer_request). */
+  async getBuyRequestContact(user: AuthUser, id: number, ip?: string) {
     const row = await this.prisma.buyRequest.findUnique({
       where: { id },
       select: { status: true, userId: true },
@@ -252,12 +261,16 @@ export class BuyRequestsService {
         where: { id: user.id },
         select: { activePakageType: true, packageExpiresAt: true },
       });
-      if (effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) === 0) {
+      const myPakage = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt);
+      if (myPakage === 0) {
         throw AppError.forbidden(
           'مشاهده اطلاعات تماس خریداران ویژه بسته اشتراک فعال دارد — برای دسترسی نامحدود به همه خریداران، یکی از بسته‌های ایمچ را فعال کنید.',
           'PACKAGE_REQUIRED',
         );
       }
+      // ردپای امنیتی + گیت سهمیهٔ روزانهٔ مشترک تماس‌ها
+      await this.security.noteContactReveal(user.id, ip, dailyCallLimit(myPakage));
+      await this.calls.assertDailyQuota(user, row.userId, myPakage);
     }
 
     const buyer = await this.prisma.user.findUnique({
@@ -265,6 +278,14 @@ export class BuyRequestsService {
       select: { phone: true, firstName: true, lastName: true, isVerified: true },
     });
     if (!buyer) throw AppError.notFound('خریدار یافت نشد.');
+
+    // ثبت آشکارسازی به‌عنوان تماس — گزارش ادمین + شمارش سهمیهٔ فردا درست بماند
+    if (row.userId !== user.id) {
+      await this.calls
+        .reportCall(user, { calleeId: row.userId, source: 'buyer_request' })
+        .catch(() => undefined);
+    }
+
     return {
       phone: buyer.phone,
       firstName: buyer.firstName,

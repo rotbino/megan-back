@@ -16,8 +16,8 @@ export class ReportCallDto {
   @Min(1)
   productId?: number;
 
-  /** از کجا شماره دیده شد — صفحه آگهی / پروفایل / چت */
+  /** از کجا شماره دیده شد — صفحه آگهی / پروفایل / چت / کارت خریدار */
   @IsOptional()
-  @IsIn(['product', 'profile', 'chat'])
-  source?: 'product' | 'profile' | 'chat';
+  @IsIn(['product', 'profile', 'chat', 'buyer_request'])
+  source?: 'product' | 'profile' | 'chat' | 'buyer_request';
 }
