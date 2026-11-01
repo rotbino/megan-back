@@ -11,6 +11,7 @@ import {
   GetRelatedProductsDto,
   GetSellerDto,
   GetSellerPhoneDto,
+  GetSellerProductsDto,
   ReportViewDto,
   SearchSuggestionsDto,
   UpdateMyProductDto,
@@ -50,9 +51,17 @@ export class ProductsController {
   }
 
   @Post('getRelatedProducts')
-  @ApiOperation({ summary: 'محصولات مرتبط هم‌دسته (عین باسکول)' })
+  @ApiOperation({
+    summary: 'محصولات مشابه — هم‌زیردسته + گسترش هم‌دسته؛ سورت نردبان/ویژه/آپدیت + صفحه‌بندی',
+  })
   async getRelatedProducts(@Body() dto: GetRelatedProductsDto) {
-    return ok(await this.products.getRelatedProducts(dto.subCategoryId, dto.excludeId, dto.limit ?? 6));
+    return ok(await this.products.getRelatedProducts(dto));
+  }
+
+  @Post('getSellerProducts')
+  @ApiOperation({ summary: 'آگهی‌های دیگر همان فروشنده — ریل افقی صفحه محصول' })
+  async getSellerProducts(@Body() dto: GetSellerProductsDto) {
+    return ok(await this.products.getSellerProducts(dto));
   }
 
   @UseGuards(JwtAuthGuard)

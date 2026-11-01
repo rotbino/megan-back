@@ -7,6 +7,7 @@ import {
   CreateSavedListDto,
   DeleteSavedListDto,
   GetSavedListUsersDto,
+  MarkUserDto,
   MoveSavedUserDto,
   RemoveSavedUserDto,
   SaveBuyerToListDto,
@@ -19,6 +20,21 @@ export interface SavedListDto {
   id: string;
   name: string;
   cnt: number;
+  /** فقط وقتی targetUserId داده شده — آیا هدف در این لیست است؟ (مودال نشان‌کردن) */
+  saved?: boolean;
+  /** وضعیت CRM هدف در همین لیست — فقط همراه targetUserId */
+  targetStatus?: string | null;
+}
+
+export interface MarkUserResult {
+  /** ردیف‌های تازه ساخته‌شده */
+  added: number;
+  /** ردیف‌های حذف‌شده (لیست‌های ازتیک‌خورده) */
+  removed: number;
+  /** آیا هدف الان در هیچ لیستی نشان است؟ */
+  marked: boolean;
+  /** وضعیت فعلی پس از تغییر — null یعنی نشان نیست */
+  status: string | null;
 }
 
 export interface SavedUserDto {
@@ -40,18 +56,34 @@ export class SavedService {
 
   // ─── لیست‌ها ───────────────────────────────────────────────────────────────
 
-  /** POST /saved/getSavedLists — لیست‌های کاربر + تعداد نشان‌شده‌ها */
-  async getSavedLists(userId: string): Promise<SavedListDto[]> {
+  /** POST /saved/getSavedLists — لیست‌های کاربر + تعداد نشان‌شده‌ها؛
+   *  با targetUserId: هر لیست پرچم saved و وضعیت هدف را هم می‌گیرد (مودال CRM) */
+  async getSavedLists(userId: string, targetUserId?: string): Promise<SavedListDto[]> {
+    const wantTarget = Boolean(targetUserId && isOid(targetUserId));
     const lists = await this.prisma.savedList.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         name: true,
-        savedUsers: { select: { id: true } },
+        _count: { select: { savedUsers: true } },
+        // رابطهٔ فیلترشده — فقط ردیفِ خودِ هدف (برای مودال)
+        ...(wantTarget
+          ? { savedUsers: { where: { targetUserId: targetUserId as string }, select: { status: true } } }
+          : {}),
       },
     });
-    return lists.map((l) => ({ id: l.id, name: l.name, cnt: l.savedUsers.length }));
+    return lists.map((l) => ({
+      id: l.id,
+      name: l.name,
+      cnt: l._count.savedUsers,
+      ...(wantTarget
+        ? {
+            saved: l.savedUsers.length > 0,
+            targetStatus: l.savedUsers[0]?.status ?? null,
+          }
+        : {}),
+    }));
   }
 
   /** POST /saved/createSavedList — «لیست جدید» */
@@ -157,6 +189,81 @@ export class SavedService {
       data: { savedListId: listId, targetUserId: dto.targetUserId },
     });
     return { savedUserId: row.id, listId };
+  }
+
+  /** POST /saved/markUser — مودال CRM (خواسته مالک ۱-۱۱ دور هفتم):
+   *  سینک عضویت هدف در لیست‌های کاربر. تیک‌خورده‌ها = عضو؛ ردیف‌های هدف در
+   *  لیست‌های دیگر کاربر حذف می‌شوند (برداشتن تیک = حذف از آن لیست).
+   *  وضعیت داده شود روی همهٔ ردیف‌های باقی‌مانده اعمال می‌شود. */
+  async markUser(user: AuthUser, dto: MarkUserDto): Promise<MarkUserResult> {
+    if (!isOid(dto.targetUserId)) throw AppError.notFound('کاربر یافت نشد.');
+    if (dto.targetUserId === user.id) {
+      throw AppError.badRequest('خودتان را نمی‌توانید نشان کنید.', 'SELF_SAVE');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: dto.targetUserId },
+      select: { id: true },
+    });
+    if (!target) throw AppError.notFound('کاربر یافت نشد.');
+
+    // مالکیت همهٔ لیست‌های تیک‌خورده یک‌جا چک شود — لیست غلط = 404
+    const wanted = [...new Set(dto.listIds)] as string[];
+    const owned = await this.prisma.savedList.findMany({
+      where: { userId: user.id, id: { in: wanted } },
+      select: { id: true },
+    });
+    if (owned.length !== wanted.length) throw AppError.notFound('لیست یافت نشد.');
+
+    const { added, removed } = await this.prisma.$transaction(async (tx) => {
+      // ردیف‌های فعلی هدف در همهٔ لیست‌های کاربر
+      const rows = await tx.savedUser.findMany({
+        where: { targetUserId: dto.targetUserId, savedList: { userId: user.id } },
+        select: { id: true, savedListId: true },
+      });
+      const keepIds = new Set(owned.map((l) => l.id));
+      const haveSet = new Set(rows.map((r) => r.savedListId));
+      const toRemove = rows.filter((r) => !keepIds.has(r.savedListId));
+      const toCreate = owned.filter((l) => !haveSet.has(l.id));
+
+      // حذف با یادداشت‌ها (cascade دستی — رویهٔ همین ماژول)
+      if (toRemove.length > 0) {
+        await tx.savedUserNote.deleteMany({
+          where: { savedUserId: { in: toRemove.map((r) => r.id) } },
+        });
+        await tx.savedUser.deleteMany({
+          where: { id: { in: toRemove.map((r) => r.id) } },
+        });
+      }
+      if (toCreate.length > 0) {
+        await tx.savedUser.createMany({
+          data: toCreate.map((l) => ({
+            savedListId: l.id,
+            targetUserId: dto.targetUserId,
+            ...(dto.status ? { status: dto.status } : {}),
+          })),
+        });
+      }
+      // وضعیت روی همهٔ ردیف‌های باقی‌ماندهٔ این هدف اعمال شود
+      if (dto.status) {
+        await tx.savedUser.updateMany({
+          where: { targetUserId: dto.targetUserId, savedList: { userId: user.id } },
+          data: { status: dto.status },
+        });
+      }
+      return { added: toCreate.length, removed: toRemove.length };
+    });
+
+    const remaining = await this.prisma.savedUser.findFirst({
+      where: { targetUserId: dto.targetUserId, savedList: { userId: user.id } },
+      orderBy: { updatedAt: 'desc' },
+      select: { status: true },
+    });
+    return {
+      added,
+      removed,
+      marked: remaining != null,
+      status: remaining?.status ?? null,
+    };
   }
 
   /** POST /saved/setSavedUserStatus — دراپ‌داون وضعیت کاربر */

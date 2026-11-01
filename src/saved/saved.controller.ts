@@ -7,6 +7,8 @@ import {
   CreateSavedListDto,
   DeleteSavedListDto,
   GetSavedListUsersDto,
+  GetSavedListsDto,
+  MarkUserDto,
   MoveSavedUserDto,
   RemoveSavedUserDto,
   SaveBuyerToListDto,
@@ -28,9 +30,15 @@ export class SavedController {
   constructor(private readonly saved: SavedService) {}
 
   @Post('getSavedLists')
-  @ApiOperation({ summary: 'لیست‌های نشان‌شده‌های کاربر + تعداد' })
-  async getSavedLists(@CurrentUser() user: AuthUser) {
-    return ok(await this.saved.getSavedLists(user.id));
+  @ApiOperation({ summary: 'لیست‌های نشان‌شده‌های کاربر + تعداد (با targetUserId: پرچم saved هر لیست)' })
+  async getSavedLists(@CurrentUser() user: AuthUser, @Body() dto: GetSavedListsDto) {
+    return ok(await this.saved.getSavedLists(user.id, dto?.targetUserId));
+  }
+
+  @Post('markUser')
+  @ApiOperation({ summary: 'مودال CRM نشان‌کردن — سینک چندلیستی + وضعیت پیگیری' })
+  async markUser(@CurrentUser() user: AuthUser, @Body() dto: MarkUserDto) {
+    return ok(await this.saved.markUser(user, dto));
   }
 
   @Post('createSavedList')

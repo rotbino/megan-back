@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength,
+} from 'class-validator';
 
 /** وضعیت‌های مجاز CRM — عین چیپ‌های پنل باسکول */
 export const SAVED_USER_STATUSES = [
@@ -46,6 +54,34 @@ export class DeleteSavedListDto {
 export class GetSavedListUsersDto {
   @IsString()
   listId!: string;
+}
+
+/** POST /saved/getSavedLists — با targetUserId اختیاری: هر لیست پرچم saved می‌گیرد
+ *  (مودال نشان‌کردن — پر کردن چک‌باکس‌ها و وضعیت فعلی) */
+export class GetSavedListsDto {
+  /** ObjectId کاربر هدف — اختیاری */
+  @IsOptional()
+  @IsString()
+  targetUserId?: string;
+}
+
+/** POST /saved/markUser — مودال CRM نشان‌کردن (خواسته مالک ۱-۱۱ دور هفتم):
+ *  سینک عضویت هدف در لیست‌های کاربر + وضعیت پیگیری. لیست‌های تیک‌خورده =
+ *  عضو می‌ماند/می‌شود؛ بقیه لیست‌های کاربر اگر هدف را داشته باشند حذف می‌شود. */
+export class MarkUserDto {
+  @IsString()
+  targetUserId!: string;
+
+  /** لیست‌های تیک‌خورده — خالی یعنی حذف کامل نشان */
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  listIds!: string[];
+
+  /** وضعیت پیگیری CRM — اختیاری (نمی‌دهد = بدون تغییر) */
+  @IsOptional()
+  @IsIn(SAVED_USER_STATUSES)
+  status?: SavedUserStatus;
 }
 
 /** POST /saved/saveBuyerToList — «نشان کردن» خریدار از کارت لیست عمومی/پنل */

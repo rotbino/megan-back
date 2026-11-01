@@ -10,7 +10,13 @@ import { CallsService, dailyCallLimit } from '../calls/calls.service';
 import { PresenceService } from '../presence/presence.service';
 import { SecurityService } from '../security/security.service';
 import type { AuthUser } from '../common/guards';
-import type { CreateProductDto, GetProductListDto, UpdateMyProductDto } from './dto';
+import type {
+  CreateProductDto,
+  GetProductListDto,
+  GetRelatedProductsDto,
+  GetSellerProductsDto,
+  UpdateMyProductDto,
+} from './dto';
 import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages.service';
 
 /** ظرفیت آگهی بسته رایگان — قبلاً ۵؛ حالا ۱۰ (خواسته مالک). بسته فعال = نامحدود. */
@@ -206,18 +212,98 @@ export class ProductsService {
     );
   }
 
-  /** POST /products/getRelatedProducts — هم‌دسته (عین باسکول) */
-  async getRelatedProducts(subCategoryId: number, excludeId: number, limit = 6) {
+  /** POST /products/getRelatedProducts — مشابه‌ها (خواسته مالک ۱-۱۱ دور هفتم):
+   *  هم‌زیردسته اول، بعد بقیهٔ هم‌دستهٔ پدر؛ سورت طبیعی همه‌جا =
+   *  نردبان ← فروشندهٔ ویژه ← تازه‌ترین به‌روزرسانی (RULES.md §۳)؛ صفحه‌بندی. */
+  async getRelatedProducts(dto: GetRelatedProductsDto) {
+    const page = dto.page ?? 1;
+    const pageSize = dto.pageSize ?? dto.limit ?? 6;
+    const baseWhere = {
+      status: 'confirmed' as const,
+      id: { not: dto.excludeId },
+      user: { isActive: true },
+      // نردبان منقضی عملاً غیرفعال است
+      OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }],
+    };
+    const ORDER: Prisma.ProductOrderByWithRelationInput[] = [
+      { isLadder: 'desc' },
+      { isElevated: 'desc' },
+      { updatedAt: 'desc' },
+    ];
+
+    // نزدیک‌ترین‌ها: هم‌زیردسته؛ اگر کم بود با بقیهٔ هم‌دستهٔ پدر پُر می‌شود
+    const [subRows, subTotal] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { ...baseWhere, subCategoryId: dto.subCategoryId },
+        orderBy: ORDER,
+        take: 60,
+      }),
+      this.prisma.product.count({ where: { ...baseWhere, subCategoryId: dto.subCategoryId } }),
+    ]);
+
+    let rows = subRows;
+    let total = subTotal;
+    if (dto.categoryId != null && rows.length < 60) {
+      // دستهٔ پدر گسترش می‌دهد — خودِ زیردسته قبلاً آمده، حذف تکرار با id
+      const have = new Set(rows.map((r) => r.id));
+      const catRows = await this.prisma.product.findMany({
+        where: {
+          ...baseWhere,
+          categoryId: dto.categoryId,
+          id: { notIn: [...have, dto.excludeId] },
+        },
+        orderBy: ORDER,
+        take: 60 - rows.length,
+      });
+      rows = [...rows, ...catRows];
+      total += await this.prisma.product.count({
+        where: { ...baseWhere, categoryId: dto.categoryId, id: { notIn: [...have, dto.excludeId] } },
+      });
+    }
+
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, pageCount);
+    const paged = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(paged.map((r) => r.id)),
+      this.hydrateNames(paged),
+    ]);
+    return {
+      items: paged.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
+      total,
+      page: safePage,
+      pageCount,
+    };
+  }
+
+  /** POST /products/getSellerProducts — آگهی‌های دیگر همان فروشنده (ریل افقی
+   *  صفحهٔ محصول). سورت = قانون طبیعی (نردبان ← ویژه ← آپدیت). عمومی. */
+  async getSellerProducts(dto: GetSellerProductsDto) {
+    const seller = await this.prisma.user.findUnique({
+      where: { userName: dto.userName },
+      select: { id: true, isActive: true },
+    });
+    if (!seller || !seller.isActive) return { items: [] as ProductDto[], total: 0 };
+
+    const where: Prisma.ProductWhereInput = {
+      userId: seller.id,
+      status: 'confirmed',
+      ...(dto.excludeId != null ? { id: { not: dto.excludeId } } : {}),
+      OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }],
+    };
     const rows = await this.prisma.product.findMany({
-      where: { subCategoryId, status: 'confirmed', id: { not: excludeId }, user: { isActive: true } },
-      orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
-      take: limit,
+      where,
+      orderBy: [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }],
+      take: dto.limit ?? 12,
     });
     const [gallery, names] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
     ]);
-    return rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names));
+    return {
+      items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
+      total: rows.length,
+    };
   }
 
   /** آگهی‌های تاییدشده با این idها — علاقه‌مندی‌ها (F5) و صفحه «ذخیره‌شده‌ها».
@@ -746,7 +832,7 @@ export class ProductsService {
 
     const rows = await this.prisma.product.findMany({
       where: { userId: seller.id, status: 'confirmed' },
-      orderBy: [{ isLadder: 'desc' }, { updatedAt: 'desc' }],
+      orderBy: [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }],
       take: 48,
     });
     // احتمال پاسخگویی — مکالماتی که خریدار شروع کرده چندتایش جواب فروشنده دارد.

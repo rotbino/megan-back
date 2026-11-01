@@ -149,11 +149,51 @@ export class GetRelatedProductsDto {
   @IsInt()
   excludeId!: number;
 
+  /** دستهٔ پدر — برای گسترش نتایج وقتی زیردسته کم‌آیتم است (مشابه‌ها) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  categoryId?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(12)
+  limit?: number;
+
+  /** صفحه‌بندی مشابه‌ها (خواسته مالک ۱-۱۱ دور هفتم) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  pageSize?: number;
+}
+
+/** آگهی‌های دیگر همان فروشنده — ریل افقی صفحهٔ محصول (خواسته مالک ۱-۱۱ دور هفتم) */
+export class GetSellerProductsDto {
+  /** userName عمومی فروشنده */
+  @IsString()
+  @Length(2, 60)
+  userName!: string;
+
+  /** آگهی صفحهٔ فعلی — از نتایج حذف می‌شود */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  excludeId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
   limit?: number;
 }
 
