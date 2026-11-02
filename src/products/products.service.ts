@@ -372,7 +372,10 @@ export class ProductsService {
       data: {
         id,
         productName: dto.productName.trim(),
-        slug: `خرید-عمده-${dto.productName.trim()}-${id}`,
+        // اسلاگ آگهی فروش = «فروش-عمده-…» (خواسته مالک ۲-۱۱: عنوان آگهی‌های فروش
+        // فروش است نه خرید؛ آدرس هم همین زبان را بازگو می‌کند — URLهای قدیمی
+        // «خرید-عمده» همچنان کار می‌کنند چون صفحه با id حل می‌شود)
+        slug: `فروش-عمده-${dto.productName.trim()}-${id}`,
         description: dto.description.trim(),
         categoryId,
         subCategoryId: sub.id,
@@ -668,6 +671,8 @@ export class ProductsService {
       where: { id: dto.id },
       data: {
         productName: dto.productName.trim(),
+        // تغییر نام = بازتولید اسلاگ تا آدرس رسمی با نام تازه هم‌زبان بماند
+        slug: `فروش-عمده-${dto.productName.trim()}-${dto.id}`,
         description: dto.description.trim(),
         categoryId,
         subCategoryId: sub.id,

@@ -179,7 +179,7 @@ async function main() {
       const row = {
         _id: m.id,
         product_name: (m.product_name ?? '').trim(),
-        slug: `خرید-عمده-${(m.product_name ?? '').trim()}-${m.id}`,
+        slug: `فروش-عمده-${(m.product_name ?? '').trim()}-${m.id}`,
         description: (m.description ?? '').trim(),
         category_id: m.category_id,
         sub_category_id: m.sub_category_id,

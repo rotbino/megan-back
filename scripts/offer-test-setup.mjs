@@ -60,7 +60,7 @@ async function main() {
     data: {
       id: counter.seq,
       productName: 'سیب قرمز تستی',
-      slug: `خرید-عمده-سیب-قرمز-تستی-${counter.seq}`,
+      slug: `فروش-عمده-سیب-قرمز-تستی-${counter.seq}`,
       description: 'سیب قرمز درجه یک تستی — برای تست نمونهٔ پارامتریک پیشنهاد تامین',
       categoryId: 1,
       subCategoryId: 3,
