@@ -914,7 +914,9 @@ export class ProductsService {
         firstName: seller.firstName,
         lastName: seller.lastName,
         sex: seller.sex,
-        activePakageType: 0,
+        // بستهٔ مؤثر (منقضی = ۰) — بج «فروشنده ویژه» پروفایل عمومی به آن وابسته است؛
+        // قبلاً هاردکد 0 بود و نشان طلایی هرگز روی پروفایل نمی‌افتاد
+        activePakageType: effectivePakageType(seller.activePakageType, seller.packageExpiresAt),
         isVerified: seller.isVerified,
         businessDesc: seller.businessDesc ?? null,
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
