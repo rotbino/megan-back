@@ -505,18 +505,42 @@ export class ProductsService {
       }
     }
 
-    // هویت کاربران مرتبط (بینندگان/تماس‌گیرندگان/ذخیره‌کنندگان) — یک کوئری
+    // چت‌کنندگان (خواسته مالک ۲-۱۱ دور ۱۸) — خریدارانی که دربارهٔ همین آگهی
+    // گفتگو کردند؛ آخرین پیام + تعداد پیام + شناسه مکالمه برای باز کردن مستقیم
+    const chatRows = await this.prisma.chatThread.findMany({
+      where: { productId },
+      orderBy: { lastMessageAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        buyerId: true,
+        lastMessageAt: true,
+        createdAt: true,
+        _count: { select: { messages: true } },
+      },
+    });
+
+    // هویت کاربران مرتبط (بینندگان/تماس‌گیرندگان/ذخیره‌کنندگان/چت‌کنندگان) — یک کوئری
     const userIds = [
       ...new Set([
         ...[...agg.values()].map((v) => v.viewerId).filter((x): x is string => x != null),
         ...callRows.map((c) => c.callerId),
         ...saveRows.map((sv) => sv.userId),
+        ...chatRows.map((t) => t.buyerId),
       ]),
     ];
     const users = userIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: userIds } },
-          select: { id: true, firstName: true, lastName: true, userName: true, phone: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            userName: true,
+            phone: true,
+            avatarUrl: true,
+            isVerified: true,
+          },
         })
       : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
@@ -525,7 +549,15 @@ export class ProductsService {
       if (!canSeeIdentity || id == null) return null;
       const u = userMap.get(id);
       return u
-        ? { firstName: u.firstName, lastName: u.lastName, userName: u.userName, phone: u.phone }
+        ? {
+            id: u.id,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            userName: u.userName,
+            phone: u.phone,
+            avatarUrl: u.avatarUrl,
+            isVerified: u.isVerified,
+          }
         : null;
     };
 
@@ -581,6 +613,12 @@ export class ProductsService {
       savers: saveRows.map((sv) => ({
         at: sv.createdAt,
         user: identity(sv.userId),
+      })),
+      chatters: chatRows.map((t) => ({
+        threadId: t.id,
+        messages: t._count.messages,
+        lastAt: t.lastMessageAt ?? t.createdAt,
+        user: identity(t.buyerId),
       })),
     };
   }
