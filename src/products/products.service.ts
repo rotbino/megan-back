@@ -435,46 +435,98 @@ export class ProductsService {
   }
 
   /**
-   * POST /products/getMyProductStats — آمار کامل آگهی برای مالک:
-   * چه کسانی دیدند (چند بار، چه تاریخی)، چه کسانی تماس زدند، چه کسانی ذخیره کردند.
+   * POST /products/getMyProductStats — آمار کامل آگهی برای مالک با بازهٔ دلخواه
+   * (خواسته مالک ۳-۱۱): چه کسانی دیدند (چند بار، چه تاریخی)، چه کسانی تماس زدند،
+   * چه کسانی ذخیره کردند + چه کسانی چت کردند.
+   *
+   * بازه: days = تعداد روز (پیش‌فرض ۱۴)؛ ۰ = کل دورهٔ زندگی آگهی از ثبت.
+   * بازه‌های بلندتر از عمر آگهی به تاریخ ثبت بریده می‌شوند (از همان موقع —
+   * خواسته مالک) و فرانت گزینه‌های بلندتر از عمر آگهی را مخفی می‌کند.
+   *
+   * پاسخ دو جعبهٔ مجموع دارد: totals (کل، از ثبت — «بازدید کل») و rangeTotals
+   * (همین بازه — نشانگر تب‌ها و سربرگ نمودار)؛ سری daily هم فقط همین بازه است.
    *
    * گیت هویت (خواسته مالک): شماره تماس/نام بینندگان فقط برای مالکِ دارای
    * اشتراک ویژه فعال؛ مالک رایگان شمارنده‌ها را می‌بیند و هویت‌ها قفل‌اند —
    * فرانت دکمه «خرید اشتراک» را کنار پیام قفل نشان می‌دهد.
    */
-  async getMyProductStats(user: AuthUser, productId: number) {
+  async getMyProductStats(user: AuthUser, productId: number, days = 14) {
     const p = await this.prisma.product.findUnique({
       where: { id: productId },
-      select: { id: true, productName: true, userId: true, viewCount: true, status: true, createdAt: true },
+      select: {
+        id: true,
+        productName: true,
+        userId: true,
+        viewCount: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        isLadder: true,
+      },
     });
     if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
 
     const me = await this.prisma.user.findUnique({
       where: { id: user.id },
-      select: { activePakageType: true, packageExpiresAt: true },
+      select: { activePakageType: true, packageExpiresAt: true, isVerified: true },
     });
     const canSeeIdentity = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0;
 
-    const since = new Date(Date.now() - 14 * 86_400_000);
-    const [viewRows, callRows, saveRows] = await Promise.all([
-      this.prisma.productView.findMany({
-        where: { productId, createdAt: { gte: since } },
-        orderBy: { createdAt: 'desc' },
-        take: 500,
-      }),
-      this.prisma.callLog.findMany({
-        where: { productId, createdAt: { gte: since } },
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-        select: { id: true, callerId: true, createdAt: true },
-      }),
-      this.prisma.favoriteProduct.findMany({
-        where: { productId },
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-        select: { id: true, userId: true, createdAt: true },
-      }),
-    ]);
+    // بازهٔ مؤثر — ۰ یعنی از ثبت آگهی؛ برش به عمر آگهی در هر حالت
+    const now = Date.now();
+    const since = new Date(
+      days === 0 ? p.createdAt.getTime() : Math.max(now - days * 86_400_000, p.createdAt.getTime()),
+    );
+
+    const [viewRows, callRows, saveRows, chatRows, totalViews, uniqueGroups, totalCalls, totalSaves, totalChats, rangeCalls, rangeSaves, rangeChats] =
+      await Promise.all([
+        // بینندگان بازه — فقط ستون‌های لازم؛ سقف بالای امان‌دهنده تا سری روزانه و
+        // تعداد بینندهٔ یکتای بازه حتی در بازه‌های چندساله دقیق بماند
+        this.prisma.productView.findMany({
+          where: { productId, createdAt: { gte: since } },
+          orderBy: { createdAt: 'desc' },
+          take: 100_000,
+          select: { createdAt: true, viewerId: true, sessionId: true },
+        }),
+        this.prisma.callLog.findMany({
+          where: { productId, createdAt: { gte: since } },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          select: { id: true, callerId: true, createdAt: true },
+        }),
+        this.prisma.favoriteProduct.findMany({
+          where: { productId, createdAt: { gte: since } },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          select: { id: true, userId: true, createdAt: true },
+        }),
+        this.prisma.chatThread.findMany({
+          where: { productId, lastMessageAt: { gte: since } },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 200,
+          select: {
+            id: true,
+            buyerId: true,
+            lastMessageAt: true,
+            createdAt: true,
+            _count: { select: { messages: true } },
+          },
+        }),
+        // مجموع‌های کل (از ثبت) — کارت‌های «بازدید کل» صفحه
+        this.prisma.productView.count({ where: { productId } }),
+        this.prisma.productView.groupBy({
+          by: ['viewerId', 'sessionId'],
+          where: { productId },
+          _count: { _all: true },
+        }),
+        this.prisma.callLog.count({ where: { productId } }),
+        this.prisma.favoriteProduct.count({ where: { productId } }),
+        this.prisma.chatThread.count({ where: { productId } }),
+        // مجموع‌های همین بازه — نشانگر تب‌ها (دقیق، حتی وقتی لیست در ۲۰۰ بریده می‌شود)
+        this.prisma.callLog.count({ where: { productId, createdAt: { gte: since } } }),
+        this.prisma.favoriteProduct.count({ where: { productId, createdAt: { gte: since } } }),
+        this.prisma.chatThread.count({ where: { productId, lastMessageAt: { gte: since } } }),
+      ]);
 
     // بینندگان — تجمیع به‌ازای کاربر/نشست: تعداد بازدید + اولین/آخرین
     interface ViewerAgg {
@@ -504,21 +556,6 @@ export class ProductsService {
         });
       }
     }
-
-    // چت‌کنندگان (خواسته مالک ۲-۱۱ دور ۱۸) — خریدارانی که دربارهٔ همین آگهی
-    // گفتگو کردند؛ آخرین پیام + تعداد پیام + شناسه مکالمه برای باز کردن مستقیم
-    const chatRows = await this.prisma.chatThread.findMany({
-      where: { productId },
-      orderBy: { lastMessageAt: 'desc' },
-      take: 200,
-      select: {
-        id: true,
-        buyerId: true,
-        lastMessageAt: true,
-        createdAt: true,
-        _count: { select: { messages: true } },
-      },
-    });
 
     // هویت کاربران مرتبط (بینندگان/تماس‌گیرندگان/ذخیره‌کنندگان/چت‌کنندگان) — یک کوئری
     const userIds = [
@@ -561,26 +598,25 @@ export class ProductsService {
         : null;
     };
 
-    // سری روزانه ۱۴ روز اخیر (فارسی نمایش داده می‌شود در فرانت)
-    const daily: Array<{ date: string; count: number }> = [];
+    // سری روزانهٔ بازه — کلید روز به وقت تهران تا با تقویمی که کاربر می‌بیند
+    // (فارسی/ایران) یکی باشد؛ بدون DST در ایران، گام ۲۴ ساعته پایدار است.
+    // فرانت بازه‌های بلند را خودش به هفته/ماه.bucket می‌کند.
+    const tehranDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' });
     const byDay = new Map<string, number>();
     for (const v of viewRows) {
-      const d = v.createdAt.toISOString().slice(0, 10);
+      const d = tehranDay.format(v.createdAt);
       byDay.set(d, (byDay.get(d) ?? 0) + 1);
     }
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-      daily.push({ date: d, count: byDay.get(d) ?? 0 });
+    const daily: Array<{ date: string; count: number }> = [];
+    const lastDay = tehranDay.format(new Date(now));
+    for (let t = since.getTime(); ; t += 86_400_000) {
+      const d = tehranDay.format(new Date(t));
+      if (daily.length === 0 || daily[daily.length - 1].date !== d) {
+        daily.push({ date: d, count: byDay.get(d) ?? 0 });
+      }
+      // تا روزِ امروز (به وقت تهران) پیش می‌رویم — حتی اگر ساعتِ گام وسط روز باشد
+      if (d === lastDay || daily.length > 4_000) break;
     }
-
-    const [totalViews, uniqueViewers] = await Promise.all([
-      this.prisma.productView.count({ where: { productId } }),
-      this.prisma.productView.groupBy({
-        by: ['viewerId', 'sessionId'],
-        where: { productId },
-        _count: { _all: true },
-      }),
-    ]);
 
     return {
       product: {
@@ -589,23 +625,42 @@ export class ProductsService {
         status: p.status,
         viewCount: p.viewCount,
         createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        isLadder: p.isLadder,
       },
       /** مالک اشتراک ویژه دارد؟ هویت‌ها فقط در این حالت باز می‌شوند */
       canSeeIdentity,
+      /** مالک احراز هویت شده؟ — ردیف «روش‌های افزایش بازدید» */
+      ownerIsVerified: me?.isVerified ?? false,
+      /** مجموع‌های کل (از ثبت آگهی) — «بازدید کل» */
       totals: {
         views: totalViews,
-        uniqueViewers: uniqueViewers.length,
-        contactClicks: await this.prisma.callLog.count({ where: { productId } }),
-        saves: saveRows.length,
+        uniqueViewers: uniqueGroups.length,
+        contactClicks: totalCalls,
+        saves: totalSaves,
+        chats: totalChats,
+      },
+      /** بازهٔ فعال بعد از برش به عمر آگهی — فرانت برچسب‌ها را از این می‌سازد */
+      range: { days, from: since, to: new Date(now) },
+      /** مجموع‌های همین بازه — نشانگر تب‌ها و سربرگ نمودار */
+      rangeTotals: {
+        views: viewRows.length,
+        uniqueViewers: agg.size,
+        contactClicks: rangeCalls,
+        saves: rangeSaves,
+        chats: rangeChats,
       },
       daily,
-      viewers: [...agg.values()].map((v) => ({
-        isGuest: v.viewerId == null,
-        views: v.views,
-        firstAt: v.firstAt,
-        lastAt: v.lastAt,
-        user: identity(v.viewerId),
-      })),
+      viewers: [...agg.values()]
+        .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
+        .slice(0, 200)
+        .map((v) => ({
+          isGuest: v.viewerId == null,
+          views: v.views,
+          firstAt: v.firstAt,
+          lastAt: v.lastAt,
+          user: identity(v.viewerId),
+        })),
       callers: callRows.map((c) => ({
         at: c.createdAt,
         user: identity(c.callerId),

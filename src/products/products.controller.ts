@@ -6,6 +6,7 @@ import {
   CreateProductDto,
   DeleteMyProductDto,
   GetMyProductDetailDto,
+  GetMyProductStatsDto,
   GetProductByIdDto,
   GetProductListDto,
   GetRelatedProductsDto,
@@ -93,10 +94,10 @@ export class ProductsController {
   @Post('getMyProductStats')
   @ApiOperation({
     summary:
-      'آمار آگهی من — چه کسانی دیدند/تماس زدند/ذخیره کردند؛ هویت‌ها فقط با اشتراک ویژه',
+      'آمار آگهی من با بازهٔ دلخواه (۷ روز تا کل دوره از ثبت) — چه کسانی دیدند/تماس زدند/ذخیره کردند؛ هویت‌ها فقط با اشتراک ویژه',
   })
-  async getMyProductStats(@CurrentUser() user: AuthUser, @Body() dto: GetMyProductDetailDto) {
-    return ok(await this.products.getMyProductStats(user, dto.id));
+  async getMyProductStats(@CurrentUser() user: AuthUser, @Body() dto: GetMyProductStatsDto) {
+    return ok(await this.products.getMyProductStats(user, dto.id, dto.days ?? 14));
   }
 
   @UseGuards(JwtAuthGuard)

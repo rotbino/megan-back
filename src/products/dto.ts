@@ -217,6 +217,20 @@ export class GetMyProductDetailDto {
   id!: number;
 }
 
+/** POST /products/getMyProductStats — آمار آگهی خودم با بازهٔ دلخواه (خواسته مالک ۳-۱۱) */
+export class GetMyProductStatsDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  /** بازهٔ آمار به روز — پیش‌فرض ۱۴؛ ۰ = کل دورهٔ زندگی آگهی (از ثبت) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  days?: number;
+}
+
 /** POST /products/updateMyProduct — ویرایش آگهی خودم → بازگشت به «در انتظار تایید» */
 export class UpdateMyProductDto extends CreateProductDto {
   @Type(() => Number)
