@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** ویژگی مرحله «جزئیات نهایی» ویزارد */
@@ -231,11 +231,38 @@ export class GetMyProductStatsDto {
   days?: number;
 }
 
-/** POST /products/updateMyProduct — ویرایش آگهی خودم → بازگشت به «در انتظار تایید» */
+/** POST /products/updateMyProduct — ویرایش آگهی خودم (بدون تایید مجدد — خواسته مالک ۴-۱۱) */
 export class UpdateMyProductDto extends CreateProductDto {
   @Type(() => Number)
   @IsInt()
   id!: number;
+}
+
+/** ردیف تغییر گروهی — قیمت + موجودی یک آگهی خودم */
+export class BulkPriceItemDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  /** کف قیمت هر واحد (تومان) — 0 یعنی «تماس بگیرید» */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  minSalePrice!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  stock!: number;
+}
+
+/** POST /products/bulkUpdatePrices — تغییر گروهی قیمت/موجودی (خواسته مالک ۴-۱۱) */
+export class BulkUpdatePricesDto {
+  @IsArray()
+  @ArrayMaxSize(200, { message: 'هر ارسال گروهی حداکثر ۲۰۰ آگهی دارد.' })
+  @ValidateNested({ each: true })
+  @Type(() => BulkPriceItemDto)
+  items!: BulkPriceItemDto[];
 }
 
 export class SearchSuggestionsDto {

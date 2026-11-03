@@ -68,6 +68,10 @@ model User {
   /// مکان پیش‌فرض کاربر — ثبت‌نام/فرم‌ها با آن پیش‌پر می‌شوند (id عددی باسکول)
   provinceId   Int?    @map("province_id")
   cityId       Int?    @map("city_id")
+  /// امکان تماس (خواسته مالک ۴-۱۱) — کاربر می‌تواند خاموش کند تا فقط چت فعال
+  /// بماند؛ اسناد قدیمیِ بدون فیلد «روشن» در نظر گرفته می‌شوند (گیت‌ها فقط
+  /// allowCalls === false را می‌گیرند)
+  allowCalls   Boolean @default(true) @map("allow_calls")
   /// پروفایل کسب‌وکار embedded — فیلدهای myuser_profiles باسکول
   profile    Json?
 

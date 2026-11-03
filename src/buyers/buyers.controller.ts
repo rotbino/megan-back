@@ -5,6 +5,7 @@ import { BuyersService } from './buyers.service';
 import {
   GetBuyerDirectoryDto,
   GetMyReceivedOffersDto,
+  GetMySentOffersDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
@@ -99,5 +100,16 @@ export class BuyersController {
   })
   async getMyReceivedOffers(@CurrentUser() user: AuthUser, @Body() dto: GetMyReceivedOffersDto) {
     return ok(await this.buyers.myReceivedOffers(user.id, dto));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMySentOffers')
+  @ApiOperation({
+    summary:
+      'پیشنهادهای تامین ارسالی من (پنل فروشنده) — کالا/خریدار/هزینه + آخرین پیام گفتگوی مرتبط؛ فیلتر دسته برای صفحهٔ خریدارانِ یک کالا',
+  })
+  async getMySentOffers(@CurrentUser() user: AuthUser, @Body() dto: GetMySentOffersDto) {
+    return ok(await this.buyers.mySentOffers(user.id, dto));
   }
 }

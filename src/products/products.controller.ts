@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import {
+  BulkUpdatePricesDto,
   CreateProductDto,
   DeleteMyProductDto,
   GetMyProductDetailDto,
@@ -103,9 +104,22 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('updateMyProduct')
-  @ApiOperation({ summary: 'ویرایش آگهی خودم → دوباره «در انتظار تایید»' })
+  @ApiOperation({ summary: 'ویرایش آگهی خودم — بدون تایید مجدد؛ وضعیت فعلی حفظ می‌شود' })
   async updateMyProduct(@CurrentUser() user: AuthUser, @Body() dto: UpdateMyProductDto) {
-    return ok(await this.products.updateMyProduct(user, dto), 'تغییرات آگهی شما ذخیره شد و دوباره در انتظار تایید است.');
+    return ok(await this.products.updateMyProduct(user, dto), 'تغییرات آگهی شما ذخیره شد.');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('bulkUpdatePrices')
+  @ApiOperation({
+    summary: 'تغییر گروهی قیمت/موجودی آگهی‌های خودم — بدون تایید مجدد؛ سوابق در تاریخچه می‌ماند',
+  })
+  async bulkUpdatePrices(@CurrentUser() user: AuthUser, @Body() dto: BulkUpdatePricesDto) {
+    return ok(
+      await this.products.bulkUpdatePrices(user, dto),
+      'قیمت‌ها و موجودی‌های تغییر یافته ذخیره شد.',
+    );
   }
 
   @UseGuards(JwtAuthGuard)

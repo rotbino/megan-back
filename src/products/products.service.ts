@@ -11,6 +11,7 @@ import { PresenceService } from '../presence/presence.service';
 import { SecurityService } from '../security/security.service';
 import type { AuthUser } from '../common/guards';
 import type {
+  BulkUpdatePricesDto,
   CreateProductDto,
   GetProductListDto,
   GetRelatedProductsDto,
@@ -757,8 +758,9 @@ export class ProductsService {
     };
   }
 
-  /** POST /products/updateMyProduct — ویرایش آگهی خودم؛ مثل باسکول بعد از ویرایش
-   *  دوباره «در انتظار تایید» می‌شود تا کارشناس بازبینی کند. */
+  /** POST /products/updateMyProduct — ویرایش آگهی خودم؛ بدون تایید مجدد
+   *  (خواسته مالک ۴-۱۱): وضعیت فعلی حفظ می‌شود — تاییدشده تاییدشده می‌ماند و
+   *  تغییرات بلافاصله زنده است؛ فقط آگهی ردشده برای بازبینی به «در انتظار» می‌رود. */
   async updateMyProduct(user: AuthUser, dto: UpdateMyProductDto) {
     const p = await this.prisma.product.findUnique({ where: { id: dto.id } });
     if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
@@ -802,9 +804,10 @@ export class ProductsService {
         minSaleAmount: dto.minSaleAmount,
         minSalePrice: dto.minSalePrice,
         features: (dto.features ?? []) as unknown as object,
-        // ویرایش = بازبینی مجدد (عین باسکول)؛ دلایل رد قبلی پاک می‌شود
-        status: 'pending',
-        rejectionReasons: [],
+        // بدون تایید مجدد (خواسته مالک ۴-۱۱): وضعیت فعلی می‌ماند؛ فقط ردشده
+        // برای بازبینیِ اصلاحات به «در انتظار» می‌رود
+        status: p.status === 'rejected' ? 'pending' : p.status,
+        ...(p.status === 'rejected' ? { rejectionReasons: [] } : {}),
         isElevated: effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0,
       },
     });
@@ -828,6 +831,62 @@ export class ProductsService {
     this.cache.invalidateTag('products');
     this.cache.invalidateTag(`product:${dto.id}`);
     return { id: updated.id, status: updated.status as string };
+  }
+
+  /** POST /products/bulkUpdatePrices — تغییر گروهی قیمت/موجودی (خواسته مالک ۴-۱۱):
+   *  صفحه‌ای سریع برای آپدیت گروهی لیست؛ فقط آگهی‌های خودم و غیرحذف؛ بدون
+   *  تایید مجدد (وضعیت حفظ می‌شود) و هر تغییر واقعی در ProductEditHistory
+   *  ثبت می‌شود تا سوابق قیمت/موجودی برای داوری بماند. */
+  async bulkUpdatePrices(user: AuthUser, dto: BulkUpdatePricesDto) {
+    if (dto.items.length === 0) {
+      throw AppError.badRequest('ردیفی برای ذخیره ارسال نشده است.', 'EMPTY_BULK');
+    }
+
+    // قیمت معتبر: 0 («تماس بگیرید») یا ≥ 1000 — عین فرم تکی
+    for (const it of dto.items) {
+      if (it.minSalePrice !== 0 && it.minSalePrice < 1000) {
+        throw AppError.badRequest(
+          'قیمت باید حداقل ۱۰۰۰ تومان باشد (یا ۰ = تماس بگیرید).',
+          'BAD_PRICE',
+        );
+      }
+    }
+
+    const ids = [...new Set(dto.items.map((i) => i.id))];
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: ids }, userId: user.id, status: { not: 'deleted' } },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    let updated = 0;
+    const touchedIds: number[] = [];
+    for (const it of dto.items) {
+      const p = byId.get(it.id);
+      if (!p) continue; // آگهی خودم نیست/حذف شده — بی‌صدا رد
+      if (p.minSalePrice === it.minSalePrice && p.stock === it.stock) continue; // بدون تغییر
+
+      const next = await this.prisma.product.update({
+        where: { id: it.id },
+        data: { minSalePrice: it.minSalePrice, stock: it.stock },
+      });
+      updated++;
+      touchedIds.push(it.id);
+      await this.prisma.productEditHistory.create({
+        data: {
+          productId: it.id,
+          userId: user.id,
+          action: 'edit',
+          before: historySnapshot(p),
+          after: historySnapshot(next),
+        },
+      });
+    }
+
+    if (touchedIds.length > 0) {
+      this.cache.invalidateTag('products');
+      for (const id of touchedIds) this.cache.invalidateTag(`product:${id}`);
+    }
+    return { updated, total: dto.items.length };
   }
 
   /** POST /products/reviewProduct (ادمین) — تأیید/رد آگهی در انتظار تایید */
@@ -918,9 +977,18 @@ export class ProductsService {
 
     const seller = await this.prisma.user.findUnique({
       where: { id: sellerId },
-      select: { id: true, phone: true, firstName: true, lastName: true, userName: true, isActive: true },
+      select: { id: true, phone: true, firstName: true, lastName: true, userName: true, isActive: true, allowCalls: true },
     });
     if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
+
+    // امکان تماس خاموش (خواسته مالک ۴-۱۱) — کاربر فقط چت را می‌خواهد؛
+    // خودِ فروشنده شماره خودش را بدون گیت می‌بیند
+    if (seller.allowCalls === false && caller.id !== seller.id) {
+      throw AppError.forbidden(
+        'این کاربر امکان تماس را غیرفعال کرده است؛ می‌توانید از گفتگوی چت استفاده کنید.',
+        'CALLS_DISABLED',
+      );
+    }
 
     // سهمیهٔ بستهٔ تماس‌گیرنده — بستهٔ فعال لحاظ شده (۱-۱۱)
     const me = await this.prisma.user.findUnique({

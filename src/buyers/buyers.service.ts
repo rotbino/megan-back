@@ -15,6 +15,7 @@ import {
   BuyerBookItemDto,
   GetBuyerDirectoryDto,
   GetMyReceivedOffersDto,
+  GetMySentOffersDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
@@ -359,12 +360,15 @@ export class BuyersService {
   /** POST /buyers/sendSupplyOffer — تکی، رایگان تا سقف روزانهٔ سطح بسته.
    *  دکمهٔ ارسال سمت سایت فقط با دستهٔ آخر (برگ) فعال می‌شود؛ همین گیت اینجا
    *  هم تکرار می‌شود و دستهٔ هر پیشنهاد ذخیره می‌شود تا خریدار بتواند
-   *  پیشنهادهای دریافتی را بر اساس دسته/نوع کالا فیلتر و مقایسه کند. */
+   *  پیشنهادهای دریافتی را بر اساس دسته/نوع کالا فیلتر و مقایسه کند.
+   *  گیت کالا (خواسته مالک ۴-۱۱): فروشنده باید همان گروه کالا را در
+   *  محصولات خودش داشته باشد — به کالایی که نمی‌فروشد پیشنهاد نمی‌دهد. */
   async sendSupplyOffer(user: AuthUser, dto: SendSupplyOfferDto) {
     const gates = await this.offerGates(user, 1);
     const message = dto.message.trim();
     const terms = this.normalizeTerms(dto);
     await this.assertLeafCategory(terms.categoryId);
+    await this.assertSellerHasProduct(user.id, terms.categoryId, terms.productType);
 
     // به خودت پیشنهاد نفرست — پیام شفاف، نه «خریدار یافت نشد» (رفع باگ ۱-۱۱)
     if (dto.buyerId === user.id) {
@@ -431,6 +435,8 @@ export class BuyersService {
     const message = dto.message.trim();
     const terms = this.normalizeTerms(dto);
     await this.assertLeafCategory(terms.categoryId);
+    // گیت کالا (خواسته مالک ۴-۱۱) — همان ارسال تکی
+    await this.assertSellerHasProduct(user.id, terms.categoryId, terms.productType);
 
     if (ids.length > billing.groupSend.maxBatch) {
       throw AppError.badRequest(
@@ -619,6 +625,95 @@ export class BuyersService {
     };
   }
 
+  /** POST /buyers/getMySentOffers — پیشنهادهای تامین ارسالی من (پنل فروشنده،
+   *  خواسته مالک ۴-۱۱): چه کالاهایی، به چه کسانی، هزینه و تاریخ؛ برای هر
+   *  پیشنهادِ چت‌دار، آخرین پیام همان گفتگو هم می‌آید تا فروشنده ببیند
+   *  بعدش چه شد (خریدار جواب داد یا نه) و مستقیم به گفتگو برود. */
+  async mySentOffers(userId: string, dto: GetMySentOffersDto) {
+    const page = Math.max(1, dto.page ?? 1);
+    const perPage = Math.min(48, Math.max(1, dto.perPage ?? 20));
+
+    const where: Prisma.SupplyOfferWhereInput = {
+      sellerId: userId,
+      ...(dto.categoryId != null ? { categoryId: dto.categoryId } : {}),
+    };
+
+    const [rows, total, catRows] = await Promise.all([
+      this.prisma.supplyOffer.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      this.prisma.supplyOffer.count({ where }),
+      // دسته‌های یکتای همهٔ پیشنهادهای من — فیلتر انتخابی بالای صفحه
+      this.prisma.supplyOffer.findMany({
+        where: { sellerId: userId, categoryId: { not: null } },
+        select: { categoryId: true },
+        distinct: ['categoryId'],
+      }),
+    ]);
+
+    const catIds = catRows.map((r) => r.categoryId).filter((x): x is number => x != null);
+    const cats = await this.categoriesWithPath(catIds);
+
+    const buyerIds = [...new Set(rows.map((r) => r.buyerId))];
+    const buyers = buyerIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: buyerIds } },
+          select: { id: true, firstName: true, lastName: true, isVerified: true, userName: true },
+        })
+      : [];
+    const buyerById = new Map(buyers.map((b) => [b.id, b]));
+
+    // آخرین پیام هر گفتگوی مرتبط — «بعدش چه شد» روی هر کارت
+    const threadIds = [...new Set(rows.map((r) => r.threadId).filter((x): x is string => !!x))];
+    const lastMessages = new Map<string, { text: string; at: Date; mine: boolean }>();
+    for (const threadId of threadIds) {
+      const msg = await this.prisma.chatMessage.findFirst({
+        where: { threadId },
+        orderBy: { createdAt: 'desc' },
+        select: { text: true, createdAt: true, senderId: true },
+      }).catch(() => null);
+      if (msg) {
+        lastMessages.set(threadId, { text: msg.text, at: msg.createdAt, mine: msg.senderId === userId });
+      }
+    }
+
+    const items = rows.map((r) => {
+      const b = buyerById.get(r.buyerId);
+      const cat = r.categoryId != null ? cats.get(r.categoryId) : undefined;
+      const last = r.threadId ? lastMessages.get(r.threadId) ?? null : null;
+      return {
+        id: r.id,
+        buyerId: r.buyerId,
+        buyerName: `${b?.firstName ?? ''} ${b?.lastName ?? ''}`.trim() || 'خریدار ایمچ',
+        buyerUserName: b?.userName ?? null,
+        buyerVerified: b?.isVerified ?? false,
+        categoryId: r.categoryId,
+        categoryName: cat?.name ?? null,
+        categoryPath: cat ? [cat.rootName, cat.parentName].filter(Boolean).join(' / ') : null,
+        productType: r.productType,
+        message: r.message,
+        isGroup: r.isGroup,
+        fee: r.fee,
+        threadId: r.threadId,
+        createdAt: r.createdAt,
+        lastMessage: last ? { text: last.text, at: last.at, mine: last.mine } : null,
+      };
+    });
+
+    return {
+      items,
+      total,
+      page,
+      perPage,
+      categories: [...cats.entries()]
+        .map(([id, c]) => ({ id, name: c.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'fa')),
+    };
+  }
+
   // ─── خصوصی ─────────────────────────────────────────────────────────────────
 
   /** گیت‌های مشترک پیشنهاد تامین — بستهٔ فعال + سهمیه‌ها */
@@ -697,6 +792,55 @@ export class BuyersService {
         'برای ارسال پیشنهاد تامین، دستهٔ آخر کالا را انتخاب کنید.',
         'CATEGORY_NOT_LEAF',
       );
+    }
+  }
+
+  /** گیت کالا (خواسته مالک ۴-۱۱) — فروشنده باید همان گروه کالا (دستهٔ برگ)
+   *  را در محصولات خودش داشته باشد؛ اگر «نوع» هم وارد کرده باشد و هیچ
+   *  محصولش از همان نوع نباشد، پیام شفاف می‌گیرد: برای تامین سیب قرمز
+   *  باید این کالا را در لیست محصولات خود داشته باشید. */
+  private async assertSellerHasProduct(
+    sellerId: string,
+    categoryId?: number,
+    productType?: string,
+  ) {
+    if (categoryId == null) return;
+
+    const mine = await this.prisma.product.findMany({
+      where: { userId: sellerId, subCategoryId: categoryId, status: { in: ['pending', 'confirmed'] } },
+      select: { productName: true },
+      take: 50,
+    });
+
+    const cats = await this.categoriesWithPath([categoryId]);
+    const catName = cats.get(categoryId)?.name ?? 'این کالا';
+
+    if (mine.length === 0) {
+      throw AppError.badRequest(
+        `برای ارسال پیشنهاد تامین ${catName} باید این کالا را در لیست محصولات خود داشته باشید.`,
+        'PRODUCT_REQUIRED',
+      );
+    }
+
+    // نوع کالا (اختیاری) — تطبیق متنِ گسترده: نام آگهی خود فروشنده یا نوع
+    // استخراج‌شدهٔ آن باید شامل نوعِ واردشده باشد (یا برعکس)؛ آگهیِ فقط‌برگ
+    // (بدون نوع) به‌مثابهٔ «هر نوعی از همین دسته» حساب می‌شود
+    const type = productType?.trim();
+    if (type) {
+      const norm = (s: string) => s.replace(/[\u200c\s]+/g, ' ').trim();
+      const leaf = catName;
+      const ok = mine.some((p) => {
+        const name = norm(p.productName).replace(leaf, ' ').trim();
+        if (!name) return true; // آگهی فقط‌برگ — نوع را مشخص نکرده
+        const t = norm(type);
+        return name.includes(t) || t.includes(name) || norm(p.productName).includes(t);
+      });
+      if (!ok) {
+        throw AppError.badRequest(
+          `برای پیشنهاد تامین نوع «${type}» باید همین کالا را در لیست محصولات خود داشته باشید.`,
+          'PRODUCT_TYPE_REQUIRED',
+        );
+      }
     }
   }
 

@@ -48,6 +48,11 @@ export class UpdateProfileDto {
   @Length(10, 500)
   avatar_url?: string;
 
+  /** امکان تماس (خواسته مالک ۴-۱۱) — خاموش = فقط چت، دکمه تماس کار نمی‌کند */
+  @IsOptional()
+  @IsBoolean()
+  allow_calls?: boolean;
+
   /** پروفایل کسب‌وکار embedded — با مقادیر موجود merge می‌شود */
   @IsOptional()
   profile?: Record<string, unknown>;

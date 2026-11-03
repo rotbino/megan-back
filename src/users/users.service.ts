@@ -66,6 +66,8 @@ export class UsersService {
         wallet_balance: user.walletBalance,
         avatar_url: user.avatarUrl,
         business_desc: user.businessDesc,
+        // امکان تماس (خواسته مالک ۴-۱۱) — اسناد قدیمی بدون فیلد = روشن
+        allow_calls: user.allowCalls !== false,
         province_id: user.provinceId,
         city_id: user.cityId,
         province: provinceName,
@@ -95,6 +97,8 @@ export class UsersService {
     if (dto.is_seller !== undefined) update.isSeller = dto.is_seller;
     if (dto.business_desc !== undefined) update.businessDesc = dto.business_desc.trim();
     if (dto.avatar_url !== undefined) update.avatarUrl = dto.avatar_url;
+    // امکان تماس (خواسته مالک ۴-۱۱) — سوییچ «فقط چت» در ویرایش پروفایل
+    if (dto.allow_calls !== undefined) update.allowCalls = dto.allow_calls;
 
     // ─── مکان پیش‌فرض (استان/شهر) — اعتبارسنجی درخت لوکیشن ───
     if (dto.province_id !== undefined) {

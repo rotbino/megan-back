@@ -275,9 +275,17 @@ export class BuyRequestsService {
 
     const buyer = await this.prisma.user.findUnique({
       where: { id: row.userId },
-      select: { phone: true, firstName: true, lastName: true, isVerified: true },
+      select: { phone: true, firstName: true, lastName: true, isVerified: true, allowCalls: true },
     });
     if (!buyer) throw AppError.notFound('خریدار یافت نشد.');
+
+    // امکان تماس خاموش (خواسته مالک ۴-۱۱) — فقط چت؛ خودِ خریدار معاف است
+    if (buyer.allowCalls === false && row.userId !== user.id) {
+      throw AppError.forbidden(
+        'این کاربر امکان تماس را غیرفعال کرده است؛ می‌توانید از گفتگوی چت استفاده کنید.',
+        'CALLS_DISABLED',
+      );
+    }
 
     // ثبت آشکارسازی به‌عنوان تماس — گزارش ادمین + شمارش سهمیهٔ فردا درست بماند
     if (row.userId !== user.id) {

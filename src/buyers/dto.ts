@@ -211,3 +211,26 @@ export class GetMyReceivedOffersDto {
   @Max(24)
   perPage?: number;
 }
+
+/** POST /buyers/getMySentOffers — پیشنهادهای تامین ارسالی من (پنل فروشنده،
+ *  خواسته مالک ۴-۱۱): چه کالاهایی، به چه کسانی، چه چت‌هایی و چه شد */
+export class GetMySentOffersDto {
+  /** فیلتر دسته — صفحهٔ «خریداران این کالا» از همان استفاده می‌کند */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  categoryId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(48)
+  perPage?: number;
+}
