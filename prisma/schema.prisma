@@ -444,6 +444,30 @@ model Product {
   @@index([slug])
 }
 
+/// تاریخچهٔ تغییرات آگهی (خواسته مالک ۳-۱۱) — ثبت/ویرایش/حذفِ نرم؛
+/// سوابق قیمت، حداقل فروش و موجودی برای رجوع در موارد اختلاف و نمایش
+/// آیندهٔ «تاریخچهٔ قیمت» به کاربر. حذف نرم است تا فروشندهٔ حقه‌باز نتواند
+/// بعد از فروش، آگهی (و سوابقش) را از بین ببرد.
+model ProductEditHistory {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  productId Int @map("product_id")
+  /// مالک آگهی در لحظهٔ رخداد (کاربر مسبب تغییر)
+  userId    String @map("user_id") @db.ObjectId
+
+  /// create | edit | delete
+  action String
+
+  /// مقدارهای پیش از تغییر — {productName?, stock?, minSaleAmount?, minSalePrice?}
+  before Json?
+  /// مقدارهای پس از تغییر — همان کلیدها
+  after  Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([productId, createdAt(sort: Desc)])
+}
+
 // ─── درخواست‌های خرید (RFQ) — عین ساختار get_buyAd_list باسکول ───────────────
 
 /// درخواست خرید — جمله کارت باسکول: «خریدار {requirementAmount} {unit}

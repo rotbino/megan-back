@@ -143,7 +143,7 @@ export class AdminProductsService {
     const p = await this.prisma.product.findUnique({ where: { id } });
     if (!p) throw AppError.notFound('آگهی یافت نشد.');
 
-    const [rows, ladderOrders] = await Promise.all([
+    const [rows, ladderOrders, editHistory] = await Promise.all([
       this.toRows([p]),
       this.prisma.ladderOrder.findMany({
         where: { productId: id },
@@ -153,6 +153,12 @@ export class AdminProductsService {
           id: true, amount: true, startsAt: true, expiresAt: true, createdAt: true,
           userId: true,
         },
+      }),
+      // تاریخچهٔ قیمت/موجودی/حداقل فروش (خواسته مالک ۳-۱۱) — رجوع در اختلاف‌ها
+      this.prisma.productEditHistory.findMany({
+        where: { productId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
       }),
     ]);
 
@@ -193,6 +199,14 @@ export class AdminProductsService {
         expires_at: o.expiresAt,
         created_at: o.createdAt,
         by_admin_gift: o.amount === 0,
+      })),
+      /** تاریخچهٔ تغییرات قیمت/موجودی/حداقل فروش — create | edit | delete */
+      edit_history: editHistory.map((h) => ({
+        id: h.id,
+        action: h.action,
+        before: h.before,
+        after: h.after,
+        created_at: h.createdAt,
       })),
     };
   }

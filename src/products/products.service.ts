@@ -26,6 +26,21 @@ export const UNLIMITED_CAPACITY = -1;
 const PER_PAGE_DEFAULT = 16;
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
 
+/** اسنپ‌شات فیلدهای حساسِ تاریخچه — قیمت/حداقل فروش/موجودی (خواسته مالک ۳-۱۱) */
+function historySnapshot(p: {
+  productName: string;
+  stock: number;
+  minSaleAmount: number;
+  minSalePrice: number;
+}) {
+  return {
+    productName: p.productName,
+    stock: p.stock,
+    minSaleAmount: p.minSaleAmount,
+    minSalePrice: p.minSalePrice,
+  };
+}
+
 /** شکل عمومی DTO — camelCase منطبق تایپ‌های فرانت (types.ts) */
 export interface ProductDto {
   id: number;
@@ -390,6 +405,17 @@ export class ProductsService {
         userId: user.id,
         // فروشنده ویژه = بسته فعال — denorm برای سورت لیست (۳۰-۱۰)
         isElevated: pakage > 0,
+      },
+    });
+
+    // نقطهٔ صفر تاریخچه (خواسته مالک ۳-۱۱) — مقادیر اولیهٔ قیمت/موجودی/حداقل فروش
+    await this.prisma.productEditHistory.create({
+      data: {
+        productId: product.id,
+        userId: user.id,
+        action: 'create',
+        before: null,
+        after: historySnapshot(product),
       },
     });
 
@@ -783,6 +809,22 @@ export class ProductsService {
       },
     });
 
+    // تاریخچهٔ تغییرات (خواسته مالک ۳-۱۱) — فقط وقتی قیمت/حداقل فروش/موجودی
+    // (یا عنوان) واقعاً عوض شده؛ سوابق برای رجوع در اختلاف‌ها می‌ماند
+    const before = historySnapshot(p);
+    const after = historySnapshot(updated);
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      await this.prisma.productEditHistory.create({
+        data: {
+          productId: updated.id,
+          userId: user.id,
+          action: 'edit',
+          before,
+          after,
+        },
+      });
+    }
+
     this.cache.invalidateTag('products');
     this.cache.invalidateTag(`product:${dto.id}`);
     return { id: updated.id, status: updated.status as string };
@@ -809,7 +851,10 @@ export class ProductsService {
     return { id: updated.id, status: updated.status };
   }
 
-  /** POST /products/deleteMyProduct — حذف نرم (تب «حذف شده» عین باسکول) */
+  /** POST /products/deleteMyProduct — حذف نرم (تب «حذف شده» عین باسکول)؛
+   *  سوابق قیمت/موجودی/حداقل فروش در ProductEditHistory می‌ماند تا در موارد
+   *  اختلاف قابل رجوع باشد (خواسته مالک ۳-۱۱ — فروشنده‌ای که بعد از فروش
+   *  آگهی را حذف کند، تاریخ از بین نمی‌رود). */
   async deleteMyProduct(user: AuthUser, id: number) {
     const p = await this.prisma.product.findUnique({ where: { id } });
     if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
@@ -818,6 +863,16 @@ export class ProductsService {
     await this.prisma.product.update({
       where: { id },
       data: { status: 'deleted', isLadder: false },
+    });
+    // رخداد حذف نرم — اسنپ‌شات کامل لحظهٔ حذف
+    await this.prisma.productEditHistory.create({
+      data: {
+        productId: id,
+        userId: user.id,
+        action: 'delete',
+        before: historySnapshot(p),
+        after: null,
+      },
     });
     this.cache.invalidateTag('products');
     this.cache.invalidateTag(`product:${id}`);
@@ -1019,6 +1074,8 @@ export class ProductsService {
         // نیست — فقط سرویس اختصاصی getSellerPhone آن را برمی‌گرداند.
         isCompany: Boolean((seller.profile as { isCompany?: boolean } | null)?.isCompany),
         companyName: (seller.profile as { companyName?: string } | null)?.companyName ?? null,
+        // صنف کسب‌وکار (خواسته مالک ۳-۱۱) — سوپرمارکت/قنادی/…؛ پایهٔ بازاریابی و تبلیغات
+        businessCategory: (seller.profile as { businessCategory?: string } | null)?.businessCategory ?? null,
         gallery: userGallery.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
         certificates: userCertificates.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
         createdAt: fmtDate(seller.createdAt),
