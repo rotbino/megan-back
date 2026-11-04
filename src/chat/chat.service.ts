@@ -74,6 +74,100 @@ export class ChatService {
     private readonly push: PushService,
   ) {}
 
+  // ─── شفا و یکتاسازی مکالمات (خواسته مالک ۴-۱۱) ────────────────────────────
+
+  /** کلید جفت بی‌جهت — جفت کاربر در هر دو جهت فقط «یک» مکالمه دارد */
+  private pairKey(a: string, b: string): string {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  /** جفت‌های دارای بیش از یک مکالمه — از ردیف‌های داده‌شده */
+  private dupPairsOf(rows: Array<{ sellerId: string; buyerId: string }>): Array<{ a: string; b: string }> {
+    const groups = new Map<string, { a: string; b: string; n: number }>();
+    for (const r of rows) {
+      const key = this.pairKey(r.sellerId, r.buyerId);
+      const g = groups.get(key);
+      if (g) g.n += 1;
+      else groups.set(key, { a: r.sellerId, b: r.buyerId, n: 1 });
+    }
+    return [...groups.values()]
+      .filter((g) => g.n > 1)
+      .map((g) => ({ a: g.a, b: g.b }));
+  }
+
+  /**
+   * ادغام مکالمات تکراری یک جفت — هر جفت کاربر در هر دو جهت فقط «یک»
+   * مکالمه دارد (خواسته مالک ۴-۱۱: «چت علی و سعید فقط یک‌بار در لیست
+   * بیاید»). دادهٔ قدیمیِ نسخه‌های قبلی خودش شفا می‌یابد: پیام‌ها و
+   * پیشنهادهای تامینِ تردهای تکراری به مکالمهٔ اصلی (فعال‌ترین) منتقل
+   * و تکراری‌ها حذف می‌شوند. شناسهٔ مکالمهٔ اصلی برمی‌گردد (null = جفت
+   * بدون مکالمه). ادغام برای همهٔ ورودی‌های چت صدا زده می‌شود؛ در حالت
+   * سالم (بدون تکرار) فقط یک findFirst سبک است.
+   */
+  async healPairThreads(aId: string, bId: string): Promise<string | null> {
+    const list = await this.prisma.chatThread.findMany({
+      where: { OR: [{ sellerId: aId, buyerId: bId }, { sellerId: bId, buyerId: aId }] },
+      select: { id: true, lastMessageAt: true, createdAt: true },
+    });
+    if (list.length === 0) return null;
+    if (list.length === 1) return list[0].id;
+
+    // نگه‌دارنده: فعال‌ترین مکالمه (آخرین پیام؛ سپس جدیدترین ساخت) —
+    // مکالمهٔ بی‌پیام هرگز بر مکالمهٔ دارای پیام ترجیح نمی‌خورد
+    const activity = (t: { lastMessageAt: Date | null }) => t.lastMessageAt?.getTime() ?? 0;
+    const keeper = [...list].sort(
+      (x, y) => activity(y) - activity(x) || y.createdAt.getTime() - x.createdAt.getTime(),
+    )[0];
+    const dupes = list.filter((t) => t.id !== keeper.id).map((t) => t.id);
+
+    // ۱) پیام‌های تردهای تکراری → مکالمهٔ اصلی
+    await this.prisma.chatMessage.updateMany({
+      where: { threadId: { in: dupes } },
+      data: { threadId: keeper.id },
+    });
+    // ۲) پیشنهادهای تامین (لینک «مشاهدهٔ گفتگو») → مکالمهٔ اصلی
+    await this.prisma.supplyOffer.updateMany({
+      where: { threadId: { in: dupes } },
+      data: { threadId: keeper.id },
+    });
+    // ۳) lastMessageAt اصلی از آخرین پیام واقعی بازمحاسبه
+    const last = await this.prisma.chatMessage.findFirst({
+      where: { threadId: keeper.id },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    await this.prisma.chatThread
+      .update({ where: { id: keeper.id }, data: { lastMessageAt: last?.createdAt ?? null } })
+      .catch(() => undefined);
+    // ۴) حذف تکراری‌های خالی‌شده
+    await this.prisma.chatThread.deleteMany({ where: { id: { in: dupes } } });
+    return keeper.id;
+  }
+
+  /** شفای مکالمات من — جفت‌های تکراریِ من ادغام می‌شوند (معمولاً هیچ) */
+  private async healMyThreads(userId: string): Promise<void> {
+    const rows = await this.prisma.chatThread.findMany({
+      where: { OR: [{ sellerId: userId }, { buyerId: userId }] },
+      select: { sellerId: true, buyerId: true },
+    });
+    for (const { a, b } of this.dupPairsOf(rows)) await this.healPairThreads(a, b);
+  }
+
+  /**
+   * شفای همهٔ جفت‌های تکراری دیتابیس (سقف‌دار) — نمای «چت‌ها»ی ادمین
+   * را شفاف نگه می‌دارد؛ اجرای مکرر بی‌ضرر است (ادغام idempotent است).
+   */
+  async healAllPairs(scanCap = 2000): Promise<number> {
+    const rows = await this.prisma.chatThread.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: scanCap,
+      select: { sellerId: true, buyerId: true },
+    });
+    const dupes = this.dupPairsOf(rows);
+    for (const { a, b } of dupes) await this.healPairThreads(a, b);
+    return dupes.length;
+  }
+
   // ─── اتصال WS ──────────────────────────────────────────────────────────────
 
   /** اعتبارسنجی توکن handshake سوکت — از JwtModule مشترک */
@@ -200,7 +294,7 @@ export class ChatService {
   /** POST /chat/sendMessage — ثبت + push WS به گیرنده */
   async sendMessage(user: AuthUser, dto: SendMessageDto): Promise<MessageDto> {
     if (!OID_RE.test(dto.threadId)) throw AppError.notFound('مکالمه یافت نشد.');
-    const thread = await this.prisma.chatThread.findUnique({
+    let thread = await this.prisma.chatThread.findUnique({
       where: { id: dto.threadId },
       include: {
         seller: { select: { id: true, firstName: true, lastName: true } },
@@ -210,6 +304,22 @@ export class ChatService {
     if (!thread) throw AppError.notFound('مکالمه یافت نشد.');
     if (thread.sellerId !== user.id && thread.buyerId !== user.id) {
       throw AppError.forbidden('شما عضو این مکالمه نیستید.');
+    }
+
+    // شناسهٔ کهنهٔ کلاینت (مکالمهٔ تکراریِ قبل از ادغام) → مکالمهٔ اصلی
+    // جفت؛ پیام هرگز در تردِ پنهان نمی‌نشیند و حذف نمی‌شود
+    {
+      const canonicalId = await this.healPairThreads(thread.sellerId, thread.buyerId);
+      if (canonicalId && canonicalId !== thread.id) {
+        const canonical = await this.prisma.chatThread.findUnique({
+          where: { id: canonicalId },
+          include: {
+            seller: { select: { id: true, firstName: true, lastName: true } },
+            buyer: { select: { id: true, firstName: true, lastName: true } },
+          },
+        });
+        if (canonical) thread = canonical;
+      }
     }
 
     const message = await this.prisma.chatMessage.create({
@@ -253,10 +363,19 @@ export class ChatService {
 
   /** POST /chat/getThreadMessages — پیام‌ها (صعودی) + خواندن طرف مقابل */
   async getThreadMessages(user: AuthUser, dto: GetThreadMessagesDto): Promise<MessageDto[]> {
-    const thread = await this.prisma.chatThread.findUnique({ where: { id: dto.threadId } });
+    let thread = await this.prisma.chatThread.findUnique({ where: { id: dto.threadId } });
     if (!thread) throw AppError.notFound('مکالمه یافت نشد.');
     if (thread.sellerId !== user.id && thread.buyerId !== user.id) {
       throw AppError.forbidden('شما عضو این مکالمه نیستید.');
+    }
+
+    // شناسهٔ کهنه (ترد تکراریِ قبل از ادغام) → مکالمهٔ اصلی جفت
+    {
+      const canonicalId = await this.healPairThreads(thread.sellerId, thread.buyerId);
+      if (canonicalId && canonicalId !== thread.id) {
+        const canonical = await this.prisma.chatThread.findUnique({ where: { id: canonicalId } });
+        if (canonical) thread = canonical;
+      }
     }
 
     const take = Math.min(50, Math.max(1, dto.take ?? 50));
@@ -279,10 +398,18 @@ export class ChatService {
   /** POST /chat/markThreadRead — علامت خوانده‌شدن بدون واکشی */
   async markThreadRead(user: AuthUser, threadId: string): Promise<{ read: number }> {
     if (!OID_RE.test(threadId)) throw AppError.notFound('مکالمه یافت نشد.');
-    const thread = await this.prisma.chatThread.findUnique({ where: { id: threadId } });
+    let thread = await this.prisma.chatThread.findUnique({ where: { id: threadId } });
     if (!thread) throw AppError.notFound('مکالمه یافت نشد.');
     if (thread.sellerId !== user.id && thread.buyerId !== user.id) {
       throw AppError.forbidden('شما عضو این مکالمه نیستید.');
+    }
+    // شناسهٔ کهنه → مکالمهٔ اصلی جفت (خواندن روی مکالمهٔ واقعی ثبت شود)
+    {
+      const canonicalId = await this.healPairThreads(thread.sellerId, thread.buyerId);
+      if (canonicalId && canonicalId !== thread.id) {
+        const canonical = await this.prisma.chatThread.findUnique({ where: { id: canonicalId } });
+        if (canonical) thread = canonical;
+      }
     }
     return { read: await this.markRead(thread, user) };
   }
@@ -310,6 +437,10 @@ export class ChatService {
 
   /** POST /chat/getConversations — مکالمات من با آخرین پیام + خوانده‌نشده */
   async getConversations(user: AuthUser): Promise<ThreadDto[]> {
+    // شفای خودکار — دادهٔ قدیمیِ تکراری (جفت در دو جهت، نسخه‌های قبلی)
+    // همان‌جا ادغام می‌شود تا هر مخاطب فقط یک‌بار در لیست بیاید
+    await this.healMyThreads(user.id);
+
     const threads = await this.prisma.chatThread.findMany({
       where: { OR: [{ sellerId: user.id }, { buyerId: user.id }] },
       // مونگو: desc مقادیر null/missing را آخر می‌گذارد — دقیقاً سورت مطلوب
@@ -340,7 +471,7 @@ export class ChatService {
   /** POST /chat/getThread — یک مکالمه (بدون پیام‌ها) */
   async getThread(user: AuthUser, threadId: string): Promise<ThreadDto> {
     if (!OID_RE.test(threadId)) throw AppError.notFound('مکالمه یافت نشد.');
-    const thread = await this.prisma.chatThread.findUnique({
+    let thread = await this.prisma.chatThread.findUnique({
       where: { id: threadId },
       include: {
         seller: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
@@ -353,6 +484,22 @@ export class ChatService {
     if (thread.sellerId !== user.id && thread.buyerId !== user.id) {
       throw AppError.forbidden('شما عضو این مکالمه نیستید.');
     }
+    // شناسهٔ کهنه → مکالمهٔ اصلی جفت
+    {
+      const canonicalId = await this.healPairThreads(thread.sellerId, thread.buyerId);
+      if (canonicalId && canonicalId !== thread.id) {
+        const canonical = await this.prisma.chatThread.findUnique({
+          where: { id: canonicalId },
+          include: {
+            seller: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
+            buyer: { select: { id: true, firstName: true, lastName: true, userName: true, avatarUrl: true } },
+            product: { select: { id: true, productName: true } },
+            messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+          },
+        });
+        if (canonical) thread = canonical;
+      }
+    }
     const unreadCount = await this.prisma.chatMessage.count({
       where: { threadId: thread.id, senderId: { not: user.id }, readAt: null },
     });
@@ -363,19 +510,30 @@ export class ChatService {
 
   /** POST /chat/unreadCount — بج هدر/فوتر: مجموع خوانده‌نشده چت + پشتیبانی */
   async getUnreadCount(user: AuthUser): Promise<{ count: number; chat: number; support: number }> {
-    // ۵۰۰ مکالمه اخیر — بج «پیام جدید» است؛ نخ‌های خفته قدیمی بی‌اثرند
-    const threads = await this.prisma.chatThread.findMany({
+    // شفای خودکار + یک کوئری: جفت تکراری ادغام و همان ردیف‌ها بج را می‌سازند
+    // (۵۰۰ مکالمه اخیر — بج «پیام جدید» است؛ نخ‌های خفته قدیمی بی‌اثرند)
+    let rows = await this.prisma.chatThread.findMany({
       where: { OR: [{ sellerId: user.id }, { buyerId: user.id }] },
       orderBy: { lastMessageAt: 'desc' },
-      select: { id: true },
+      select: { id: true, sellerId: true, buyerId: true },
       take: 500,
     });
+    const dupPairs = this.dupPairsOf(rows);
+    if (dupPairs.length > 0) {
+      for (const { a, b } of dupPairs) await this.healPairThreads(a, b);
+      rows = await this.prisma.chatThread.findMany({
+        where: { OR: [{ sellerId: user.id }, { buyerId: user.id }] },
+        orderBy: { lastMessageAt: 'desc' },
+        select: { id: true, sellerId: true, buyerId: true },
+        take: 500,
+      });
+    }
 
     const [chat, support] = await Promise.all([
-      threads.length
+      rows.length
         ? this.prisma.chatMessage.count({
             where: {
-              threadId: { in: threads.map((t) => t.id) },
+              threadId: { in: rows.map((t) => t.id) },
               senderId: { not: user.id },
               readAt: null,
             },

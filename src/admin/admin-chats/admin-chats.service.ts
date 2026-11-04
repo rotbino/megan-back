@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AppError } from '../../common/errors/app-error';
 import { USER_SELECT, toUserCard, UserCard } from '../user-card';
+import { ChatService } from '../../chat/chat.service';
 import type { GetThreadListDto } from './dto';
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
@@ -53,12 +54,19 @@ export interface AdminThreadRow {
  */
 @Injectable()
 export class AdminChatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly chat: ChatService,
+  ) {}
 
   // ─── لیست مکالمات ───────────────────────────────────────────────────────────
 
   /** POST /admin/chats/getThreadList — تازه‌ترین مکالمات بالا */
   async getThreadList(dto: GetThreadListDto) {
+    // شفای سراسری — جفت‌های تکراریِ باقی‌مانده از نسخه‌های قبلی همان‌جا
+    // ادغام می‌شوند تا ادمین هر جفت را فقط یک‌بار ببیند (idempotent)
+    await this.chat.healAllPairs();
+
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? 20));
     const filter = dto.filter ?? 'all';
