@@ -126,6 +126,9 @@ model User {
   supplyOffersSent SupplyOffer[]     @relation("SupplyOfferSeller")
   /// پیشنهادهای تامین دریافتی این کاربر (به‌عنوان خریدار)
   supplyOffersReceived SupplyOffer[] @relation("SupplyOfferBuyer")
+  /// مخاطبین گوشی این کاربر — «ارسال به مخاطبین» (۴-۱۱): یک‌بار از
+  /// Contact Picker مرورگر لود می‌شود و در ایمچ می‌ماند
+  contacts Contact[] @relation("ContactOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -811,6 +814,29 @@ model ChatMessage {
 
   @@index([threadId, createdAt(sort: Desc)])
   @@index([threadId, readAt])
+}
+
+/// مخاطبین گوشی کاربر (خواسته مالک ۴-۱۱) — «ارسال به مخاطبین»: دکمهٔ
+/// فقط-موبایل در جعبهٔ اشتراک؛ مخاطبین گوشی یک‌بار با Contact Picker
+/// مرورگر خوانده و اینجا ذخیره می‌شوند تا همیشه در ایمچ در دسترس باشند.
+/// عضویت در ایمچ لحظهٔ نمایش از روی User.phone همان شماره محاسبه می‌شود
+/// (isMember) — غیراعضا دکمهٔ «دعوت به آیمچ» (پیامک sms:) می‌گیرند.
+model Contact {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// صاحب مخاطب — کسی که مخاطبینش را در ایمچ لود کرده
+  userId    String   @map("user_id") @db.ObjectId
+  user      User     @relation("ContactOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// نام ذخیره‌شده در گوشی — نمایشی
+  name      String?
+  /// شماره نرمال‌شده (۰۹xxxxxxxxx هم‌شکل User.phone؛ غیرایرانی = ارقام خام)
+  phone     String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, phone])
+  @@index([userId])
 }
 
 /// پیام مستقیم پشتیبانی (ادمین → کاربر) — یک‌طرفه برای اطلاع‌رسانی/حذف نرم

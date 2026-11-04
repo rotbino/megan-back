@@ -130,14 +130,36 @@ export class ChatService {
       messages: { orderBy: { createdAt: 'desc' as const }, take: 1 },
     };
 
+    // یک مکالمه به‌ازای جفت کاربر (خواسته مالک ۴-۱۱): «اگر سعید دو روز
+    // بعد دوباره پیام بدهد، در ادامهٔ همان چت قبلی می‌آید» — عین همهٔ
+    // پیامرسان‌ها. جفت در هر دو جهت بررسی می‌شود (فروشنده↔خریدار)، آگهیِ
+    // زمینه فقط زمینهٔ نمایش است و با هر شروع تازه به‌روز می‌شود.
     // upsert با کلید مرکب و productId=null در تایپِ where پرایسما جا نمی‌شود
     // (کلید مرکب null قبول نمی‌کند) → find + create با بازیابی از تداخل
     // یکتایی (P2002) — رفتارِ upsert، بدون محدودیت تایپ.
-    // productId=null در where عادی به null/missing مونگو می‌خورد — درست است.
     let thread = await this.prisma.chatThread.findFirst({
-      where: { sellerId, buyerId: user.id, productId },
+      where: {
+        OR: [
+          { sellerId, buyerId: user.id },
+          { sellerId: user.id, buyerId: sellerId },
+        ],
+      },
       include: threadInclude,
     });
+    if (thread) {
+      // زمینهٔ مکالمه = آخرین آگهی که گفتگو از روی آن شروع شد (نمایشی فقط)
+      if (thread.productId !== productId) {
+        try {
+          thread = await this.prisma.chatThread.update({
+            where: { id: thread.id },
+            data: { productId },
+            include: threadInclude,
+          });
+        } catch {
+          // تداخل یکتایی نادر (دادهٔ قدیمی تکراری) — زمینهٔ قبلی می‌ماند
+        }
+      }
+    }
     if (!thread) {
       try {
         thread = await this.prisma.chatThread.create({
@@ -152,7 +174,12 @@ export class ChatService {
         ) {
           // مکالمه همزمان ساخته شد (دو تب) — همان را برگردان
           thread = await this.prisma.chatThread.findFirstOrThrow({
-            where: { sellerId, buyerId: user.id, productId },
+            where: {
+              OR: [
+                { sellerId, buyerId: user.id },
+                { sellerId: user.id, buyerId: sellerId },
+              ],
+            },
             include: threadInclude,
           });
         } else {

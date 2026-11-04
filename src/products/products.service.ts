@@ -863,11 +863,20 @@ export class ProductsService {
     for (const it of dto.items) {
       const p = byId.get(it.id);
       if (!p) continue; // آگهی خودم نیست/حذف شده — بی‌صدا رد
-      if (p.minSalePrice === it.minSalePrice && p.stock === it.stock) continue; // بدون تغییر
+      if (
+        p.minSalePrice === it.minSalePrice &&
+        p.stock === it.stock &&
+        p.minSaleAmount === it.minSaleAmount
+      )
+        continue; // بدون تغییر
 
       const next = await this.prisma.product.update({
         where: { id: it.id },
-        data: { minSalePrice: it.minSalePrice, stock: it.stock },
+        data: {
+          minSalePrice: it.minSalePrice,
+          stock: it.stock,
+          minSaleAmount: it.minSaleAmount,
+        },
       });
       updated++;
       touchedIds.push(it.id);

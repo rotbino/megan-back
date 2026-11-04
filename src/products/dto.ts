@@ -238,7 +238,7 @@ export class UpdateMyProductDto extends CreateProductDto {
   id!: number;
 }
 
-/** ردیف تغییر گروهی — قیمت + موجودی یک آگهی خودم */
+/** ردیف تغییر گروهی — قیمت + موجودی + حداقل سفارش یک آگهی خودم */
 export class BulkPriceItemDto {
   @Type(() => Number)
   @IsInt()
@@ -254,6 +254,12 @@ export class BulkPriceItemDto {
   @IsInt()
   @Min(0)
   stock!: number;
+
+  /** حداقل سفارش (خواسته مالک ۴-۱۱) — هم‌شکل فرم ویرایش تکی */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  minSaleAmount!: number;
 }
 
 /** POST /products/bulkUpdatePrices — تغییر گروهی قیمت/موجودی (خواسته مالک ۴-۱۱) */

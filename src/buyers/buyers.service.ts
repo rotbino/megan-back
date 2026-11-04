@@ -902,10 +902,26 @@ export class BuyersService {
       where: { id: sellerId },
       select: { firstName: true, lastName: true },
     });
-    // گفتگوی مستقیم فروشنده↔خریدار (بدون آگهی زمینه) — upsert با بازیابی P2002
+    // گفتگوی جفت فروشنده↔خریدار — یک مکالمه به‌ازای جفت (خواسته مالک ۴-۱۱)،
+    // در هر دو جهت؛ آگهی زمینه ندارد (پیام پیشنهاد مستقیم است) — upsert با
+    // بازیابی P2002
     let thread = await this.prisma.chatThread.findFirst({
-      where: { sellerId, buyerId, productId: null },
+      where: {
+        OR: [
+          { sellerId, buyerId },
+          { sellerId: buyerId, buyerId: sellerId },
+        ],
+      },
     });
+    if (thread) {
+      // پیشنهادها همیشه در همان گفتگوی جفت ادامه می‌یابند — فقط زمینه‌اش
+      // گفتگوی مستقیم می‌ماند تا عنوان مکالمه گمراه‌کننده نشود
+      if (thread.productId != null) {
+        thread = await this.prisma.chatThread
+          .update({ where: { id: thread.id }, data: { productId: null } })
+          .catch(() => thread);
+      }
+    }
     if (!thread) {
       try {
         thread = await this.prisma.chatThread.create({
@@ -917,7 +933,12 @@ export class BuyersService {
           e.code === 'P2002'
         ) {
           thread = await this.prisma.chatThread.findFirstOrThrow({
-            where: { sellerId, buyerId, productId: null },
+            where: {
+              OR: [
+                { sellerId, buyerId },
+                { sellerId: buyerId, buyerId: sellerId },
+              ],
+            },
           });
         } else {
           throw e;
