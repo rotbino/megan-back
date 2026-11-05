@@ -10,7 +10,7 @@ import { GetVerificationOrdersDto, ReviewVerificationDto } from './dto';
 /**
  * فیلدهای مدارک — اسلات‌های File برای relatedModel=Verification
  * (خواسته مالک ۵-۱۱: دو مرحله‌ای عین باسکول — روی کارت + پشت کارت +
- * سلفی همراه با کارت و گواهی دست‌نوشته؛ حقوقی: + آگهی ثبت شرکت)
+ * سلفی همراه با کارت و گواهی دست‌نوشته + جواز کسب/آگهی ثبت اختیاری)
  */
 export const DOC_KEYS = [
   'nationalCardFront',
@@ -19,7 +19,8 @@ export const DOC_KEYS = [
   'registrationNotice',
 ] as const;
 
-/** نوع حساب احراز: حقیقی | حقوقی (حقوقی = آگهی ثبت شرکت هم الزامی است) */
+/** نوع حساب احراز: حقیقی | دارای مدرک کسب‌وکار — بدون پرسش کاربر،
+ * از وجود جواز کسب/آگهی ثبت در مدارک استخراج می‌شود */
 export type VerificationAccountType = 'personal' | 'legal';
 
 /** برچسب فارسی هر مدرک — پیام خطای «الزامی» و نمای ادمین */
@@ -27,7 +28,7 @@ export const DOC_LABELS: Record<(typeof DOC_KEYS)[number], string> = {
   nationalCardFront: 'تصویر روی کارت ملی',
   nationalCardBack: 'تصویر پشت کارت ملی',
   selfieWithCard: 'سلفی همراه با کارت ملی و گواهی دست‌نوشته',
-  registrationNotice: 'تصویر آگهی ثبت شرکت (روزنامه رسمی)',
+  registrationNotice: 'تصویر جواز کسب یا آگهی ثبت شرکت',
 };
 
 export interface VerificationDocDto {
@@ -90,15 +91,15 @@ export class VerificationService {
       throw AppError.conflict('هویت شما قبلاً احراز شده است.', 'ALREADY_VERIFIED');
     }
 
-    // ۲) نوع حساب + خواندن مدارک — فقط فیلدهای شناخته‌شده پذیرفته می‌شوند
-    const { fields, files } = await this.uploads.readMultipartMulti(req, [...DOC_KEYS]);
-    const accountType: VerificationAccountType =
-      fields.accountType === 'legal' ? 'legal' : 'personal';
-    // مدارک الزامی حقیقی: روی کارت + پشت کارت + سلفی با گواهی دست‌نوشته؛
-    // حقوقی: هر سه + آگهی ثبت شرکت (روزنامه رسمی)
-    const required: Array<(typeof DOC_KEYS)[number]> =
-      accountType === 'legal' ? [...DOC_KEYS] : DOC_KEYS.slice(0, 3);
-    for (const key of required) {
+    // ۲) خواندن مدارک — فقط فیلدهای شناخته‌شده پذیرفته می‌شوند.
+    // سه مدرک اول الزامی است؛ جواز کسب/آگهی ثبت شرکت اختیاری است
+    // (اعتبار بیشتر برای کسب‌وکارها — خواسته مالک ۶-۱۱: بدون پرسش نوع حساب).
+    // accountType از وجود مدرک کسب‌وکار استخراج می‌شود (نمای ادمین).
+    const { files } = await this.uploads.readMultipartMulti(req, [...DOC_KEYS]);
+    const accountType: VerificationAccountType = files.get('registrationNotice')
+      ? 'legal'
+      : 'personal';
+    for (const key of DOC_KEYS.slice(0, 3)) {
       if (!files.get(key)) {
         throw AppError.badRequest(`${DOC_LABELS[key]} الزامی است.`, 'DOC_MISSING');
       }

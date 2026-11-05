@@ -20,7 +20,7 @@ export class VerificationController {
   @Post('submitVerification')
   @ApiOperation({
     summary:
-      'ارسال مدارک احراز هویت دو مرحله‌ای (multipart: روی کارت + پشت کارت + سلفی با گواهی؛ حقوقی: + آگهی ثبت شرکت) → در حال بررسی',
+      'ارسال مدارک احراز هویت دو مرحله‌ای (multipart: روی کارت + پشت کارت + سلفی با گواهی؛ + جواز کسب/آگهی ثبت شرکت اختیاری) → در حال بررسی',
   })
   async submitVerification(@CurrentUser() user: AuthUser, @Req() req: FastifyRequest) {
     return ok(

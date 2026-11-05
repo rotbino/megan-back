@@ -146,7 +146,8 @@ model VerificationOrder {
 
   /// pending | approved | rejected
   status         String   @default("pending")
-  /// personal (حقیقی) | legal (حقوقی) — حقوقی: آگهی ثبت شرکت نیز الزامی است
+  /// personal | legal — legal = مدرک کسب‌وکار (جواز کسب/آگهی ثبت) نیز ارسال شده؛
+  /// بدون پرسش کاربر، از وجود مدرک استخراج می‌شود
   accountType    String   @default("personal") @map("account_type")
   rejectionReason String? @map("rejection_reason")
   /// کاربر ادمین بررسی‌کننده
