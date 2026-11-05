@@ -146,6 +146,8 @@ model VerificationOrder {
 
   /// pending | approved | rejected
   status         String   @default("pending")
+  /// personal (حقیقی) | legal (حقوقی) — حقوقی: آگهی ثبت شرکت نیز الزامی است
+  accountType    String   @default("personal") @map("account_type")
   rejectionReason String? @map("rejection_reason")
   /// کاربر ادمین بررسی‌کننده
   reviewedBy String?   @map("reviewed_by") @db.ObjectId

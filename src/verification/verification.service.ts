@@ -7,8 +7,28 @@ import { UploadsService } from '../uploads/uploads.service';
 import type { AuthUser } from '../common/guards';
 import { GetVerificationOrdersDto, ReviewVerificationDto } from './dto';
 
-/** فیلدهای مدارک — اسلات‌های File برای relatedModel=Verification */
-export const DOC_KEYS = ['nationalCard', 'selfie'] as const;
+/**
+ * فیلدهای مدارک — اسلات‌های File برای relatedModel=Verification
+ * (خواسته مالک ۵-۱۱: دو مرحله‌ای عین باسکول — روی کارت + پشت کارت +
+ * سلفی همراه با کارت و گواهی دست‌نوشته؛ حقوقی: + آگهی ثبت شرکت)
+ */
+export const DOC_KEYS = [
+  'nationalCardFront',
+  'nationalCardBack',
+  'selfieWithCard',
+  'registrationNotice',
+] as const;
+
+/** نوع حساب احراز: حقیقی | حقوقی (حقوقی = آگهی ثبت شرکت هم الزامی است) */
+export type VerificationAccountType = 'personal' | 'legal';
+
+/** برچسب فارسی هر مدرک — پیام خطای «الزامی» و نمای ادمین */
+export const DOC_LABELS: Record<(typeof DOC_KEYS)[number], string> = {
+  nationalCardFront: 'تصویر روی کارت ملی',
+  nationalCardBack: 'تصویر پشت کارت ملی',
+  selfieWithCard: 'سلفی همراه با کارت ملی و گواهی دست‌نوشته',
+  registrationNotice: 'تصویر آگهی ثبت شرکت (روزنامه رسمی)',
+};
 
 export interface VerificationDocDto {
   id: string;
@@ -23,6 +43,8 @@ export interface MyVerificationDto {
   orderId?: string | null;
   /** none | pending | approved | rejected */
   status: string;
+  /** personal | legal — نوع حساب احرازشده */
+  accountType?: VerificationAccountType;
   submittedAt?: Date;
   reviewedAt?: Date | null;
   rejectionReason?: string | null;
@@ -48,7 +70,7 @@ export class VerificationService {
     private readonly uploads: UploadsService,
   ) {}
 
-  /** POST /verification/submitVerification (multipart) — کارت ملی + سلفی */
+  /** POST /verification/submitVerification (multipart) — مدارک دو مرحله‌ای */
   async submit(user: AuthUser, req: FastifyRequest): Promise<MyVerificationDto> {
     // ۱) وضعیت کاربر — فقط یک درخواست باز و بدون تکرار پس از تأیید
     const [pending, me] = await Promise.all([
@@ -68,20 +90,27 @@ export class VerificationService {
       throw AppError.conflict('هویت شما قبلاً احراز شده است.', 'ALREADY_VERIFIED');
     }
 
-    // ۲) خواندن مدارک — فقط این دو فیلد فایل پذیرفته می‌شوند
-    const { files } = await this.uploads.readMultipartMulti(req, [...DOC_KEYS]);
-    for (const key of DOC_KEYS) {
+    // ۲) نوع حساب + خواندن مدارک — فقط فیلدهای شناخته‌شده پذیرفته می‌شوند
+    const { fields, files } = await this.uploads.readMultipartMulti(req, [...DOC_KEYS]);
+    const accountType: VerificationAccountType =
+      fields.accountType === 'legal' ? 'legal' : 'personal';
+    // مدارک الزامی حقیقی: روی کارت + پشت کارت + سلفی با گواهی دست‌نوشته؛
+    // حقوقی: هر سه + آگهی ثبت شرکت (روزنامه رسمی)
+    const required: Array<(typeof DOC_KEYS)[number]> =
+      accountType === 'legal' ? [...DOC_KEYS] : DOC_KEYS.slice(0, 3);
+    for (const key of required) {
       if (!files.get(key)) {
-        throw AppError.badRequest('تصویر کارت ملی و سلفی هر دو الزامی است.', 'DOC_MISSING');
+        throw AppError.badRequest(`${DOC_LABELS[key]} الزامی است.`, 'DOC_MISSING');
       }
     }
 
     // ۳) سفارش (ردیف مرجع) → ۴) چسباندن مدارک با اعتبارسنجی کامل uploads
     const order = await this.prisma.verificationOrder.create({
-      data: { userId: user.id },
+      data: { userId: user.id, accountType },
     });
     try {
       for (const key of DOC_KEYS) {
+        if (!files.get(key)) continue; // اسلات اختیاری (آگهی ثبت شرکت برای حقیقی)
         await this.uploads.upload(user, {
           model: 'Verification',
           modelId: order.id,
@@ -128,6 +157,7 @@ export class VerificationService {
     return {
       orderId: order.id,
       status: order.status,
+      accountType: order.accountType as VerificationAccountType,
       submittedAt: order.createdAt,
       reviewedAt: order.reviewedAt,
       rejectionReason: order.rejectionReason,
@@ -189,6 +219,7 @@ export class VerificationService {
         return {
           id: r.id,
           status: r.status,
+          accountType: r.accountType,
           rejectionReason: r.rejectionReason,
           reviewedAt: r.reviewedAt,
           createdAt: r.createdAt,
@@ -201,8 +232,10 @@ export class VerificationService {
             is_verified: u?.isVerified ?? false,
           },
           docs: {
-            nationalCard: doc('nationalCard'),
-            selfie: doc('selfie'),
+            nationalCardFront: doc('nationalCardFront'),
+            nationalCardBack: doc('nationalCardBack'),
+            selfieWithCard: doc('selfieWithCard'),
+            registrationNotice: doc('registrationNotice'),
           },
         };
       }),

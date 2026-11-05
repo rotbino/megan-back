@@ -19,7 +19,8 @@ export class VerificationController {
   @ApiBearerAuth()
   @Post('submitVerification')
   @ApiOperation({
-    summary: 'ارسال مدارک احراز هویت (multipart: nationalCard + selfie) → در حال بررسی',
+    summary:
+      'ارسال مدارک احراز هویت دو مرحله‌ای (multipart: روی کارت + پشت کارت + سلفی با گواهی؛ حقوقی: + آگهی ثبت شرکت) → در حال بررسی',
   })
   async submitVerification(@CurrentUser() user: AuthUser, @Req() req: FastifyRequest) {
     return ok(
