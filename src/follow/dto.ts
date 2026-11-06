@@ -28,6 +28,11 @@ export const FOLLOW_STATUS_LABELS: Record<FollowStatus, string> = {
   dropped: 'منصرف شدم',
 };
 
+/** اولویت پیگیری (خواسته مالک ۷-۱۱) — 1: بالا، 2: متوسط، 3: کم.
+ *  Int نگه داشتیم مثل وضعیت سیمی؛ سمت فرانت متادیتای نمایشی دارد. */
+export const FOLLOW_PRIORITIES = [1, 2, 3] as const;
+export type FollowPriority = (typeof FOLLOW_PRIORITIES)[number];
+
 /** انواع هدف پیگیری — دید فروشنده (درخواست خرید) یا دید خریدار (آگهی فروش) */
 export const FOLLOW_TARGET_TYPES = ['buy_request', 'product'] as const;
 export type FollowTargetType = (typeof FOLLOW_TARGET_TYPES)[number];
@@ -89,6 +94,19 @@ export class UpsertItemDto {
   @IsIn(FOLLOW_STATUSES as unknown as string[])
   status?: FollowStatus;
 
+  /** اولویت — 1 بالا / 2 متوسط / 3 کم (اختیاری، پیش‌فرض متوسط) */
+  @IsOptional()
+  @IsIn(FOLLOW_PRIORITIES as unknown as number[])
+  priority?: FollowPriority;
+
+  /** «پیگیری بعدی N روز دیگر» — 0 یا ارسال نشدن = بدون یادآور (اختیاری) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  nextFollowDays?: number;
+
   /** یادداشت اولیه — اختیاری (خواسته مالک: یادداشت اجباری نیست) */
   @IsOptional()
   @IsString()
@@ -103,6 +121,28 @@ export class SetItemStatusDto {
 
   @IsIn(FOLLOW_STATUSES as unknown as string[])
   status!: FollowStatus;
+}
+
+/** POST /follow/setItemPriority — تغییر اولویت (زیر سه‌نقطه و مودال؛
+ *  خواسته مالک ۷-۱۱) — اولویت بالا = 1 در لیست بالاتر */
+export class SetItemPriorityDto {
+  @IsString()
+  itemId!: string;
+
+  @IsIn(FOLLOW_PRIORITIES as unknown as number[])
+  priority!: FollowPriority;
+}
+
+/** POST /follow/setNextFollow — «پیگیری بعدی N روز دیگر»؛ days=0 یعنی حذف یادآور */
+export class SetNextFollowDto {
+  @IsString()
+  itemId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  days!: number;
 }
 
 /** POST /follow/moveItem — انتقال به پرونده دیگر (وضعیت و یادداشت‌ها حفظ می‌شوند) */

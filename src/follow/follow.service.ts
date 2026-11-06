@@ -16,7 +16,9 @@ import type {
   MoveItemDto,
   RemoveItemDto,
   RenameFolderDto,
+  SetItemPriorityDto,
   SetItemStatusDto,
+  SetNextFollowDto,
   UpsertItemDto,
 } from './dto';
 
@@ -56,6 +58,10 @@ export interface FollowItemDto {
   targetType: FollowTargetType;
   targetId: number;
   status: FollowStatus;
+  /** اولویت — 1 بالا / 2 متوسط / 3 کم (خواسته مالک ۷-۱۱) */
+  priority: number;
+  /** تاریخ پیگیری بعدی (YYYY-MM-DD HH:mm:ss) یا null — از «N روز دیگر» */
+  nextFollowAt: string | null;
   notes: Array<{ id: string; text: string; createdAt: string }>;
   createdAt: string;
   updatedAt: string;
@@ -152,19 +158,24 @@ export class FollowService {
   }
 
   /** POST /follow/upsertItem — گام ۲ جریان ذخیره.
-   *  هدف تازه: ایجاد در پرونده با وضعیت (+ یادداشت اختیاری).
-   *  هدف از قبل ذخیره‌شده: انتقال به پروندهٔ انتخابی + به‌روزرسانی وضعیت. */
+   *  هدف تازه: ایجاد در پرونده با وضعیت (+ اولویت + یادآور + یادداشت اختیاری).
+   *  هدف از قبل ذخیره‌شده: انتقال به پروندهٔ انتخابی + به‌روزرسانی وضعیت/اولویت/یادآور. */
   async upsertItem(user: AuthUser, dto: UpsertItemDto): Promise<FollowItemDto> {
     const folder = await this.ownFolder(user.id, dto.folderId);
     await this.assertTargetExists(dto.targetType, dto.targetId);
 
     const note = dto.note?.trim();
+    // «پیگیری بعدی N روز دیگر» — 0/غیب = بی‌تغییر روی آپدیت، null روی ایجاد
+    const nextFollowAt =
+      dto.nextFollowDays == null ? undefined : this.computeNextFollowAt(dto.nextFollowDays);
+
     const data = {
       folderId: folder.id,
       userId: user.id,
       targetType: dto.targetType,
       targetId: dto.targetId,
       status: dto.status ?? 'reviewing',
+      priority: dto.priority ?? 2,
     };
 
     const item = await this.prisma.followItem.upsert({
@@ -175,10 +186,16 @@ export class FollowService {
           targetId: dto.targetId,
         },
       },
-      create: { ...data, ...(note ? { notes: { create: { text: note } } } : {}) },
+      create: {
+        ...data,
+        ...(nextFollowAt !== undefined && { nextFollowAt }),
+        ...(note ? { notes: { create: { text: note } } } : {}),
+      },
       update: {
         folderId: data.folderId,
         status: data.status,
+        priority: data.priority,
+        ...(nextFollowAt !== undefined && { nextFollowAt }),
         ...(note ? { notes: { create: { text: note } } } : {}),
       },
       include: { notes: true },
@@ -194,6 +211,26 @@ export class FollowService {
     await this.prisma.followItem.update({
       where: { id: dto.itemId },
       data: { status: dto.status },
+    });
+  }
+
+  /** POST /follow/setItemPriority — تغییر اولویت (خواسته مالک ۷-۱۱:
+   *  «تغییر اولویت» زیر سه‌نقطه و در مودال؛ اولویت‌های بالا در لیست بالاتر) */
+  async setItemPriority(user: AuthUser, dto: SetItemPriorityDto): Promise<void> {
+    await this.ownItem(user.id, dto.itemId);
+    await this.prisma.followItem.update({
+      where: { id: dto.itemId },
+      data: { priority: dto.priority },
+    });
+  }
+
+  /** POST /follow/setNextFollow — یادآور «پیگیری بعدی N روز دیگر»؛
+   *  days=0 یادآور را برمی‌دارد؛ فیلتر «پیگیری‌های امروز» سررسیده‌ها را نشان می‌دهد */
+  async setNextFollow(user: AuthUser, dto: SetNextFollowDto): Promise<void> {
+    await this.ownItem(user.id, dto.itemId);
+    await this.prisma.followItem.update({
+      where: { id: dto.itemId },
+      data: { nextFollowAt: this.computeNextFollowAt(dto.days) },
     });
   }
 
@@ -276,6 +313,16 @@ export class FollowService {
     return folder;
   }
 
+  /** «پیگیری بعدی N روز دیگر» → تاریخ مطلق از نیمه‌شبِ امروز؛ 0 = حذف یادآور (null).
+   *  نیمه‌شب مبناست تا نمایش «N روز دیگر» دقیقاً همان N ورودی کاربر بماند. */
+  private computeNextFollowAt(days: number): Date | null {
+    if (days <= 0) return null;
+    const at = new Date();
+    at.setHours(0, 0, 0, 0);
+    at.setDate(at.getDate() + days);
+    return at;
+  }
+
   /** مورد متعلق به کاربر یا ۴۰۴ */
   private async ownItem(userId: string, itemId: string) {
     const item = await this.prisma.followItem.findFirst({ where: { id: itemId, userId } });
@@ -332,6 +379,8 @@ export class FollowService {
         targetType: item.targetType as FollowTargetType,
         targetId: item.targetId,
         status: item.status as FollowStatus,
+        priority: item.priority ?? 2,
+        nextFollowAt: item.nextFollowAt ? fmtDate(item.nextFollowAt) : null,
         notes: item.notes.map((n) => ({
           id: n.id,
           text: n.text,

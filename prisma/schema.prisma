@@ -567,6 +567,14 @@ model FollowItem {
 
   /// reviewing | contacted | negotiating | closed | dropped (قیف تماس)
   status String @default("reviewing")
+
+  /// اولویت — 1: بالا، 2: متوسط، 3: کم (خواسته مالک ۷-۱۱: اولویت‌های بالا
+  /// در لیست بالاتر؛ فیلتر و «تغییر اولویت» زیر سه‌نقطه و در مودال)
+  priority Int @default(2)
+  /// تاریخ پیگیری بعدی — از اینپوت «پیگیری بعدی N روز دیگر» محاسبه می‌شود؛
+  /// فیلتر «پیگیری‌های امروز» موارد سررسیده (<= پایان امروز) را نشان می‌دهد
+  nextFollowAt DateTime? @map("next_follow_at")
+
   notes FollowNote[]
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -574,6 +582,8 @@ model FollowItem {
 
   @@unique([userId, targetType, targetId])
   @@index([folderId])
+  /// فیلتر «پیگیری‌های امروز» — اسکن سررسیده‌ها
+  @@index([userId, nextFollowAt])
 }
 
 /// یادداشت زمان‌دار روی مورد پیگیری — «قیمت ۴۸ گفت، جمعه دوباره زنگ می‌زنم»

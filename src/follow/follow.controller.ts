@@ -14,7 +14,9 @@ import {
   MoveItemDto,
   RemoveItemDto,
   RenameFolderDto,
+  SetItemPriorityDto,
   SetItemStatusDto,
+  SetNextFollowDto,
   UpsertItemDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards';
@@ -87,6 +89,20 @@ export class FollowController {
   async setItemStatus(@CurrentUser() user: AuthUser, @Body() dto: SetItemStatusDto) {
     await this.follow.setItemStatus(user, dto);
     return ok(true, 'وضعیت به‌روزرسانی شد.');
+  }
+
+  @Post('setItemPriority')
+  @ApiOperation({ summary: 'تغییر اولویت (بالا/متوسط/کم) — اولویت‌های بالا در لیست بالاتر (خواسته مالک ۷-۱۱)' })
+  async setItemPriority(@CurrentUser() user: AuthUser, @Body() dto: SetItemPriorityDto) {
+    await this.follow.setItemPriority(user, dto);
+    return ok(true, 'اولویت به‌روزرسانی شد.');
+  }
+
+  @Post('setNextFollow')
+  @ApiOperation({ summary: 'یادآور «پیگیری بعدی N روز دیگر» — days=0 حذف یادآور (خواسته مالک ۷-۱۱)' })
+  async setNextFollow(@CurrentUser() user: AuthUser, @Body() dto: SetNextFollowDto) {
+    await this.follow.setNextFollow(user, dto);
+    return ok(true, 'تاریخ پیگیری بعدی ثبت شد.');
   }
 
   @Post('moveItem')
