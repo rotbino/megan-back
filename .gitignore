@@ -13,3 +13,12 @@ logs/
 
 # misc
 .DS_Store
+
+# فایل‌های آپلودشده درایور local (APP_PROFILE=local / STORAGE_DRIVER=local)
+# — بایت‌های کاربر، جایی در گیت ندارند
+uploads/
+
+# فایل‌های پشتیبان/دامپ محلی
+*.tar.gz
+*.dump
+backups/

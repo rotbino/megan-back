@@ -28,11 +28,31 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return value === 'true' || value === '1';
 }
 
+/**
+ * پروفایل اجرا — «کلید واحد» سوییچ لوکال/ابر (خواسته مالک: کار آفلاین):
+ *   APP_PROFILE=local → دیتابیس مونگوی لوکال + ذخیرهٔ فایل روی دیسک ./uploads
+ *                        (آدرس Atlas و کلیدهای آروان در .env نادیده گرفته می‌شوند)
+ *   APP_PROFILE=cloud → رفتار کامل امروز: Atlas + آروان (پیش‌فرض)
+ * مقادیر جایگزین لوکال با LOCAL_* قابل تنظیم‌اند؛ برای جزئیات docs/LOCAL-DEV.md.
+ */
+export type AppProfile = 'local' | 'cloud';
+export const profile: AppProfile = process.env.APP_PROFILE === 'local' ? 'local' : 'cloud';
+export const isLocalProfile = profile === 'local';
+
+/** در پروفایل local، DATABASE_URL ابری نادیده گرفته می‌شود و مونگوی لوکال وصل می‌شود */
+function resolveDatabaseUrl(): string {
+  if (isLocalProfile) {
+    //LOCAL_DATABASE_URL اگر ست شده باشد همان می‌آید؛ وگرنه پیش‌فرض استاندارد لوکال
+    return process.env.LOCAL_DATABASE_URL || 'mongodb://127.0.0.1:27017/megan_local';
+  }
+  return required('DATABASE_URL', process.env.DATABASE_URL);
+}
+
 export const env = Object.freeze({
   PORT: num('PORT', process.env.PORT, 4000),
   HOST: process.env.HOST || '0.0.0.0',
   NODE_ENV: process.env.NODE_ENV || 'development',
-  DATABASE_URL: required('DATABASE_URL', process.env.DATABASE_URL),
+  DATABASE_URL: resolveDatabaseUrl(),
   JWT_SECRET: required('JWT_SECRET', process.env.JWT_SECRET, 16),
   /** «7d» | «15m» | «3600» — عمر توکن دسترسی */
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
@@ -87,12 +107,16 @@ export function jwtExpiresInSeconds(spec = env.JWT_EXPIRES_IN): number {
 // بایت‌ها روی object storage آروان (سازگار S3) زندگی می‌کنند؛ درایور local برای
 // توسعه/خودمیزبانی — سوییچ با یک env، نه بازنویسی.
 export const storage = Object.freeze({
-  /** «arvan» (S3-compatible) | «local» (دیسک زیر UPLOAD_PATH) */
-  DRIVER: process.env.STORAGE_DRIVER || 'arvan',
+  /** «arvan» (S3-compatible) | «local» (دیسک زیر UPLOAD_PATH)
+ *  پروفایل local درایور را به «local» مجبور می‌کند (سوییچ آفلاین). */
+  DRIVER: isLocalProfile ? 'local' : process.env.STORAGE_DRIVER || 'arvan',
   MAX_FILE_SIZE: num('MAX_FILE_SIZE', process.env.MAX_FILE_SIZE, 5 * 1024 * 1024),
   /** فقط درایور local */
   UPLOAD_PATH: process.env.UPLOAD_PATH || './uploads',
-  PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL || '',
+  /** پروفایل local: مبدأ خود API کافی است؛ قابل تغییر با LOCAL_PUBLIC_BASE_URL */
+  PUBLIC_BASE_URL: isLocalProfile
+    ? process.env.LOCAL_PUBLIC_BASE_URL || `http://localhost:${env.PORT}`
+    : process.env.PUBLIC_BASE_URL || '',
   ARVAN_ENDPOINT: process.env.ARVAN_ENDPOINT || '',
   ARVAN_REGION: process.env.ARVAN_REGION || '',
   ARVAN_ACCESS_KEY: process.env.ARVAN_ACCESS_KEY || '',

@@ -9,12 +9,13 @@ import fastifyCompress from '@fastify/compress';
 import fastifyStatic from '@fastify/static';
 import fastifyIO from 'fastify-socket.io';
 import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { AppModule } from './app.module';
 import { ChatModule } from './chat/chat.module';
 import { ChatService } from './chat/chat.service';
 import { PresenceModule } from './presence/presence.module';
 import { PresenceService } from './presence/presence.service';
-import { env, isProd, storage } from './common/config/env';
+import { env, isProd, isLocalProfile, profile, storage } from './common/config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { setIo, onUserDepart } from './chat/io-holder';
 
@@ -77,6 +78,9 @@ async function bootstrap(): Promise<void> {
 
   // درایور local فایل‌ها را مستقیم سرو می‌کند (درایور arvan بی‌اعتناست)
   if (storage.DRIVER === 'local') {
+    // ریشهٔ uploads اگر نباشد ساخته می‌شود — ثبت fastifyStatic و آپلود اول
+    // هر دو بدون دایرکتوری از قبل موجود کار می‌کنند (پروفایل local آفلاین)
+    await mkdir(path.resolve(storage.UPLOAD_PATH), { recursive: true });
     await app.register(fastifyStatic, {
       root: path.resolve(storage.UPLOAD_PATH),
       prefix: '/uploads/',
@@ -160,7 +164,13 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  if (!isProd) console.log(`🚀 Megan API (Prisma + Fastify) → http://${env.HOST}:${env.PORT} | Swagger: /docs`);
+  if (!isProd)
+    console.log(
+      `🚀 Megan API (Prisma + Fastify) → http://${env.HOST}:${env.PORT} | Swagger: /docs | پروفایل: ${profile}` +
+        (isLocalProfile
+          ? ` (DB: مونگوی لوکال | فایل‌ها: ${storage.UPLOAD_PATH} روی دیسک)`
+          : ` (DB: Atlas | فایل‌ها: ${storage.DRIVER === 'local' ? 'دیسک لوکال' : 'آروان'})`),
+    );
 }
 
 void bootstrap().catch((err) => {
