@@ -244,6 +244,30 @@ export class FollowService {
     return { following: true, item: decorated };
   }
 
+  /** POST /follow/getFollowingMap — همهٔ موارد یک نوع برای نقشهٔ دکمه‌های ذخیره؛
+   *  یک درخواست به‌جای N درخواست isFollowing در صفحات فهرست (۱۶ کارت = ۱ درخواست).
+   *  خروجی همان آرایهٔ FollowItemDto است؛ فرانت به Record<targetId, item> تبدیل می‌کند. */
+  async getFollowingMap(user: AuthUser, targetType: FollowTargetType): Promise<FollowItemDto[]> {
+    const items = await this.prisma.followItem.findMany({
+      where: { userId: user.id, targetType },
+      include: { notes: true, folder: { select: { name: true } } },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (items.length === 0) return [];
+
+    // decorate نام پرونده را می‌خواهد — گروه‌بندی بر اساس پرونده و تزئین هر گروه
+    const byFolder = new Map<string, typeof items>();
+    for (const item of items) {
+      const group = byFolder.get(item.folderId);
+      if (group) group.push(item);
+      else byFolder.set(item.folderId, [item]);
+    }
+    const groups = await Promise.all(
+      [...byFolder.values()].map((group) => this.decorate(group, group[0].folder.name)),
+    );
+    return groups.flat();
+  }
+
   // ─── داخلی ────────────────────────────────────────────────────────────────
 
   /** پروندهٔ متعلق به کاربر یا ۴۰۴ */

@@ -7,6 +7,7 @@ import {
   CreateFolderDto,
   DeleteFolderDto,
   GetFolderItemsDto,
+  GetFollowingMapDto,
   GetFoldersDto,
   IsFollowingDto,
   MoveItemDto,
@@ -106,5 +107,13 @@ export class FollowController {
   @ApiOperation({ summary: 'وضعیت دکمهٔ ذخیره — آیا این هدف در پیگیری من است؟' })
   async isFollowing(@CurrentUser() user: AuthUser, @Body() dto: IsFollowingDto) {
     return ok(await this.follow.isFollowing(user, dto.targetType, dto.targetId));
+  }
+
+  @Post('getFollowingMap')
+  @ApiOperation({
+    summary: 'نقشهٔ موارد ذخیره‌شدهٔ یک نوع — یک درخواست مشترک برای همهٔ دکمه‌های ذخیرهٔ صفحه به‌جای N درخواست',
+  })
+  async getFollowingMap(@CurrentUser() user: AuthUser, @Body() dto: GetFollowingMapDto) {
+    return ok(await this.follow.getFollowingMap(user, dto.targetType));
   }
 }

@@ -140,3 +140,10 @@ export class IsFollowingDto {
   @Min(1)
   targetId!: number;
 }
+
+/** POST /follow/getFollowingMap — همهٔ موارد ذخیره‌شدهٔ یک نوع؛
+ *  یک درخواست مشترک برای همهٔ دکمه‌های ذخیرهٔ یک صفحه به‌جای N درخواست isFollowing */
+export class GetFollowingMapDto {
+  @IsIn(FOLLOW_TARGET_TYPES as unknown as string[])
+  targetType!: FollowTargetType;
+}
