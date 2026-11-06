@@ -94,8 +94,8 @@ model User {
   buyRequests  BuyRequest[]   @relation("BuyRequestOwner")
   chargeOrders ChargeOrder[]  @relation("ChargeOrderOwner")
   ladderOrders LadderOrder[]  @relation("LadderOrderOwner")
-  savedLists   SavedList[]    @relation("SavedListOwner")
-  savedTargets SavedUser[]    @relation("SavedTarget")
+  followFolders FollowFolder[] @relation("FollowFolderOwner")
+  followItems   FollowItem[]   @relation("FollowItemOwner")
   chatThreadsAsSeller ChatThread[] @relation("ChatThreadSeller")
   chatThreadsAsBuyer  ChatThread[] @relation("ChatThreadBuyer")
   /// گزارش تماس — تماس‌گیرنده (شماره طرف را دیده/زنگ زده)
@@ -527,16 +527,19 @@ model BuyRequest {
   @@index([userId, status])
 }
 
-// ─── CRM نشان‌شده‌ها — عین پنل باسکول (SavedList/SavedUser/Note) ────────────
+// ─── پیگیری‌ها — CRM کوچک ایمچ (جایگزین نشان‌شده‌های باسکول، خواسته مالک ۶-۱۱) ─
+// فروشنده درخواست‌های خرید و خریدار آگهی‌های فروش را در «پرونده»های نام‌دار
+// ذخیره می‌کند؛ هر مورد وضعیت قیف تماس + یادداشت‌های زمان‌دار دارد.
+// جریان ذخیره دومرحله‌ای است: ۱) انتخاب/ساخت پرونده ۲) وضعیت + یادداشت اختیاری.
 
-/// لیست نشان‌شده‌ها — نام آزاد مثل «سیب زمینی»؛ یکتا به‌ازای کاربر
-model SavedList {
+/// پروندهٔ پیگیری — ظرف موارد با موضوع مشترک (مثل «خرید سیب زمینی»)؛ یکتا به‌ازای کاربر
+model FollowFolder {
   id     String @id @default(auto()) @map("_id") @db.ObjectId
   userId String @map("user_id") @db.ObjectId
-  user   User   @relation("SavedListOwner", fields: [userId], references: [id], onDelete: Cascade)
+  user   User   @relation("FollowFolderOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  name      String
-  savedUsers SavedUser[]
+  name  String
+  items FollowItem[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -544,39 +547,46 @@ model SavedList {
   @@unique([userId, name])
 }
 
-/// خریدار نشان‌شده در یک لیست — وضعیت ۷گانه CRM باسکول
-model SavedUser {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  savedListId String    @map("saved_list_id") @db.ObjectId
-  savedList   SavedList @relation(fields: [savedListId], references: [id], onDelete: Cascade)
+/// مورد پیگیری — هدف چندریخت: درخواست خرید (دید فروشنده) یا آگهی فروش (دید خریدار).
+/// هر هدف حداکثر یک‌بار در پیگیری هر کاربر می‌نشیند — «انتقال به پرونده دیگر»
+/// جابه‌جایی است نه تکرار؛ حذف هدف (آگهی/درخواست) مورد را یتیم می‌کند که سرویس
+/// هنگام خواندن فیلتر می‌کند.
+model FollowItem {
+  id       String       @id @default(auto()) @map("_id") @db.ObjectId
+  folderId String       @map("folder_id") @db.ObjectId
+  folder   FollowFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 
-  /// خریدار نشان‌شده
-  targetUserId String @map("target_user_id") @db.ObjectId
-  targetUser   User   @relation("SavedTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  /// صاحب پیگیری — denorm برای کوئری‌های سریع و یکتایی سراسری
+  userId String @map("user_id") @db.ObjectId
+  user   User   @relation("FollowItemOwner", fields: [userId], references: [id], onDelete: Cascade)
 
-  /// following | not_needed | unresponsive | out_of_stock |
-  /// priority_high | priority_medium | priority_low
-  status      String  @default("following")
-  notes       SavedUserNote[]
+  /// buy_request (درخواست خرید — دید فروشنده) | product (آگهی فروش — دید خریدار)
+  targetType String @map("target_type")
+  /// شناسهٔ عددی BuyRequest یا Product
+  targetId   Int    @map("target_id")
+
+  /// reviewing | contacted | negotiating | closed | dropped (قیف تماس)
+  status String @default("reviewing")
+  notes FollowNote[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([savedListId, targetUserId])
-  @@index([targetUserId])
+  @@unique([userId, targetType, targetId])
+  @@index([folderId])
 }
 
-/// یادداشت زمان‌دار روی خریدار نشان‌شده — «یادم باشه زنگ بزنم»
-model SavedUserNote {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  savedUserId String    @map("saved_user_id") @db.ObjectId
-  savedUser   SavedUser @relation(fields: [savedUserId], references: [id], onDelete: Cascade)
+/// یادداشت زمان‌دار روی مورد پیگیری — «قیمت ۴۸ گفت، جمعه دوباره زنگ می‌زنم»
+model FollowNote {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  followItemId String     @map("follow_item_id") @db.ObjectId
+  followItem   FollowItem @relation(fields: [followItemId], references: [id], onDelete: Cascade)
 
-  text        String
+  text String
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([savedUserId, createdAt(sort: Desc)])
+  @@index([followItemId, createdAt(sort: Desc)])
 }
 
 // ─── چت و پیام‌ها (B8) ───────────────────────────────────────────────────────

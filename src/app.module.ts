@@ -13,7 +13,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { ProductsModule } from './products/products.module';
 import { VerificationModule } from './verification/verification.module';
 import { BuyRequestsModule } from './buy-requests/buy-requests.module';
-import { SavedModule } from './saved/saved.module';
+import { FollowModule } from './follow/follow.module';
 import { ChatModule } from './chat/chat.module';
 import { PresenceModule } from './presence/presence.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -47,7 +47,7 @@ import { AdminModule } from './admin/admin.module';
     ProductsModule,
     VerificationModule,
     BuyRequestsModule,
-    SavedModule,
+    FollowModule, // پیگیری‌ها — CRM کوچک (جایگزین نشان‌شده‌های باسکول)
     ChatModule,
     PresenceModule,
     ReviewsModule,

@@ -287,12 +287,12 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // ۵) لیست‌های نشان‌شده — نام تکراری با پسوند شماره یکتا می‌شود
+    // ۵) پرونده‌های پیگیری — نام تکراری با پسوند شماره یکتا می‌شود
     {
-      const staleLists = await p.savedList.findMany({ where: { userId: sid } });
+      const staleLists = await p.followFolder.findMany({ where: { userId: sid } });
       if (staleLists.length) {
         const keeperNames = new Set(
-          (await p.savedList.findMany({ where: { userId: kid }, select: { name: true } })).map(
+          (await p.followFolder.findMany({ where: { userId: kid }, select: { name: true } })).map(
             (l) => l.name,
           ),
         );
@@ -301,29 +301,16 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
           let i = 2;
           let name = `${l.name} (${i})`;
           while (keeperNames.has(name)) name = `${l.name} (${++i})`;
-          await p.savedList.update({ where: { id: l.id }, data: { name } });
+          await p.followFolder.update({ where: { id: l.id }, data: { name } });
           keeperNames.add(name);
         }
-        await p.savedList.updateMany({ where: { userId: sid }, data: { userId: kid } });
+        await p.followFolder.updateMany({ where: { userId: sid }, data: { userId: kid } });
+        // موارد پیگیری denorm مالک خودشان را دارند — همراه پرونده‌ها منتقل شوند
+        await p.followItem.updateMany({ where: { userId: sid }, data: { userId: kid } });
       }
     }
-    // کسانی که کاربر قدیمی را نشان کرده بودند → نشانِ کاربر جدید
-    {
-      const marks = await p.savedUser.findMany({
-        where: { targetUserId: sid },
-        select: { id: true, savedListId: true },
-      });
-      for (const m of marks) {
-        const dup = await p.savedUser.findFirst({
-          where: { savedListId: m.savedListId, targetUserId: kid },
-        });
-        if (dup) await p.savedUser.delete({ where: { id: m.id } }).catch(() => undefined);
-        else
-          await p.savedUser
-            .update({ where: { id: m.id }, data: { targetUserId: kid } })
-            .catch(() => undefined);
-      }
-    }
+    // (بازنشانی نشانِ کاربران دیگر حذف شد — هدف پیگیری دیگر کاربر نیست؛ آگهی/درخواست است)
+
 
     // ۶) نظرات فروشنده — دو سمت (نویسنده/فروشنده) + ممنوعیت خودفروشی
     {
