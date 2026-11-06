@@ -31,20 +31,12 @@ export interface LadderConfig {
   maxMonths: number;
 }
 
-/** پیشنهاد تامین — سقف روزانه به تفکیک سطح بسته فعال فروشنده */
-export interface SupplyOfferConfig {
-  /** سقف تکی‌ارسال به‌ازای هر سطح (pakageType) در شبانه‌روز */
-  dailyLimits: { pakageType: number; label: string; limit: number }[];
-}
-
-/** ارسال گروهی پیشنهاد تامین — پولی از کیف پول */
+/** ارسال گروهی پیشنهاد تامین — پولی از کیف پول (خواسته مالک ۶-۱۱:
+ *  محدودیت سهمیه/سقف حذف شد؛ چون فروشنده به‌ازای هر گیرنده پول می‌دهد،
+ *  سقف روزانه معنایی ندارد — خودِ کیف پول کنترل طبیعی مصرف است). */
 export interface GroupSendConfig {
   /** هزینه هر گیرنده (تومان) */
   perRecipientPrice: number;
-  /** سقف کل گیرندگان گروهی در شبانه‌روز (ضد هرزنامه) */
-  maxPerDay: number;
-  /** سقف هر ارسال (اندازه دسته) */
-  maxBatch: number;
 }
 
 /** کل پیکربندی صورتحساب — شکل JSON در SiteSetting.data */
@@ -52,7 +44,6 @@ export interface BillingConfig {
   chargePackages: ChargePackageRow[];
   customCharge: CustomChargeRules;
   ladder: LadderConfig;
-  supplyOffer: SupplyOfferConfig;
   groupSend: GroupSendConfig;
 }
 
@@ -71,14 +62,7 @@ export const DEFAULT_BILLING: BillingConfig = {
     ],
   },
   ladder: { monthlyPrice: 50_000, maxMonths: 4 },
-  supplyOffer: {
-    dailyLimits: [
-      { pakageType: 1, label: 'دو ماهه', limit: 5 },
-      { pakageType: 2, label: 'شش ماهه', limit: 10 },
-      { pakageType: 3, label: 'یک‌ساله', limit: 20 },
-    ],
-  },
-  groupSend: { perRecipientPrice: 5_000, maxPerDay: 100, maxBatch: 50 },
+  groupSend: { perRecipientPrice: 5_000 },
 };
 
 /** درصد شارژ اضافه مبلغ دلخواه — از پله‌های پیکربندی‌شده (dynamic) */
@@ -161,37 +145,12 @@ function normLadder(raw: unknown): LadderConfig {
   };
 }
 
-function normSupplyOffer(raw: unknown): SupplyOfferConfig {
-  const d = DEFAULT_BILLING.supplyOffer;
-  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
-  const limits = o && Array.isArray(o.dailyLimits) ? o.dailyLimits : null;
-  if (!limits) return d;
-  const rows: SupplyOfferConfig['dailyLimits'] = [];
-  const seen = new Set<number>();
-  for (const r of limits) {
-    if (!r || typeof r !== 'object') continue;
-    const ro = r as Record<string, unknown>;
-    const pakageType = toInt(ro.pakageType, 0, 1, 9);
-    if (pakageType <= 0 || seen.has(pakageType)) continue;
-    rows.push({
-      pakageType,
-      label: String(ro.label ?? '').trim() || `سطح ${pakageType}`,
-      limit: toInt(ro.limit, 5, 0, 1_000),
-    });
-    seen.add(pakageType);
-  }
-  if (rows.length === 0) return d;
-  return { dailyLimits: rows.sort((a, b) => a.pakageType - b.pakageType) };
-}
-
 function normGroupSend(raw: unknown): GroupSendConfig {
   const d = DEFAULT_BILLING.groupSend;
   if (!raw || typeof raw !== 'object') return d;
   const o = raw as Record<string, unknown>;
   return {
     perRecipientPrice: toInt(o.perRecipientPrice, d.perRecipientPrice, 0, 100_000_000),
-    maxPerDay: toInt(o.maxPerDay, d.maxPerDay, 1, 10_000),
-    maxBatch: toInt(o.maxBatch, d.maxBatch, 1, 500),
   };
 }
 
@@ -202,15 +161,7 @@ export function normalizeBilling(raw: unknown): BillingConfig {
     chargePackages: normChargePackages(o.chargePackages),
     customCharge: normCustomCharge(o.customCharge),
     ladder: normLadder(o.ladder),
-    supplyOffer: normSupplyOffer(o.supplyOffer),
     groupSend: normGroupSend(o.groupSend),
   };
 }
 
-/** سقف روزانه پیشنهاد تامین برای سطح بسته — سطح ناشناخته → کم‌طول‌ترین سقف
- *  (محافظه‌کارانه ضد هرزنامه) */
-export function offerDailyLimit(cfg: BillingConfig, pakageType: number): number {
-  const row = cfg.supplyOffer.dailyLimits.find((r) => r.pakageType === pakageType);
-  if (row) return row.limit;
-  return cfg.supplyOffer.dailyLimits.reduce((m, r) => Math.min(m, r.limit), 0);
-}

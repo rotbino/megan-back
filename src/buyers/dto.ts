@@ -162,9 +162,11 @@ export class SendSupplyOfferDto extends SupplyOfferTermsDto {
 
 /** POST /buyers/groupSendSupplyOffer — ارسال گروهی پولی از کیف پول */
 export class GroupSendSupplyOfferDto extends SupplyOfferTermsDto {
+  /** سقفِ فنیِ اندازهٔ درخواست فقط (500) — سقف کسب‌وکاری حذف شد (خواسته مالک
+   *  ۶-۱۱: فروشنده به‌ازای هر گیرنده پول می‌دهد؛ محدودیت معنا ندارد) */
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   @Matches(/^[0-9a-fA-F]{24}$/, { each: true, message: 'خریدار یافت نشد.' })
   buyerIds!: string[];

@@ -63,7 +63,7 @@ export class BuyersController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('getMyOfferQuota')
-  @ApiOperation({ summary: 'سهمیه پیشنهاد تامین امروز + قیمت ارسال گروهی (دارندگان بسته)' })
+  @ApiOperation({ summary: 'وضعیت گیت پیشنهاد تامین — بستهٔ فعال + موجودی کیف پول' })
   async getMyOfferQuota(@CurrentUser() user: AuthUser) {
     return ok(await this.buyers.myQuota(user));
   }
@@ -72,7 +72,7 @@ export class BuyersController {
   @ApiBearerAuth()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('sendSupplyOffer')
-  @ApiOperation({ summary: 'پیشنهاد تامین تکی — رایگان تا سقف روزانه سطح بسته' })
+  @ApiOperation({ summary: 'پیشنهاد تامین تکی — بدون سهمیه (خواسته مالک ۶-۱۱)' })
   async sendSupplyOffer(@CurrentUser() user: AuthUser, @Body() dto: SendSupplyOfferDto) {
     return ok(
       await this.buyers.sendSupplyOffer(user, dto),

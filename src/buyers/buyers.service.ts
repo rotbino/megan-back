@@ -5,7 +5,6 @@ import { AppError } from '../common/errors/app-error';
 import type { AuthUser } from '../common/guards';
 import { CategoriesService } from '../categories/categories.service';
 import { SiteSettingsService } from '../site-settings/site-settings.service';
-import { offerDailyLimit } from '../site-settings/billing';
 import { effectivePakageType } from '../packages/packages.service';
 import { PushService } from '../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../chat/io-holder';
@@ -44,15 +43,6 @@ const ACTIVE_WINDOW_MS = 90 * 86_400_000;
 const STALE_WINDOW_MS = 180 * 86_400_000;
 /** نشان «فعال در ۷ روز اخیر» */
 const RECENT_WINDOW_MS = 7 * 86_400_000;
-
-/** شروع شبانه‌روز به وقت تهران — سهمیه‌ها روزانه و مرز روز ایرانی است */
-function startOfTehranDay(): Date {
-  const now = new Date();
-  const tehran = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tehran' }));
-  const midnight = new Date(tehran.getFullYear(), tehran.getMonth(), tehran.getDate());
-  const offset = now.getTime() - tehran.getTime();
-  return new Date(midnight.getTime() - offset);
-}
 
 /** نقش نمایشی از حجم خرید — تن یا ≥۱ تن کیلو = عمده */
 function buyerRole(unit: string, volumeMin: number): 'عمده‌خریدار' | 'خرده‌خریدار' {
@@ -325,46 +315,33 @@ export class BuyersService {
     };
   }
 
-  // ─── سهمیه و پیشنهاد تامین ─────────────────────────────────────────────────
+  // ─── گیت و پیشنهاد تامین ───────────────────────────────────────────────────
 
-  /** POST /buyers/getMyOfferQuota — وضعیت سهمیه برای UI دکمه/مودال */
+  /** POST /buyers/getMyOfferQuota — وضعیت گیت پیشنهاد تامین برای UI (خواستهٔ
+   *  مالک ۶-۱۱: سهمیه/سقف روزانه حذف شد — ارسال پولی است و محدودیت معنا
+   *  ندارد؛ این اندپوینت فقط «بستهٔ فعال؟» و موجودی کیف پول را می‌دهد). */
   async myQuota(user: AuthUser) {
-    const billing = await this.settings.getBilling();
     const me = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: { activePakageType: true, packageExpiresAt: true, walletBalance: true },
     });
     const active = me ? effectivePakageType(me.activePakageType, me.packageExpiresAt) : 0;
-    const limit = offerDailyLimit(billing, active);
-    const [usedToday, groupUsedToday] = await Promise.all([
-      this.distinctBuyersToday(user.id),
-      this.groupRecipientsToday(user.id),
-    ]);
     return {
       isFeatured: active > 0,
       pakageType: active,
-      dailyLimit: active > 0 ? limit : 0,
-      usedToday,
-      left: active > 0 ? Math.max(0, limit - usedToday) : 0,
-      groupSend: {
-        perRecipientPrice: billing.groupSend.perRecipientPrice,
-        maxBatch: billing.groupSend.maxBatch,
-        maxPerDay: billing.groupSend.maxPerDay,
-        usedToday: groupUsedToday,
-        left: Math.max(0, billing.groupSend.maxPerDay - groupUsedToday),
-      },
       walletBalance: me?.walletBalance ?? 0,
     };
   }
 
-  /** POST /buyers/sendSupplyOffer — تکی، رایگان تا سقف روزانهٔ سطح بسته.
+  /** POST /buyers/sendSupplyOffer — تکی، بدون سهمیه (خواستهٔ مالک ۶-۱۱: ارسال
+   *  پولی است، سقف روزانه معنا ندارد؛ گیت بستهٔ فعال و گیت کالا می‌ماند).
    *  دکمهٔ ارسال سمت سایت فقط با دستهٔ آخر (برگ) فعال می‌شود؛ همین گیت اینجا
    *  هم تکرار می‌شود و دستهٔ هر پیشنهاد ذخیره می‌شود تا خریدار بتواند
    *  پیشنهادهای دریافتی را بر اساس دسته/نوع کالا فیلتر و مقایسه کند.
    *  گیت کالا (خواسته مالک ۴-۱۱): فروشنده باید همان گروه کالا را در
    *  محصولات خودش داشته باشد — به کالایی که نمی‌فروشد پیشنهاد نمی‌دهد. */
   async sendSupplyOffer(user: AuthUser, dto: SendSupplyOfferDto) {
-    const gates = await this.offerGates(user, 1);
+    await this.offerGates(user);
     const message = dto.message.trim();
     const terms = this.normalizeTerms(dto);
     await this.assertLeafCategory(terms.categoryId);
@@ -403,15 +380,6 @@ export class BuyersService {
       }
     }
 
-    // سهمیهٔ خریدارانِ متمایز امروز — تکرار به همان خریدار سهمیه نمی‌گیرد
-    const contacted = await this.contactedBuyerIdsToday(user.id);
-    if (!contacted.has(target.id) && gates.usedToday >= gates.limit) {
-      throw AppError.badRequest(
-        `سهمیهٔ پیشنهاد تامین امروز شما پر شده است (${gates.limit} خریدار در شبانه‌روز). برای ظرفیت بیشتر، بستهٔ بالاتر تهیه کنید یا از «ارسال گروهی» استفاده کنید.`,
-        'OFFER_LIMIT_REACHED',
-      );
-    }
-
     // تحویل پیام چت (متن + بلوک شرایط تامین) — بعد ذخیرهٔ ردیف با threadId
     const unit = await this.unitOfCategory(terms.categoryId);
     const threadId = await this.deliverOfferMessage(
@@ -423,33 +391,21 @@ export class BuyersService {
       data: { sellerId: user.id, buyerId: target.id, message, isGroup: false, fee: 0, threadId, ...terms },
     });
 
-    const left = Math.max(0, gates.limit - gates.usedToday - (contacted.has(target.id) ? 0 : 1));
-    return { offerId: offer.id, threadId, quotaLeft: left };
+    return { offerId: offer.id, threadId };
   }
 
-  /** POST /buyers/groupSendSupplyOffer — گروهی، پولی از کیف پول (اتمیک) */
+  /** POST /buyers/groupSendSupplyOffer — گروهی، پولی از کیف پول (اتمیک).
+   *  خواستهٔ مالک ۶-۱۱: سقف روزانه/سقف هر دسته حذف شد — فروشنده به‌ازای هر
+   *  گیرنده پول می‌دهد؛ هزینه همان لحظهٔ ارسال از کیف پولش کسر می‌شود. */
   async groupSendSupplyOffer(user: AuthUser, dto: GroupSendSupplyOfferDto) {
     const billing = await this.settings.getBilling();
     const ids = [...new Set(dto.buyerIds)];
-    const gates = await this.offerGates(user, ids.length);
+    await this.offerGates(user);
     const message = dto.message.trim();
     const terms = this.normalizeTerms(dto);
     await this.assertLeafCategory(terms.categoryId);
     // گیت کالا (خواسته مالک ۴-۱۱) — همان ارسال تکی
     await this.assertSellerHasProduct(user.id, terms.categoryId, terms.productType);
-
-    if (ids.length > billing.groupSend.maxBatch) {
-      throw AppError.badRequest(
-        `هر ارسال گروهی حداکثر ${billing.groupSend.maxBatch} گیرنده دارد.`,
-        'GROUP_BATCH_MAX',
-      );
-    }
-    if (gates.groupUsedToday + ids.length > billing.groupSend.maxPerDay) {
-      throw AppError.badRequest(
-        `سقف ارسال گروهی امروز پر شده است (${billing.groupSend.maxPerDay} گیرنده در شبانه‌روز).`,
-        'GROUP_DAY_MAX',
-      );
-    }
 
     // اهداف — فعال + دفتر خرید پر؛ اگر دسته ارسال شده، دفتر باید همان دسته را داشته باشد
     const targets = await this.prisma.user.findMany({
@@ -538,9 +494,7 @@ export class BuyersService {
     return {
       sent: valid.length,
       fee,
-      perRecipient: billing.groupSend.perRecipientPrice,
       balance,
-      groupLeft: Math.max(0, billing.groupSend.maxPerDay - gates.groupUsedToday - valid.length),
     };
   }
 
@@ -716,9 +670,9 @@ export class BuyersService {
 
   // ─── خصوصی ─────────────────────────────────────────────────────────────────
 
-  /** گیت‌های مشترک پیشنهاد تامین — بستهٔ فعال + سهمیه‌ها */
-  private async offerGates(user: AuthUser, batch: number) {
-    const billing = await this.settings.getBilling();
+  /** گیت مشترک پیشنهاد تامین — فقط حساب فعال + بستهٔ فعال (خواستهٔ مالک
+   *  ۶-۱۱: شمارش سهمیهٔ روزانه حذف شد؛ محدودیتی جز بستهٔ فعال وجود ندارد) */
+  private async offerGates(user: AuthUser) {
     const me = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: { activePakageType: true, packageExpiresAt: true, isActive: true },
@@ -731,18 +685,6 @@ export class BuyersService {
         'PACKAGE_REQUIRED',
       );
     }
-    const [usedToday, groupUsedToday] = await Promise.all([
-      this.distinctBuyersToday(user.id),
-      this.groupRecipientsToday(user.id),
-    ]);
-    return {
-      billing,
-      active,
-      limit: offerDailyLimit(billing, active),
-      usedToday,
-      groupUsedToday,
-      batch,
-    };
   }
 
   /** شرایط ساختاریافتهٔ تامین (خواستهٔ مالک ۱-۱۱): اعتبارسنجیِ وابستگی
@@ -872,27 +814,6 @@ export class BuyersService {
     }
     if (lines.length === 0) return '';
     return `\n\n— شرایط تامین —\n${lines.map((l) => `• ${l}`).join('\n')}`;
-  }
-
-  /** شمار خریداران متمایزِ امروز (ارسال تکی) */
-  private async distinctBuyersToday(sellerId: string): Promise<number> {
-    const ids = await this.contactedBuyerIdsToday(sellerId);
-    return ids.size;
-  }
-
-  private async contactedBuyerIdsToday(sellerId: string): Promise<Set<string>> {
-    const rows = await this.prisma.supplyOffer.findMany({
-      where: { sellerId, isGroup: false, createdAt: { gte: startOfTehranDay() } },
-      select: { buyerId: true },
-    });
-    return new Set(rows.map((r) => r.buyerId));
-  }
-
-  /** شمار گیرندگان گروهی امروز */
-  private async groupRecipientsToday(sellerId: string): Promise<number> {
-    return this.prisma.supplyOffer.count({
-      where: { sellerId, isGroup: true, createdAt: { gte: startOfTehranDay() } },
-    });
   }
 
   /** تحویل پیشنهاد به‌صورت پیام چت در گفتگوی مستقیم + push/WS */
