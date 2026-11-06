@@ -6,6 +6,7 @@ import {
   AddItemNoteDto,
   CreateFolderDto,
   DeleteFolderDto,
+  GetAllItemsDto,
   GetFolderItemsDto,
   GetFollowingMapDto,
   GetFoldersDto,
@@ -65,6 +66,12 @@ export class FollowController {
   @ApiOperation({ summary: 'موارد یک پرونده — با snapshot درخواست خرید/آگهی، وضعیت و یادداشت‌ها' })
   async getFolderItems(@CurrentUser() user: AuthUser, @Body() dto: GetFolderItemsDto) {
     return ok(await this.follow.getFolderItems(user, dto));
+  }
+
+  @Post('getAllItems')
+  @ApiOperation({ summary: 'همهٔ موارد کاربر از همهٔ پرونده‌ها — تک‌صفحهٔ CRM (جستجو/فیلتر سمت فرانت)' })
+  async getAllItems(@CurrentUser() user: AuthUser, @Body() _dto: GetAllItemsDto) {
+    return ok(await this.follow.getAllItems(user));
   }
 
   @Post('upsertItem')

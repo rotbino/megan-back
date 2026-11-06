@@ -253,19 +253,18 @@ export class FollowService {
       include: { notes: true, folder: { select: { name: true } } },
       orderBy: { updatedAt: 'desc' },
     });
-    if (items.length === 0) return [];
+    return this.decorateGrouped(items);
+  }
 
-    // decorate نام پرونده را می‌خواهد — گروه‌بندی بر اساس پرونده و تزئین هر گروه
-    const byFolder = new Map<string, typeof items>();
-    for (const item of items) {
-      const group = byFolder.get(item.folderId);
-      if (group) group.push(item);
-      else byFolder.set(item.folderId, [item]);
-    }
-    const groups = await Promise.all(
-      [...byFolder.values()].map((group) => this.decorate(group, group[0].folder.name)),
-    );
-    return groups.flat();
+  /** POST /follow/getAllItems — همهٔ موارد کاربر از همهٔ پرونده‌ها (تک‌صفحهٔ CRM:
+   *  جستجو + فیلتر پرونده/وضعیت/شهر سمت فرانت روی همین لیست انجام می‌شود). */
+  async getAllItems(user: AuthUser): Promise<FollowItemDto[]> {
+    const items = await this.prisma.followItem.findMany({
+      where: { userId: user.id },
+      include: { notes: true, folder: { select: { name: true } } },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return this.decorateGrouped(items);
   }
 
   // ─── داخلی ────────────────────────────────────────────────────────────────
@@ -346,6 +345,26 @@ export class FollowService {
     return out;
   }
 
+  /** گروه‌بندی ردیف‌ها بر اساس پرونده + تزئین با نام پرونده —
+   *  مشترک بین نقشهٔ دکمه‌ها (getFollowingMap) و تک‌صفحهٔ CRM (getAllItems) */
+  private async decorateGrouped(
+    items: Prisma.FollowItemGetPayload<{
+      include: { notes: true; folder: { select: { name: true } } };
+    }>[],
+  ): Promise<FollowItemDto[]> {
+    if (items.length === 0) return [];
+    const byFolder = new Map<string, typeof items>();
+    for (const item of items) {
+      const group = byFolder.get(item.folderId);
+      if (group) group.push(item);
+      else byFolder.set(item.folderId, [item]);
+    }
+    const groups = await Promise.all(
+      [...byFolder.values()].map((group) => this.decorate(group, group[0].folder.name)),
+    );
+    return groups.flat();
+  }
+
   /** snapshot درخواست خرید — هم‌شکل RawBuyRequest فرانت (الگوی BuyRequestsService.toDto) */
   private async serializeBuyRequests(
     rows: Array<{
@@ -367,7 +386,7 @@ export class FollowService {
     const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, firstName: true, lastName: true, isVerified: true },
+        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
       }),
       this.categories.getNameMap(), // کش‌شده
       this.locations.getNames([], cityIds),
@@ -384,6 +403,8 @@ export class FollowService {
         requirementAmount: r.requirementAmount,
         unit: r.unit,
         myuserId: r.userId,
+        /** شناسهٔ عمومی خریدار — چت مستقیم از CRM (ChatDialog مسیر پروفایل) */
+        userName: buyer?.userName ?? null,
         firstName: buyer?.firstName ?? '—',
         lastName: buyer?.lastName ?? '—',
         city: (r.cityId != null ? locNames.cities.get(r.cityId) : undefined) ?? '—',

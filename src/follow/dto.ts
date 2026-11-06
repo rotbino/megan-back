@@ -147,3 +147,6 @@ export class GetFollowingMapDto {
   @IsIn(FOLLOW_TARGET_TYPES as unknown as string[])
   targetType!: FollowTargetType;
 }
+
+/** POST /follow/getAllItems — همهٔ موارد کاربر از همهٔ پرونده‌ها (تک‌صفحهٔ CRM) */
+export class GetAllItemsDto {}
