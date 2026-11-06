@@ -55,6 +55,10 @@ LOCAL_PUBLIC_BASE_URL="http://localhost:4000"
    bun run dev
    ```
 
+   نکته: همه اسکریپت‌های جریان کاری (`db:push`، `seed:*`، `make-admin`،
+   `backup`) هم `APP_PROFILE` را از `.env` می‌فهمند و در حالت local به مونگوی
+   لوکال می‌روند، نه Atlas (منطق مشترک در `scripts/lib/profile.mjs`).
+
 3. **فرانت** — هیچ کلیدی لازم نیست عوض شود؛ `BACKEND_URL` پیش‌فرض
    `http://127.0.0.1:4000` است و `next.config.ts` از قبل میزبان
    `localhost`/`127.0.0.1` (هر پورتی) را برای `next/image` مجاز کرده تا

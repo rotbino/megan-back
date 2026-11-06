@@ -48,11 +48,17 @@ function resolveDatabaseUrl(): string {
   return required('DATABASE_URL', process.env.DATABASE_URL);
 }
 
+const DATABASE_URL = resolveDatabaseUrl();
+// مهم: Prisma از env("DATABASE_URL") مستقیمِِ process.env می‌خواند، نه از این
+// آبجکت — مقدار مؤثر را برمی‌گردانیم تا سوییچ پروفایل به کلاینت Prisma هم
+// برسد (در پروفایل cloud مقدار یکسان است و نوشتنش بی‌اثر است).
+process.env.DATABASE_URL = DATABASE_URL;
+
 export const env = Object.freeze({
   PORT: num('PORT', process.env.PORT, 4000),
   HOST: process.env.HOST || '0.0.0.0',
   NODE_ENV: process.env.NODE_ENV || 'development',
-  DATABASE_URL: resolveDatabaseUrl(),
+  DATABASE_URL,
   JWT_SECRET: required('JWT_SECRET', process.env.JWT_SECRET, 16),
   /** «7d» | «15m» | «3600» — عمر توکن دسترسی */
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',

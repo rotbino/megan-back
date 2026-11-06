@@ -10,10 +10,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
+import { applyProfile } from './lib/profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // override: در برخی محیط‌ها DATABASE_URL از قبل تعریف شده (مثل سندباکس) — .env باید برنده شود
 dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
+// APP_PROFILE=local → seed به مونگوی لوکال می‌رود، نه Atlas
+applyProfile();
 
 const DATA_DIR = join(__dirname, 'data');
 const DATABASE_URL = process.env.DATABASE_URL;

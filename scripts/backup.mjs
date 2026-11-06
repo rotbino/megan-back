@@ -21,8 +21,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import dotenv from 'dotenv';
+import { applyProfile } from './lib/profile.mjs';
 
 dotenv.config({ path: '.env', override: true });
+// APP_PROFILE=local → بکاپ از مونگوی لوکال گرفته می‌شود، نه Atlas
+applyProfile();
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {

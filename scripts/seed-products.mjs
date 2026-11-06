@@ -16,9 +16,12 @@ import { fileURLToPath } from 'node:url';
 import { MongoClient, ObjectId } from 'mongodb';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
+import { applyProfile } from './lib/profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
+// APP_PROFILE=local → seed به مونگوی لوکال می‌رود، نه Atlas
+applyProfile();
 
 const SKIP_PHOTOS = process.argv.includes('--skip-photos');
 const SOURCE = '/home/z/my-project/scripts/buskool-data/products.json';

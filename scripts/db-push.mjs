@@ -16,9 +16,12 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { applyProfile } from './lib/profile.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: join(root, '.env'), override: true });
+// APP_PROFILE=local → db push به مونگوی لوکال می‌رود، نه Atlas
+applyProfile();
 
 if (!process.env.DATABASE_URL) {
   console.error('✖ DATABASE_URL در .env تعریف نشده است');

@@ -13,9 +13,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
+import { applyProfile } from './lib/profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
+// APP_PROFILE=local → seed به مونگوی لوکال می‌رود، نه Atlas
+applyProfile();
 
 const SOURCE = '/home/z/my-project/scripts/buskool-data/buyads.json';
 const DATABASE_URL = process.env.DATABASE_URL;
