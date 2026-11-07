@@ -655,6 +655,15 @@ export class BuyersService {
         threadId: r.threadId,
         createdAt: r.createdAt,
         lastMessage: last ? { text: last.text, at: last.at, mine: last.mine } : null,
+        // مشخصات ساختاریافتهٔ پیشنهاد (خواسته مالک ۸-۱۱) — عین فرم ارسال:
+        // حداقل خرید (با واحد دسته)، چک (درصد + سرسید) و ارسال به محل
+        minOrderAmount: r.minOrderAmount ?? null,
+        unit: cat?.unit ?? '',
+        checkAccepted: r.checkAccepted,
+        checkPercent: r.checkAccepted ? r.checkPercent ?? null : null,
+        checkMaxDays: r.checkAccepted ? r.checkMaxDays ?? null : null,
+        deliveryToBuyer: r.deliveryToBuyer,
+        shippingCostBy: r.deliveryToBuyer ? r.shippingCostBy ?? null : null,
       };
     });
 
@@ -669,22 +678,27 @@ export class BuyersService {
     };
   }
 
-  /** POST /buyers/getMyUrgentChats — گفتگوهای من با خریدارانِ فوریِ یک دسته
-   *  (خواسته مالک ۷-۱۱): تب «پیشنهادهای من» صفحهٔ خریدارانِ هر کالا، کنار
-   *  پیشنهادهای تامین، تاریخچهٔ گفتگوهای خرید فوری همان دسته را هم نشان
-   *  می‌دهد — «به چه کسانی پیام دادم و جوابشان چه شد». برای هر خریداری که
-   *  درخواست فوری همین دسته را دارد و گفتگویی با من دارد: آخرین درخواستش
-   *  (زمینهٔ گفتگو) + آخرین پیام گفتگو (پاسخ خریدار یا پیام من). */
+  /** POST /buyers/getMyUrgentChats — گفتگوهای من با خریدارانِ فوری (خواسته مالک
+   *  ۷-۱۱ و ۸-۱۱): با categoryId، فقط همان دسته؛ بدون آن، همهٔ دسته‌ها — تب
+   *  «پیشنهادهای من» هم در صفحهٔ خریدارانِ هر کالا و هم در پنل خریداران، کنار
+   *  پیشنهادهای تامین، تاریخچهٔ گفتگوهای خرید فوری را هم نشان می‌دهد — «به چه
+   *  کسانی پیام دادم و جوابشان چه شد». برای هر خریداری که درخواست فوری
+   *  (تأییدشده) دارد و گفتگویی با من دارد: آخرین درخواستش (زمینهٔ گفتگو، با
+   *  نام دسته) + آخرین پیام گفتگو (پاسخ خریدار یا پیام من). */
   async myUrgentChats(userId: string, dto: GetMyUrgentChatsDto) {
-    // ۱) درخواست‌های فوری تأییدشدهٔ همین دستهٔ برگ — جدید‌ترینِ هر خریدار
+    const catFilter = dto.categoryId ?? null;
+
+    // ۱) درخواست‌های فوری تأییدشده — دستهٔ مشخص یا همهٔ دسته‌ها (خواسته مالک
+    //    ۸-۱۱: بدون categoryId، گفتگوهای خرید فوریِ همهٔ کالاها برای تب
+    //    «پیشنهادهای من» پنل خریداران برمی‌گردد) — جدید‌ترینِ هر خریدار
     const requests = await this.prisma.buyRequest.findMany({
       where: {
-        categoryId: dto.categoryId,
+        ...(catFilter != null ? { categoryId: catFilter } : {}),
         status: 'confirmed',
         user: { isActive: true },
       },
       orderBy: { createdAt: 'desc' },
-      take: 300,
+      take: catFilter != null ? 300 : 500,
       select: {
         id: true,
         userId: true,
@@ -692,6 +706,7 @@ export class BuyersService {
         requirementAmount: true,
         unit: true,
         createdAt: true,
+        categoryId: true,
       },
     });
     const latestByUser = new Map<string, (typeof requests)[number]>();
@@ -727,13 +742,22 @@ export class BuyersService {
       if (msg) lastMessages.set(t.id, { text: msg.text, at: msg.createdAt, mine: msg.senderId === userId });
     }
 
-    // ۴) نام و نشان خریداران + نام دسته برای جملهٔ «N کیلو …»
+    // ۴) نام و نشان خریداران + نام دستهٔ درخواست هر خریدار (حالت همهٔ دسته‌ها:
+    //    نام دسته از خود درخواست می‌آید، نه از پارامتر)
     const users = await this.prisma.user.findMany({
       where: { id: { in: buyerIds } },
       select: { id: true, firstName: true, lastName: true, userName: true, isVerified: true },
     });
     const userById = new Map(users.map((u) => [u.id, u]));
-    const cat = (await this.categoriesWithPath([dto.categoryId])).get(dto.categoryId);
+    const reqCatIds = [
+      ...new Set(
+        threads
+          .map((t) => latestByUser.get(t.sellerId === userId ? t.buyerId : t.sellerId))
+          .filter((r): r is (typeof requests)[number] => !!r)
+          .map((r) => r.categoryId),
+      ),
+    ];
+    const cats = await this.categoriesWithPath(reqCatIds);
 
     const items = threads.map((t) => {
       // هم‌صحبت من در این گفتگو — همان خریدارِ درخواست‌دار، از هر دو جهت
@@ -741,6 +765,7 @@ export class BuyersService {
       const u = userById.get(counterpartId);
       const req = latestByUser.get(counterpartId);
       const last = lastMessages.get(t.id) ?? null;
+      const reqCat = req ? cats.get(req.categoryId) : undefined;
       return {
         threadId: t.id,
         buyerId: counterpartId,
@@ -753,7 +778,8 @@ export class BuyersService {
               amount: req.requirementAmount,
               unit: req.unit,
               productType: req.name,
-              categoryName: cat?.name ?? null,
+              categoryId: req.categoryId,
+              categoryName: reqCat?.name ?? null,
               createdAt: req.createdAt,
             }
           : null,
