@@ -6,6 +6,7 @@ import {
   GetBuyerDirectoryDto,
   GetMyReceivedOffersDto,
   GetMySentOffersDto,
+  GetMyUrgentChatsDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
@@ -111,5 +112,16 @@ export class BuyersController {
   })
   async getMySentOffers(@CurrentUser() user: AuthUser, @Body() dto: GetMySentOffersDto) {
     return ok(await this.buyers.mySentOffers(user.id, dto));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getMyUrgentChats')
+  @ApiOperation({
+    summary:
+      'گفتگوهای من با خریداران فوریِ یک دسته — آخرین درخواست هر خریدار + آخرین پیام گفتگو؛ تب «پیشنهادهای من» صفحهٔ خریدارانِ هر کالا',
+  })
+  async getMyUrgentChats(@CurrentUser() user: AuthUser, @Body() dto: GetMyUrgentChatsDto) {
+    return ok(await this.buyers.myUrgentChats(user.id, dto));
   }
 }

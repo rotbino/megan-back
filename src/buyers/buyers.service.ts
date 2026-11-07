@@ -15,6 +15,7 @@ import {
   GetBuyerDirectoryDto,
   GetMyReceivedOffersDto,
   GetMySentOffersDto,
+  GetMyUrgentChatsDto,
   GroupSendSupplyOfferDto,
   SaveMyBookDto,
   SendSupplyOfferDto,
@@ -666,6 +667,102 @@ export class BuyersService {
         .map(([id, c]) => ({ id, name: c.name }))
         .sort((a, b) => a.name.localeCompare(b.name, 'fa')),
     };
+  }
+
+  /** POST /buyers/getMyUrgentChats — گفتگوهای من با خریدارانِ فوریِ یک دسته
+   *  (خواسته مالک ۷-۱۱): تب «پیشنهادهای من» صفحهٔ خریدارانِ هر کالا، کنار
+   *  پیشنهادهای تامین، تاریخچهٔ گفتگوهای خرید فوری همان دسته را هم نشان
+   *  می‌دهد — «به چه کسانی پیام دادم و جوابشان چه شد». برای هر خریداری که
+   *  درخواست فوری همین دسته را دارد و گفتگویی با من دارد: آخرین درخواستش
+   *  (زمینهٔ گفتگو) + آخرین پیام گفتگو (پاسخ خریدار یا پیام من). */
+  async myUrgentChats(userId: string, dto: GetMyUrgentChatsDto) {
+    // ۱) درخواست‌های فوری تأییدشدهٔ همین دستهٔ برگ — جدید‌ترینِ هر خریدار
+    const requests = await this.prisma.buyRequest.findMany({
+      where: {
+        categoryId: dto.categoryId,
+        status: 'confirmed',
+        user: { isActive: true },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        requirementAmount: true,
+        unit: true,
+        createdAt: true,
+      },
+    });
+    const latestByUser = new Map<string, (typeof requests)[number]>();
+    for (const r of requests) {
+      if (!latestByUser.has(r.userId)) latestByUser.set(r.userId, r);
+    }
+    const buyerIds = [...latestByUser.keys()];
+    if (buyerIds.length === 0) return { items: [] };
+
+    // ۲) گفتگوهای من با همان خریداران — جفت در هر دو جهت (عین startThread)
+    const threads = await this.prisma.chatThread.findMany({
+      where: {
+        OR: [
+          { sellerId: userId, buyerId: { in: buyerIds } },
+          { buyerId: userId, sellerId: { in: buyerIds } },
+        ],
+      },
+      orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
+      take: 50,
+    });
+    if (threads.length === 0) return { items: [] };
+
+    // ۳) آخرین پیام هر گفتگو — «بعدش چه شد» روی هر کارت
+    const lastMessages = new Map<string, { text: string; at: Date; mine: boolean }>();
+    for (const t of threads) {
+      const msg = await this.prisma.chatMessage
+        .findFirst({
+          where: { threadId: t.id },
+          orderBy: { createdAt: 'desc' },
+          select: { text: true, createdAt: true, senderId: true },
+        })
+        .catch(() => null);
+      if (msg) lastMessages.set(t.id, { text: msg.text, at: msg.createdAt, mine: msg.senderId === userId });
+    }
+
+    // ۴) نام و نشان خریداران + نام دسته برای جملهٔ «N کیلو …»
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: buyerIds } },
+      select: { id: true, firstName: true, lastName: true, userName: true, isVerified: true },
+    });
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const cat = (await this.categoriesWithPath([dto.categoryId])).get(dto.categoryId);
+
+    const items = threads.map((t) => {
+      // هم‌صحبت من در این گفتگو — همان خریدارِ درخواست‌دار، از هر دو جهت
+      const counterpartId = t.sellerId === userId ? t.buyerId : t.sellerId;
+      const u = userById.get(counterpartId);
+      const req = latestByUser.get(counterpartId);
+      const last = lastMessages.get(t.id) ?? null;
+      return {
+        threadId: t.id,
+        buyerId: counterpartId,
+        buyerName: `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || 'خریدار ایمچ',
+        buyerUserName: u?.userName ?? null,
+        buyerVerified: u?.isVerified ?? false,
+        request: req
+          ? {
+              id: req.id,
+              amount: req.requirementAmount,
+              unit: req.unit,
+              productType: req.name,
+              categoryName: cat?.name ?? null,
+              createdAt: req.createdAt,
+            }
+          : null,
+        lastMessage: last ? { text: last.text, at: last.at, mine: last.mine } : null,
+        updatedAt: t.lastMessageAt ?? t.updatedAt,
+      };
+    });
+
+    return { items };
   }
 
   // ─── خصوصی ─────────────────────────────────────────────────────────────────

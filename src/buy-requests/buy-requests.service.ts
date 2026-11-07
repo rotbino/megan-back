@@ -33,6 +33,8 @@ export interface BuyRequestDto {
   myuserId: string;
   firstName: string;
   lastName: string;
+  /** نام‌کاربری عمومی خریدار — چت مستقیم از کارت (خواسته مالک ۷-۱۱) */
+  userName: string | null;
   city: string;
   /** استان/شهر خام (خواستهٔ مالک ۷-۱۱) — برای فرمول تطابق فرانت
    *  (مقایسهٔ عددی دقیق‌تر از نام است؛ نام فقط نمایش) */
@@ -71,7 +73,10 @@ export interface SuggestedBuyerDto {
  * نام دسته/شهر و مشخصات خریدار در لحظه خواندن ساخته می‌شوند.
  */
 interface NameMaps {
-  users: Map<string, { firstName: string; lastName: string; isVerified: boolean }>;
+  users: Map<
+    string,
+    { firstName: string; lastName: string; isVerified: boolean; userName: string | null }
+  >;
   cats: Map<number, string>;
   provinces: Map<number, string>;
   cities: Map<number, string>;
@@ -752,7 +757,7 @@ export class BuyRequestsService {
     const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, firstName: true, lastName: true, isVerified: true },
+        select: { id: true, firstName: true, lastName: true, isVerified: true, userName: true },
       }),
       this.categories.getNameMap(), // کش‌شده
       this.locations.getNames(provinceIds, cityIds),
@@ -760,7 +765,15 @@ export class BuyRequestsService {
 
     return {
       users: new Map(
-        userRows.map((u) => [u.id, { firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified }]),
+        userRows.map((u) => [
+          u.id,
+          {
+            firstName: u.firstName,
+            lastName: u.lastName,
+            isVerified: u.isVerified,
+            userName: u.userName,
+          },
+        ]),
       ),
       cats: new Map(catIds.map((id) => [id, catMap.get(id)?.category_name ?? '—'])),
       provinces: locNames.provinces,
@@ -793,6 +806,10 @@ export class BuyRequestsService {
       myuserId: r.userId,
       firstName: buyer?.firstName ?? '—',
       lastName: buyer?.lastName ?? '—',
+      // نام‌کاربری عمومی خریدار — چت مستقیم از کارت (خواسته مالک ۷-۱۱):
+      // گفتگوی خرید فوری همین‌جا شروع می‌شود و نتیجه‌اش در تب «پیشنهادهای من»
+      // دیده می‌شود؛ پروفایل عمومی است (عین snapshot پیگیری‌ها)
+      userName: buyer?.userName ?? null,
       city: (r.cityId != null ? names.cities.get(r.cityId) : undefined) ?? '—',
       provinceId: r.provinceId ?? null,
       cityId: r.cityId ?? null,
