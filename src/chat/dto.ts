@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 
 /**
  * POST /chat/startThread — شروع/یافتن مکالمه.
@@ -19,14 +19,54 @@ export class StartThreadDto {
   userName?: string;
 }
 
-/** POST /chat/sendMessage */
+/** نوع پیام — متن یا پیوست (خواسته مالک ۷-۱۱) */
+export const MESSAGE_KINDS = ['text', 'image', 'video', 'file'] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+/** POST /chat/sendMessage — متن یا فایل (تصویر/ویدئو/فایل تا ۵MB) + متن دلخواه */
 export class SendMessageDto {
   @IsString()
   threadId!: string;
 
+  /** نوع پیام — پیش‌فرض متن */
+  @IsOptional()
+  @IsIn(MESSAGE_KINDS)
+  kind?: MessageKind;
+
+  /** متن پیام — برای پیام فایل‌دار می‌تواند خالی (کپشن) باشد */
+  @IsOptional()
   @IsString()
-  @Length(1, 2000)
-  text!: string;
+  @Length(0, 2000)
+  text?: string;
+
+  /** URL عمومی فایل — از /chat/uploadFile آمده */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  fileUrl?: string;
+
+  /** کلید ذخیره‌سازی — مالکیت فایل با الگوی chat/<userId>/… چک می‌شود */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  fileKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(190)
+  fileName?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(5 * 1024 * 1024)
+  fileSize?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  fileMime?: string;
 }
 
 /** POST /chat/getThreadMessages — پیام‌های مکالمه (جدید → قدیمی با before) */
@@ -58,10 +98,21 @@ export class MarkThreadReadDto {
   threadId!: string;
 }
 
-/** فیلد اختیاری توضیحی برای سازگاری آینده */
-export class ChatNoteDto {
-  @IsOptional()
+/**
+ * POST /chat/editMessage — ویرایش متن/کپشن پیام خودی.
+ * فقط تا وقتی طرف مقابل ندیده است (readAt=null) — بعد از آن پیام «مدرک» است.
+ */
+export class EditMessageDto {
   @IsString()
-  @MaxLength(200)
-  note?: string;
+  messageId!: string;
+
+  @IsString()
+  @Length(0, 2000)
+  text!: string;
+}
+
+/** POST /chat/deleteMessage — حذف پیام خودی دیده‌نشده (+ پاک‌کردن فایل از سرور) */
+export class DeleteMessageDto {
+  @IsString()
+  messageId!: string;
 }

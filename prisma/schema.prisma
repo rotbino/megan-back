@@ -844,6 +844,21 @@ model ChatMessage {
   text      String
   readAt    DateTime?  @map("read_at")
 
+  /// نوع پیام — متن | تصویر | ویدئو | فایل (خواسته مالک ۷-۱۱)
+  kind      String     @default("text") @map("kind")
+  /// URL عمومی فایل پیوست — null یعنی پیام متنی
+  fileUrl   String?    @map("file_url")
+  /// کلید ذخیره‌سازی (برای حذف بایت‌ها هنگام حذف پیام — ضد فایل سرگردان)
+  fileKey   String?    @map("file_key")
+  /// نام اصلی فایل (نمایش/دانلود)
+  fileName  String?    @map("file_name")
+  /// حجم بایت
+  fileSize  Int?       @map("file_size")
+  /// MIME اعلام‌شده هنگام آپلود
+  fileMime  String?    @map("file_mime")
+  /// مهر ویرایش — null یعنی ویرایش نشده؛ ویرایش فقط تا قبل از مشاهده طرف مقابل
+  editedAt  DateTime?  @map("edited_at")
+
   createdAt DateTime   @default(now()) @map("created_at")
 
   @@index([threadId, createdAt(sort: Desc)])

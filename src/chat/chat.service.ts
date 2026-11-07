@@ -4,9 +4,19 @@ import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
 import { JwtService } from '@nestjs/jwt';
 import type { AuthUser } from '../common/guards';
+import type { FastifyRequest } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from './io-holder';
 import { PushService } from '../push/push.service';
-import { GetThreadMessagesDto, SendMessageDto, StartThreadDto } from './dto';
+import { UploadsService } from '../uploads/uploads.service';
+import { buildStorage, type StorageDriver } from '../uploads/storage';
+import {
+  EditMessageDto,
+  GetThreadMessagesDto,
+  MESSAGE_KINDS,
+  SendMessageDto,
+  StartThreadDto,
+} from './dto';
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
 
@@ -18,6 +28,19 @@ export interface MessageDto {
   text: string;
   readAt: Date | null;
   createdAt: Date;
+  /** نوع پیام — text | image | video | file */
+  kind: 'text' | 'image' | 'video' | 'file';
+  /** فایل پیوست — null برای پیام متنی */
+  file: {
+    url: string;
+    /** کلید ذخیره‌سازی — فقط داخلی؛ برای حذف سروری هنگام حذف پیام */
+    key: string;
+    name: string;
+    size: number;
+    mime: string;
+  } | null;
+  /** مهر ویرایش — null یعنی دست‌نخورده */
+  editedAt: Date | null;
 }
 
 export interface ThreadDto {
@@ -68,11 +91,147 @@ export interface AdminInboxDto {
  */
 @Injectable()
 export class ChatService {
+  private readonly storage: StorageDriver;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly push: PushService,
-  ) {}
+    private readonly uploads: UploadsService,
+  ) {
+    this.storage = buildStorage();
+  }
+
+  // ─── آپلود فایل چت (خواسته مالک ۷-۱۱) ─────────────────────────────────────
+
+  /** سقف حجم فایل چت — ۵ مگابایت */
+  static readonly MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+  /** پسوندهای مجاز به تفکیک نوع — لیست سفید؛ هر چیز دیگر (exe، sh، js،
+   *  php، svg، zip و…) رد می‌شود تا فایل قابل‌سوءاستفاده وارد چت نشود. */
+  private static readonly FILE_RULES = {
+    image: {
+      exts: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+      mimes: ['image/jpeg', 'image/pjpeg', 'image/png', 'image/gif', 'image/webp'],
+    },
+    video: {
+      exts: ['mp4', 'webm', 'mov'],
+      mimes: ['video/mp4', 'video/webm', 'video/quicktime'],
+    },
+    file: {
+      // اسناد رایج اداری — svg و html و js و بقیهٔ کد/اجرایی‌ها عمداً نیستند
+      exts: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'],
+      mimes: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/plain',
+        'text/csv',
+      ],
+    },
+  } as const;
+
+  /** بایتهای جادویی رایج — تقلب MIME/پسوند را می‌گیرد (فایل exe با نام jpg رد) */
+  private static sniffKind(buf: Buffer): string | null {
+    if (buf.length < 4) return null;
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+    if (buf.subarray(0, 4).toString('ascii') === 'GIF8') return 'gif';
+    if (buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP')
+      return 'webp';
+    if (buf.subarray(0, 4).toString('ascii') === '%PDF') return 'pdf';
+    if (buf.subarray(4, 8).toString('ascii') === 'ftyp') return 'mp4-like'; // mp4 / mov
+    if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'webm-ebml';
+    if (buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 3 || buf[2] === 5 || buf[2] === 7))
+      return 'zip'; // docx / xlsx / pptx
+    if (buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0)
+      return 'ole'; // doc / xls / ppt قدیمی
+    return null;
+  }
+
+  /**
+   * POST /chat/uploadFile — آپلود پیوست چت (multipart، سقف ۵MB، لیست سفید).
+   * خروجی مستقیم به sendMessage می‌رود؛ بایت‌ها زیر chat/<userId>/ ذخیره
+   * می‌شوند تا مالکیت فایل در sendMessage قابل اثبات باشد.
+   */
+  async uploadFile(user: AuthUser, req: FastifyRequest): Promise<{
+    url: string;
+    key: string;
+    name: string;
+    size: number;
+    mime: string;
+    kind: 'image' | 'video' | 'file';
+  }> {
+    const { file } = await this.uploads.readMultipart(req);
+    if (!file) throw AppError.badRequest('فایل ارسال نشده است.', 'FILE_REQUIRED');
+
+    const { buffer, mimetype, filename } = file;
+
+    if (buffer.length === 0) throw AppError.badRequest('فایل خالی است.', 'FILE_EMPTY');
+    if (buffer.length > ChatService.MAX_FILE_BYTES) {
+      throw AppError.badRequest('حجم فایل نباید بیشتر از ۵ مگابایت باشد.', 'FILE_TOO_LARGE');
+    }
+
+    // نام امن — فقط basename؛ کاراکترهای کنترلی و مسیر حذف
+    const safeName =
+      filename
+        .split(/[/\\]/)
+        .pop()!
+        .replace(/[\u0000-\u001f<>:"|?*]/g, '')
+        .slice(0, 180) || 'فایل';
+
+    const ext = (safeName.includes('.') ? safeName.split('.').pop()! : '').toLowerCase();
+    if (!ext || !/^[a-z0-9]{1,9}$/.test(ext)) {
+      throw AppError.badRequest('پسوند فایل معتبر نیست.', 'BAD_EXTENSION');
+    }
+
+    // پیدا کردن نوع مجاز مطابق پسوند + MIME (هر دو باید بخوانند)
+    let kind: 'image' | 'video' | 'file' | null = null;
+    for (const [k, rule] of Object.entries(ChatService.FILE_RULES) as Array<
+      ['image' | 'video' | 'file', (typeof ChatService.FILE_RULES)['image']]
+    >) {
+      if ((rule.exts as readonly string[]).includes(ext) && (rule.mimes as readonly string[]).includes(mimetype)) {
+        kind = k;
+        break;
+      }
+    }
+    if (!kind) {
+      throw AppError.badRequest(
+        'این نوع فایل مجاز نیست. تصویر (jpg، png، gif، webp)، ویدئو (mp4، webm، mov) یا سند (pdf، آفیس، متن) ارسال کنید.',
+        'FILE_TYPE_FORBIDDEN',
+      );
+    }
+
+    // بایتهای جادویی — تقلب پسوند/MIME را می‌گیرد (چت قابل سوءاستفاده نیست)
+    const sniff = ChatService.sniffKind(buffer);
+    if (sniff) {
+      const ok =
+        (kind === 'image' && ['jpeg', 'png', 'gif', 'webp'].includes(sniff)) ||
+        (kind === 'video' && ['mp4-like', 'webm-ebml'].includes(sniff)) ||
+        (kind === 'file' &&
+          ((ext === 'pdf' && sniff === 'pdf') ||
+            (['docx', 'xlsx', 'pptx'].includes(ext) && sniff === 'zip') ||
+            (['doc', 'xls', 'ppt'].includes(ext) && sniff === 'ole')));
+      if (!ok) {
+        throw AppError.badRequest('محتوای فایل با نوع اعلام‌شده نمی‌خواند.', 'FILE_CONTENT_MISMATCH');
+      }
+    } else if (kind !== 'file') {
+      // تصویر/ویدئوی ناشناخته = مشکوک — رد
+      throw AppError.badRequest('محتوای فایل معتبر نیست.', 'FILE_CONTENT_MISMATCH');
+    }
+
+    const stamp = Date.now().toString(36);
+    const rand = randomBytes(5).toString('hex');
+    const key = `chat/${user.id}/${stamp}-${rand}.${ext}`;
+    const url = await this.storage.put(key, buffer, mimetype);
+
+    return { url, key, name: safeName, size: buffer.length, mime: mimetype, kind };
+  }
+
 
   // ─── شفا و یکتاسازی مکالمات (خواسته مالک ۴-۱۱) ────────────────────────────
 
@@ -291,9 +450,24 @@ export class ChatService {
 
   // ─── پیام‌ها ────────────────────────────────────────────────────────────────
 
-  /** POST /chat/sendMessage — ثبت + push WS به گیرنده */
+  /** POST /chat/sendMessage — ثبت متن یا فایل + push WS به گیرنده */
   async sendMessage(user: AuthUser, dto: SendMessageDto): Promise<MessageDto> {
     if (!OID_RE.test(dto.threadId)) throw AppError.notFound('مکالمه یافت نشد.');
+    const kind: MessageDto['kind'] = dto.kind ?? 'text';
+    const hasFile = kind !== 'text';
+
+    const text = (dto.text ?? '').trim();
+    if (!hasFile && !text) {
+      throw AppError.badRequest('متن پیام خالی است.', 'EMPTY_MESSAGE');
+    }
+    if (hasFile && (!dto.fileUrl || !dto.fileKey)) {
+      throw AppError.badRequest('اطلاعات فایل ناقص است.', 'FILE_META_REQUIRED');
+    }
+    // مالکیت فایل — کلید باید زیر پوشهٔ خود کاربر باشد (از uploadFile خودش)
+    if (hasFile && !dto.fileKey!.startsWith(`chat/${user.id}/`)) {
+      throw AppError.forbidden('این فایل به شما تعلق ندارد.');
+    }
+
     let thread = await this.prisma.chatThread.findUnique({
       where: { id: dto.threadId },
       include: {
@@ -325,7 +499,22 @@ export class ChatService {
     const message = await this.prisma.chatMessage.create({
       // ⚠️ readAt باید صریح null نوشته شود — فیلتر «خوانده‌نشده» پرایسما
       // فقط null صریح را می‌گیرد نه فیلد غایب ($ne $$REMOVE در کوئری تولیدی)
-      data: { threadId: thread.id, senderId: user.id, text: dto.text.trim(), readAt: null },
+      data: {
+        threadId: thread.id,
+        senderId: user.id,
+        text,
+        readAt: null,
+        ...(hasFile
+          ? {
+              kind,
+              fileUrl: dto.fileUrl,
+              fileKey: dto.fileKey,
+              fileName: dto.fileName?.slice(0, 190) ?? 'فایل',
+              fileSize: dto.fileSize ?? 0,
+              fileMime: dto.fileMime?.slice(0, 120) ?? 'application/octet-stream',
+            }
+          : {}),
+      },
     });
     await this.prisma.chatThread.update({
       where: { id: thread.id },
@@ -348,7 +537,15 @@ export class ChatService {
     // گیرنده آنلاین نیست (سوکت وصل نیست) → اعلان سیستمی وب‌پوش (B10)
     if (!isUserOnline(receiverId)) {
       const preview =
-        dto.text.trim().length > 90 ? `${dto.text.trim().slice(0, 90)}…` : dto.text.trim();
+        kind === 'text'
+          ? text.length > 90
+            ? `${text.slice(0, 90)}…`
+            : text
+          : kind === 'image'
+            ? '📷 تصویر'
+            : kind === 'video'
+              ? '🎬 ویدئو'
+              : '📎 فایل';
       void this.push
         .sendToUser(receiverId, {
           title: `پیام جدید از ${senderName || 'کاربر ایمچ'}`,
@@ -360,6 +557,84 @@ export class ChatService {
 
     return this.toMessageDto(message);
   }
+
+  // ─── ویرایش/حذف پیام — فقط تا قبل از مشاهدهٔ طرف مقابل (خواسته مالک ۷-۱۱) ──
+
+  /** یافتن پیام خودیِ دیده‌نشده + ترد آن — یا خطای مناسب */
+  private async ownUnseenMessage(userId: string, messageId: string) {
+    if (!OID_RE.test(messageId)) throw AppError.notFound('پیام یافت نشد.');
+    const message = await this.prisma.chatMessage.findUnique({
+      where: { id: messageId },
+      include: {
+        thread: { select: { id: true, sellerId: true, buyerId: true } },
+      },
+    });
+    if (!message) throw AppError.notFound('پیام یافت نشد.');
+    if (message.senderId !== userId) {
+      throw AppError.forbidden('این پیام شما نیست.');
+    }
+    // چت مدرک است — بعد از مشاهدهٔ طرف مقابل پیام قفل می‌شود
+    if (message.readAt !== null) {
+      throw AppError.forbidden(
+        'طرف مقابل این پیام را دیده است؛ پیام‌های دیده‌شده قابل ویرایش یا حذف نیستند.',
+        'MESSAGE_SEEN',
+      );
+    }
+    return message;
+  }
+
+  /** POST /chat/editMessage — ویرایش متن/کپشن پیام خودیِ دیده‌نشده */
+  async editMessage(user: AuthUser, dto: EditMessageDto): Promise<MessageDto> {
+    const old = await this.ownUnseenMessage(user.id, dto.messageId);
+    const updated = await this.prisma.chatMessage.update({
+      where: { id: old.id },
+      data: { text: dto.text.trim(), editedAt: new Date() },
+    });
+
+    // خبر زنده به طرف مقابل
+    const counterpart = old.thread.sellerId === user.id ? old.thread.buyerId : old.thread.sellerId;
+    emitToUser(counterpart, CHAT_EVENTS.EDIT, {
+      threadId: old.threadId,
+      message: this.toMessageDto(updated),
+    });
+
+    return this.toMessageDto(updated);
+  }
+
+  /** POST /chat/deleteMessage — حذف پیام خودیِ دیده‌نشده + پاک‌کردن فایل از سرور */
+  async deleteMessage(user: AuthUser, messageId: string): Promise<{ ok: true }> {
+    const message = await this.ownUnseenMessage(user.id, messageId);
+
+    // فایل سرگردان نماند — بایت‌ها بهترین‌حال پاک می‌شوند
+    if (message.fileKey) {
+      await this.storage.delete(message.fileKey).catch(() => undefined);
+    }
+
+    await this.prisma.chatMessage.delete({ where: { id: message.id } });
+
+    // اگر تازه‌ترین پیام ترد بود، lastMessageAt از آخرین پیام باقی‌مانده بازمحاسبه
+    const last = await this.prisma.chatMessage.findFirst({
+      where: { threadId: message.threadId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    await this.prisma.chatThread
+      .update({
+        where: { id: message.threadId },
+        data: { lastMessageAt: last?.createdAt ?? null },
+      })
+      .catch(() => undefined);
+
+    const counterpart =
+      message.thread.sellerId === user.id ? message.thread.buyerId : message.thread.sellerId;
+    emitToUser(counterpart, CHAT_EVENTS.DELETE, {
+      threadId: message.threadId,
+      messageId: message.id,
+    });
+
+    return { ok: true };
+  }
+
 
   /** POST /chat/getThreadMessages — پیام‌ها (صعودی) + خواندن طرف مقابل */
   async getThreadMessages(user: AuthUser, dto: GetThreadMessagesDto): Promise<MessageDto[]> {
@@ -378,7 +653,8 @@ export class ChatService {
       }
     }
 
-    const take = Math.min(50, Math.max(1, dto.take ?? 50));
+    // Ù¾ÛØ¬ÛÙÚ¯ Ø®ÙØ§Ø³ØªÙ ÙØ§ÙÚ© Û·-Û±Û±: Û²Û° Ù¾ÛØ§Ù Ø¢Ø®Ø±Ø Ø¹ÙØ± Ø¨Ø§ before ØµÙØ­Ø§Øª ÙØ¨ÙÛØªØ±
+    const take = Math.min(50, Math.max(1, dto.take ?? 20));
 
     // اول خواندن (پیام‌های طرف مقابل) بعد واکشی — پاسخ readAt تازه برمی‌گرداند
     await this.markRead(thread, user);
@@ -581,7 +857,17 @@ export class ChatService {
     text: string;
     readAt: Date | null;
     createdAt: Date;
+    kind?: string | null;
+    fileUrl?: string | null;
+    fileKey?: string | null;
+    fileName?: string | null;
+    fileSize?: number | null;
+    fileMime?: string | null;
+    editedAt?: Date | null;
   }): MessageDto {
+    const kind = (MESSAGE_KINDS as readonly string[]).includes(m.kind ?? 'text')
+      ? ((m.kind ?? 'text') as MessageDto['kind'])
+      : 'text';
     return {
       id: m.id,
       threadId: m.threadId,
@@ -589,6 +875,18 @@ export class ChatService {
       text: m.text,
       readAt: m.readAt,
       createdAt: m.createdAt,
+      kind,
+      file:
+        m.fileUrl && m.fileKey
+          ? {
+              url: m.fileUrl,
+              key: m.fileKey,
+              name: m.fileName ?? 'فایل',
+              size: m.fileSize ?? 0,
+              mime: m.fileMime ?? 'application/octet-stream',
+            }
+          : null,
+      editedAt: m.editedAt ?? null,
     };
   }
 
@@ -618,7 +916,7 @@ export class ChatService {
       product: { productName: string } | null;
       seller: { id: string; firstName: string; lastName: string; userName: string; avatarUrl: string | null };
       buyer: { id: string; firstName: string; lastName: string; userName: string; avatarUrl: string | null };
-      messages: Array<{ text: string; createdAt: Date; senderId: string }>;
+      messages: Array<{ text: string; createdAt: Date; senderId: string; kind?: string | null }>;
     },
     myId: string,
     unreadCount: number,
@@ -626,6 +924,10 @@ export class ChatService {
     const myRole: 'buyer' | 'seller' = t.sellerId === myId ? 'seller' : 'buyer';
     const counterpart = myRole === 'buyer' ? t.seller : t.buyer;
     const last = t.messages[0];
+    // پیش‌نمایش لیست مکالمات — پیام فایل‌دار بدون کپشن برچسب نوع می‌گیرد
+    const previewOf = (m: { text: string; kind?: string | null }) =>
+      m.text.trim() ||
+      (m.kind === 'image' ? '📷 تصویر' : m.kind === 'video' ? '🎬 ویدئو' : m.kind === 'file' ? '📎 فایل' : '');
     return {
       id: t.id,
       productId: t.productId,
@@ -639,7 +941,9 @@ export class ChatService {
         userName: counterpart.userName,
         avatarUrl: counterpart.avatarUrl ?? null,
       },
-      lastMessage: last ? { text: last.text, at: last.createdAt, senderId: last.senderId } : null,
+      lastMessage: last
+        ? { text: previewOf(last) || 'بدون پیام', at: last.createdAt, senderId: last.senderId }
+        : null,
       unreadCount,
       updatedAt: t.updatedAt,
     };

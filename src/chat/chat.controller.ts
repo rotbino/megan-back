@@ -1,8 +1,11 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 import { ChatService } from './chat.service';
 import {
+  DeleteMessageDto,
+  EditMessageDto,
   GetThreadDto,
   GetThreadMessagesDto,
   MarkThreadReadDto,
@@ -30,9 +33,30 @@ export class ChatController {
   }
 
   @Post('sendMessage')
-  @ApiOperation({ summary: 'ارسال پیام + push لحظه‌ای WS به گیرنده' })
+  @ApiOperation({ summary: 'ارسال پیام (متن یا فایل) + push لحظه‌ای WS به گیرنده' })
   async sendMessage(@CurrentUser() user: AuthUser, @Body() dto: SendMessageDto) {
     return ok(await this.chat.sendMessage(user, dto));
+  }
+
+  @Post('uploadFile')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'آپلود پیوست چت — تصویر/ویدئو/سند تا ۵MB (لیست سفید + بایت جادویی)',
+  })
+  async uploadFile(@Req() req: FastifyRequest, @CurrentUser() user: AuthUser) {
+    return ok(await this.chat.uploadFile(user, req));
+  }
+
+  @Post('editMessage')
+  @ApiOperation({ summary: 'ویرایش پیام خودی — فقط قبل از مشاهدهٔ طرف مقابل' })
+  async editMessage(@CurrentUser() user: AuthUser, @Body() dto: EditMessageDto) {
+    return ok(await this.chat.editMessage(user, dto));
+  }
+
+  @Post('deleteMessage')
+  @ApiOperation({ summary: 'حذف پیام خودی دیده‌نشده + پاک‌کردن فایل از سرور' })
+  async deleteMessage(@CurrentUser() user: AuthUser, @Body() dto: DeleteMessageDto) {
+    return ok(await this.chat.deleteMessage(user, dto.messageId));
   }
 
   @Post('getThreadMessages')
