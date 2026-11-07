@@ -86,8 +86,10 @@ export interface AdminInboxDto {
  * ─── چت و پیام‌ها (B8) ───────────────────────────────────────────────────────
  * مکالمه خریدار ↔ فروشنده روی یک آگهی (عین باسکول). REST برای همه عملیات +
  * WebSocket (socket.io) فقط برای push لحظه‌ای پیام تازه به گیرنده.
- * خواندن: باز کردن مکالمه پیام‌های طرف مقابل را readAt می‌زند و به فرستنده
- * رویداد chat:read می‌فرستد (تیک آبی).
+ * خواندن: فقط فراخوانی صریح markThreadRead پیام‌های طرف مقابل را readAt می‌زند و به
+ * فرستنده رویداد chat:read می‌فرستد (تیک آبی). واکشی پیام‌ها (getThreadMessages)
+ * هرگز خوانده نمی‌کند (خواسته مالک ۸-۱۱): بج خوانده‌نشده تا نمایش واقعی پیام‌ها
+ * به کاربر باقی می‌ماند — کلاینت بعد از رندر چت open، markThreadRead را صدا می‌زند.
  */
 @Injectable()
 export class ChatService {
@@ -636,7 +638,7 @@ export class ChatService {
   }
 
 
-  /** POST /chat/getThreadMessages — پیام‌ها (صعودی) + خواندن طرف مقابل */
+  /** POST /chat/getThreadMessages — پیام‌ها (صعودی)؛ واکشی ≠ خواندن (خواسته مالک ۸-۱۱) */
   async getThreadMessages(user: AuthUser, dto: GetThreadMessagesDto): Promise<MessageDto[]> {
     let thread = await this.prisma.chatThread.findUnique({ where: { id: dto.threadId } });
     if (!thread) throw AppError.notFound('مکالمه یافت نشد.');
@@ -653,11 +655,13 @@ export class ChatService {
       }
     }
 
-    // Ù¾ÛØ¬ÛÙÚ¯ Ø®ÙØ§Ø³ØªÙ ÙØ§ÙÚ© Û·-Û±Û±: Û²Û° Ù¾ÛØ§Ù Ø¢Ø®Ø±Ø Ø¹ÙØ± Ø¨Ø§ before ØµÙØ­Ø§Øª ÙØ¨ÙÛØªØ±
+    // پیجینگ درخواسته مالک ۷-۱۱: ۲۰ پیام آخر؛ با before صفحات قبلی‌تر
     const take = Math.min(50, Math.max(1, dto.take ?? 20));
 
-    // اول خواندن (پیام‌های طرف مقابل) بعد واکشی — پاسخ readAt تازه برمی‌گرداند
-    await this.markRead(thread, user);
+    // واکشی بدون خواندن (خواسته مالک ۸-۱۱) — بج خوانده‌نشده تا زمانی که کلاینت
+    // چت را واقعاً نمایش داد و markThreadRead را صریحاً صدا زد باقی می‌ماند؛
+    // پیام‌های خوانده‌نشده با readAt=null برمی‌گردند تا اسکرول روی اولین
+    // پیام خوانده‌نشده متوقف شود.
 
     const messages = await this.prisma.chatMessage.findMany({
       where: {
