@@ -3,6 +3,7 @@ import { PrismaService } from '../../common/prisma/prisma.module';
 import { AdminActionsService } from '../admin-actions/admin-actions.service';
 import { AdminChatsService } from '../admin-chats/admin-chats.service';
 import { AdminCallsService } from '../admin-calls/admin-calls.service';
+import { AdminSupportService } from '../admin-support/admin-support.service';
 
 /** شماره روز در کلید YYYY-MM-DD (UTC) — برای نمودار روند */
 function dayKey(d: Date): string {
@@ -26,6 +27,7 @@ export class AdminDashboardService {
     private readonly actions: AdminActionsService,
     private readonly chatsStats: AdminChatsService,
     private readonly callsStats: AdminCallsService,
+    private readonly supportStats: AdminSupportService,
   ) {}
 
   /**
@@ -172,6 +174,8 @@ export class AdminDashboardService {
       // چند تماس امروز ثبت شده؟ (calls.today)
       chats: await this.chatsStats.getChatStats(),
       calls: await this.callsStats.getCallStats(),
+      // پشتیبانی (دور ۲۱) — گفتگوهای نیازمند پاسخ برای صف انتظار داشبورد
+      support: await this.supportStats.getStats(),
     };
   }
 
@@ -182,7 +186,7 @@ export class AdminDashboardService {
    * ادمین فیش خودش را مثل بقیه کاربران پیدا و تأیید کند.
    */
   async getQueues() {
-    const [pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages, pendingReviews] =
+    const [pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages, pendingReviews, supportStats] =
       await Promise.all([
         this.prisma.product.count({ where: { status: 'pending' } }),
         this.prisma.buyRequest.count({ where: { status: 'pending' } }),
@@ -191,8 +195,19 @@ export class AdminDashboardService {
         this.prisma.packageOrder.count({ where: { status: 'pending' } }),
         // نظرات در انتظار تحقیق و تأیید (قانون انتشار مالک ۲-۱۱)
         this.prisma.sellerReview.count({ where: { status: 'pending' } }),
+        // پشتیبانی — بج منو: پیام‌های جدید کاربران که پشتیبان ندیده
+        this.supportStats.getStats(),
       ]);
-    return { pendingProducts, pendingBuyRequests, pendingVerifications, pendingCharges, pendingPackages, pendingReviews };
+    return {
+      pendingProducts,
+      pendingBuyRequests,
+      pendingVerifications,
+      pendingCharges,
+      pendingPackages,
+      pendingReviews,
+      // پیام‌های پشتیبانی خوانده‌نشده — بج قرمز منوی «چت‌های پشتیبانی»
+      unreadSupportMessages: supportStats.unreadMessages,
+    };
   }
 
   /**

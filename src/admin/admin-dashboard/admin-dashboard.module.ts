@@ -5,10 +5,11 @@ import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { AdminActionsModule } from '../admin-actions/admin-actions.module';
 import { AdminChatsModule } from '../admin-chats/admin-chats.module';
 import { AdminCallsModule } from '../admin-calls/admin-calls.module';
+import { AdminSupportModule } from '../admin-support/admin-support.module';
 
 /** داشبورد عملیاتی مدیریت — شمارنده‌ها + روند ۳۰ روزه + درآمد + فعالیت اخیر (A5) */
 @Module({
-  imports: [AdminAuthModule, AdminActionsModule, AdminChatsModule, AdminCallsModule], // گارد ادمین + سرویس لاگ عملیات + آمار چت/تماس
+  imports: [AdminAuthModule, AdminActionsModule, AdminChatsModule, AdminCallsModule, AdminSupportModule], // گارد ادمین + سرویس لاگ عملیات + آمار چت/تماس/پشتیبانی
   controllers: [AdminDashboardController],
   providers: [AdminDashboardService],
 })

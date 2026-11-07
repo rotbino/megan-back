@@ -18,6 +18,7 @@ import { ChatModule } from './chat/chat.module';
 import { PresenceModule } from './presence/presence.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { SurveyModule } from './survey/survey.module';
+import { SupportModule } from './support/support.module';
 import { CallsModule } from './calls/calls.module';
 import { WalletModule } from './wallet/wallet.module';
 import { PackagesModule } from './packages/packages.module';
@@ -52,6 +53,7 @@ import { AdminModule } from './admin/admin.module';
     PresenceModule,
     ReviewsModule,
     SurveyModule,
+    SupportModule, // گفتگوی پشتیبانی کاربر ↔ پشتیبان (پاسخ‌دهی: admin/support)
     CallsModule,
     WalletModule,
     PackagesModule, // بسته‌های اشتراک — خرید کارت‌به‌کارت + گیت‌ها

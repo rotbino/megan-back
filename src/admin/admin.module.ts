@@ -16,6 +16,7 @@ import { AdminChatsModule } from './admin-chats/admin-chats.module';
 import { AdminMessagesModule } from './admin-messages/admin-messages.module';
 import { AdminCallsModule } from './admin-calls/admin-calls.module';
 import { AdminSurveysModule } from './admin-surveys/admin-surveys.module';
+import { AdminSupportModule } from './admin-support/admin-support.module';
 import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
 import { AdminActivitiesModule } from './admin-activities/admin-activities.module';
 import { AdminSettingsModule } from './admin-settings/admin-settings.module';
@@ -45,6 +46,7 @@ import { AdminSettingsModule } from './admin-settings/admin-settings.module';
     AdminCallsModule,
     AdminMessagesModule,
     AdminSurveysModule,
+    AdminSupportModule, // چت‌های پشتیبانی — پاسخ‌دهی + آمار بج/داشبورد
     AdminReviewsModule,
     AdminActivitiesModule, // فعالیت کاربران — جستجو/دسته/صفحه
     AdminSettingsModule, // تنظیمات کیف شارژ و مصرف شارژ (پویا — ۳۱-۱۰)

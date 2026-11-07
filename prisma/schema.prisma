@@ -114,6 +114,8 @@ model User {
   packageOrders  PackageOrder[] @relation("PackageOrderOwner")
   /// پاسخ نظرسنجی عملکرد ایمچ (یکی؛ userId یکتا)
   surveyResponse  SurveyResponse? @relation("SurveyOwner")
+  /// گفتگوی پشتیبانی این کاربر (دوطرفه: کاربر ↔ پشتیبان — /panel/support)
+  supportMessages SupportMessage[] @relation("SupportMessageOwner")
   /// آگهی‌هایی که این کاربر نشان کرده (علاقه‌مندی‌ها — ۳۰-۱۰)
   favoriteProducts FavoriteProduct[] @relation("FavoriteProductOwner")
   /// فروشنده‌هایی که این کاربر ذخیره کرده
@@ -892,6 +894,33 @@ model AdminMessage {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([readAt, createdAt(sort: Desc)])
+}
+
+/// گفتگوی پشتیبانی کاربر ↔ پشتیبان — دوطرفه (خواستهٔ مالک ۸-۱۱ دور ۲۱).
+/// هر کاربر یک گفتگوی پیوسته دارد (بدون بازکردن تیکت — MVP ساده).
+/// user-side: کارت «گفتگو با پشتیبان» صفحه /panel/support.
+/// admin-side: پنل مدیریت → پشتیبانی → چت‌های پشتیبانی (پاسخ‌دهی).
+/// readAt = لحظهٔ خواندن توسط «گیرنده»: پیام کاربر را ادمین با باز کردن
+/// گفتگو می‌خواند؛ پیام پشتیبان را کاربر با باز کردن صفحه پشتیبانی.
+model SupportMessage {
+  id     String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId String  @map("user_id") @db.ObjectId
+  user   User    @relation("SupportMessageOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// user | admin — فرستندهٔ پیام
+  senderRole   String
+  /// نام کاربری ادمین پاسخ‌دهنده — فقط وقتی senderRole = admin
+  adminUsername String? @map("admin_username")
+
+  /// متن پیام — ساده در v1 (بدون فایل)
+  text String
+
+  /// null = گیرنده هنوز نخوانده
+  readAt   DateTime? @map("read_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([senderRole, readAt, createdAt(sort: Desc)])
 }
 
 /// گزارش تماس کاربر-به-کاربر (A6).
