@@ -34,6 +34,11 @@ export interface BuyRequestDto {
   firstName: string;
   lastName: string;
   city: string;
+  /** استان/شهر خام (خواستهٔ مالک ۷-۱۱) — برای فرمول تطابق فرانت
+   *  (مقایسهٔ عددی دقیق‌تر از نام است؛ نام فقط نمایش) */
+  provinceId: number | null;
+  cityId: number | null;
+  province: string | null;
   isVerified: boolean;
   createdAt: Date;
 }
@@ -57,7 +62,7 @@ export interface MyBuyRequestDto {
 export interface SuggestedBuyerDto {
   buyRequest: BuyRequestDto;
   matchScore: number;
-  tier: 'exact' | 'same-product' | 'near-category';
+  tier: 'exact' | 'same-product' | 'near-category' | 'other';
   relatedProduct: string;
 }
 
@@ -68,6 +73,7 @@ export interface SuggestedBuyerDto {
 interface NameMaps {
   users: Map<string, { firstName: string; lastName: string; isVerified: boolean }>;
   cats: Map<number, string>;
+  provinces: Map<number, string>;
   cities: Map<number, string>;
 }
 
@@ -257,6 +263,18 @@ export class BuyRequestsService {
 
     // خودِ خریدار بدون بسته هم شماره خودش را می‌بیند
     if (row.userId !== user.id) {
+      // گیت ثبت کالا (خواستهٔ مالک ۷-۱۱): دیدن درخواست‌های خرید آزاد است، اما
+      // تماس فقط برای فروشنده‌ای که کالای خود را برای فروش ثبت کرده — این
+      // گیت قبل از گیت بسته می‌آید تا اولین قدم فروشنده ثبت کالا باشد
+      const productCount = await this.prisma.product.count({
+        where: { userId: user.id, status: { in: ['pending', 'confirmed'] } },
+      });
+      if (productCount === 0) {
+        throw AppError.forbidden(
+          'برای ارسال تامین یا تماس یا پیام، باید کالاهای خود را برای فروش ثبت کنید تا خریداران مرتبط به شما نمایش داده شوند.',
+          'PRODUCT_REGISTRATION_REQUIRED',
+        );
+      }
       const me = await this.prisma.user.findUnique({
         where: { id: user.id },
         select: { activePakageType: true, packageExpiresAt: true },
@@ -419,31 +437,45 @@ export class BuyRequestsService {
   // ─── خریداران پیشنهادی (تطبیق آگهی‌های من) ─────────────────────────────────
 
   /**
-   * POST /buy-requests/getSuggestedBuyers — سه سطح تطبیق عین پنل باسکول:
-   *   exact: نوع کالای درخواست = نام/نوع همان آگهی من
-   *   same-product: همان دسته برگ
-   *   near-category: دسته خواهر (هم‌پدر)
-   * امتیاز حجم: نزدیکی requirementAmount به موجودی آگهی (منطق «حجم خرید نزدیک
-   * حجم فروش» باسکول) — امتیاز تطابق از ۱۰۰.
+   * POST /buy-requests/getSuggestedBuyers — فرمول تطابق انعطاف‌پذیر (بازنویسی
+   * خواستهٔ مالک ۷-۱۱). امتیاز ۰ تا ۱۰۰ از چهار محور:
+   *   • کالا ۴۰ — هم‌برگ ۴۰ / هم‌پدر ۲۲ / هم‌ریشه ۱۰ (ستون فقرات؛ بدون آن
+   *     محورهای دیگر اثر ندارند)
+   *   • نوع کالا ۲۰ — تطبیق متن نوعِ درخواست با نام/نوع آگهی؛ درخواستِ بدون
+   *     نوع یعنی «هر نوعی از همین کالا» و امتیاز کامل می‌گیرد
+   *   • حجم خرید ۲۵ — بازهٔ معاملهٔ ممکن: حداقل سفارش فروشنده ≤ نیاز خریدار ≤
+   *     موجودی؛ داخل بازه هرچه سهم بیشتری از عرضه بردارد به‌صرفه‌تر (تا ۲۵)،
+   *     خارج بازه با نسبت فاصله کمرنگ می‌شود — «حجم خرید نزدیک». واحد وزنی
+   *     نرمال می‌شود (تن ← کیلوگرم)؛ واحد غیرقابل‌مقایسه = امتیاز بی‌طرف ۱۰
+   *   • مکان ۱۵ — هم‌شهر ۱۵ / هم‌استان ۱۰ (حمل ارزان‌تر = به‌صرفه‌تر)
+   * هرگز خالی نمی‌شود (خواستهٔ مالک ۷-۱۱): اگر تطابق خاصی پیدا نشد، همان
+   * خریداران موجود با امتیاز ۰ مرتب بر اساس تازگی نمایش داده می‌شوند.
+   * گیت بسته حذف شد — دیدن خریداران آزاد است؛ گیت فقط سر ارسال تامین/تماس
+   * است (assertSellerHasProduct و getBuyRequestContact).
    */
   async getSuggestedBuyers(userId: string): Promise<SuggestedBuyerDto[]> {
-    // گیت بسته — خریداران پیشنهادی هم مثل صفحه خریداران ویژه بسته فعال است
-    const me = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { activePakageType: true, packageExpiresAt: true },
-    });
-    if (effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) === 0) {
-      return [];
-    }
-
     const products = await this.prisma.product.findMany({
-      where: { userId, status: 'confirmed' },
-      select: { id: true, productName: true, subCategoryId: true, stock: true },
+      where: { userId, status: { in: ['pending', 'confirmed'] } },
+      select: {
+        productName: true,
+        subCategoryId: true,
+        stock: true,
+        minSaleAmount: true,
+        provinceId: true,
+        cityId: true,
+        unit: true,
+      },
       take: 50,
     });
-    if (products.length === 0) return [];
 
-    // دسته‌های پدر برای تشخیص «دسته خواهر» + نام‌ها برای join
+    const requests = await this.prisma.buyRequest.findMany({
+      where: { status: 'confirmed', user: { isActive: true } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const names = await this.hydrateNames(requests);
+
+    // والد/ریشهٔ هر دسته از درخت کش‌شده — برای سطوح هم‌پدر/هم‌ریشه
     const all = await this.categories.getAllCategories();
     const flat = new Map<number, { parent: number | null }>();
     const walk = (nodes: Array<{ id: number; parent_id: number | null; children: unknown[] }>): void => {
@@ -454,56 +486,149 @@ export class BuyRequestsService {
     };
     walk(all as never);
 
-    const requests = await this.prisma.buyRequest.findMany({
-      where: { status: 'confirmed' },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    const names = await this.hydrateNames(requests);
-
     const out: SuggestedBuyerDto[] = [];
-    const seen = new Set<number>(); // یک درخواست فقط یک‌بار (بهترین تطبیق)
-    for (const product of products) {
-      const pName = product.productName.replace(/\s+/g, ' ').trim();
-      for (const req of requests) {
-        if (seen.has(req.id)) continue;
-        if (req.userId === userId) continue; // درخواست خودم
-
-        let tier: SuggestedBuyerDto['tier'] | null = null;
-        if (req.categoryId === product.subCategoryId && req.name && pName.includes(req.name.trim())) {
-          tier = 'exact';
-        } else if (req.categoryId === product.subCategoryId) {
-          tier = 'same-product';
-        } else {
-          const reqParent = flat.get(req.categoryId)?.parent ?? null;
-          const prodParent = flat.get(product.subCategoryId)?.parent ?? null;
-          if (reqParent != null && reqParent === prodParent) tier = 'near-category';
+    for (const req of requests) {
+      if (req.userId === userId) continue; // درخواست خودم
+      let best = 0;
+      let tier: SuggestedBuyerDto['tier'] = 'other';
+      let related = '';
+      for (const product of products) {
+        const m = this.scoreRequestMatch(product, req, flat);
+        if (m.score > best) {
+          best = m.score;
+          tier = m.tier;
+          related = product.productName;
         }
-        if (!tier) continue;
-
-        // امتیاز حجم — نزدیکی نیازمندی خریدار به موجودی من
-        const stock = Math.max(1, product.stock);
-        const ratio = req.requirementAmount / stock;
-        const volumeScore =
-          ratio >= 0.5 && ratio <= 2 ? 30 : Math.max(0, 30 - Math.abs(Math.log(ratio)) * 15);
-        const base = tier === 'exact' ? 70 : tier === 'same-product' ? 50 : 25;
-
-        out.push({
-          buyRequest: this.toDto(req, names),
-          matchScore: Math.min(99, Math.round(base + volumeScore)),
-          tier,
-          relatedProduct: product.productName,
-        });
-        if (tier === 'exact') seen.add(req.id); // تطابق کامل → از ادامه خارج
       }
+      // ثبت همهٔ درخواست‌ها — حتی بی‌تطابق (هرگز خالی نمی‌شود)؛ درخواست‌های
+      // تازه بالای بقیهٔ بی‌تطابق‌ها می‌مانند چون از ابتدا بر اساس createdAt
+      // desc آمده‌اند و مرتب‌سازی پایین پایدار است
+      out.push({
+        buyRequest: this.toDto(req, names),
+        matchScore: Math.round(best),
+        tier,
+        relatedProduct: related,
+      });
     }
-    // بهترین امتیاز برای درخواست‌های تکراری (same/near چند آگهی)
-    const best = new Map<number, SuggestedBuyerDto>();
-    for (const item of out) {
-      const cur = best.get(item.buyRequest.id);
-      if (!cur || item.matchScore > cur.matchScore) best.set(item.buyRequest.id, item);
+
+    return out.sort((a, b) => b.matchScore - a.matchScore).slice(0, 24);
+  }
+
+  /** امتیاز یک جفت (آگهی خودم، درخواست خرید) — فرمول چهارمحوری مالک ۷-۱۱ */
+  private scoreRequestMatch(
+    product: {
+      productName: string;
+      subCategoryId: number;
+      stock: number;
+      minSaleAmount: number;
+      provinceId: number;
+      cityId: number;
+      unit: string;
+    },
+    req: {
+      name: string | null;
+      categoryId: number;
+      requirementAmount: number;
+      unit: string;
+      provinceId: number | null;
+      cityId: number | null;
+    },
+    flat: Map<number, { parent: number | null }>,
+  ): { score: number; tier: SuggestedBuyerDto['tier'] } {
+    // ── کالا — ستون فقرات ──
+    const ancestorsOf = (id: number): Set<number> => {
+      const set = new Set<number>();
+      let cur = flat.get(id)?.parent ?? null;
+      while (cur != null && !set.has(cur)) {
+        set.add(cur);
+        cur = flat.get(cur)?.parent ?? null;
+      }
+      return set;
+    };
+    const sameLeaf = req.categoryId === product.subCategoryId;
+    const reqParent = flat.get(req.categoryId)?.parent ?? null;
+    const prodParent = flat.get(product.subCategoryId)?.parent ?? null;
+    const sameParent = reqParent != null && reqParent === prodParent;
+    const sameRoot =
+      !sameParent &&
+      [...ancestorsOf(req.categoryId)].some((a) => ancestorsOf(product.subCategoryId).has(a));
+    const catScore = sameLeaf ? 40 : sameParent ? 22 : sameRoot ? 10 : 0;
+    if (catScore === 0) return { score: 0, tier: 'other' };
+
+    // ── نوع کالا — تطبیق متن دوطرفه ──
+    const norm = (s: string) => s.replace(/[\u200c\s]+/g, ' ').trim();
+    const t = req.name ? norm(req.name) : '';
+    const p = norm(product.productName);
+    const typeScore = !t || p.includes(t) || t.includes(p) ? 20 : 0;
+
+    // ── حجم خرید — بازهٔ معاملهٔ ممکن + نزدیکی ──
+    const volScore = this.volumeScore(
+      req.requirementAmount,
+      req.unit,
+      product.stock,
+      Math.max(1, product.minSaleAmount),
+      product.unit,
+    );
+
+    // ── مکان — هم‌شهر/هم‌استان ──
+    const locScore =
+      req.cityId != null && req.cityId === product.cityId
+        ? 15
+        : req.provinceId != null && req.provinceId === product.provinceId
+          ? 10
+          : 0;
+
+    const tier: SuggestedBuyerDto['tier'] = sameLeaf
+      ? t && typeScore > 0
+        ? 'exact'
+        : 'same-product'
+      : 'near-category';
+
+    return { score: catScore + typeScore + volScore + locScore, tier };
+  }
+
+  /**
+   * امتیاز حجم (۰ تا ۲۵) — «حجم خرید نزدیک» (خواستهٔ مالک ۷-۱۱):
+   *  • نیاز خریدار داخل بازهٔ [حداقل سفارش فروشنده، موجودی فروشنده] → معامله
+   *    ممکن؛ هرچه سهم بیشتری از عرضه بردارد به‌صرفه‌تر: ۱۸ + ۷×سهم
+   *  • زیر حداقل سفارش → با نسبت نزدیکی به حداقل کمرنگ می‌شود
+   *  • بالای موجودی → با نسبت پوشش موجودی کمرنگ می‌شود
+   *  • واحد غیرقابل‌مقایسه (مثل عدد در برابر کیلوگرم) → بی‌طرف ۱۰
+   */
+  private volumeScore(
+    buyerAmount: number,
+    buyerUnit: string,
+    sellerStock: number,
+    sellerMin: number,
+    sellerUnit: string,
+  ): number {
+    const FAMILY: Record<string, string> = {
+      'تن': 'weight',
+      'کیلوگرم': 'weight',
+      'گرم': 'weight',
+      'عدد': 'count',
+      'بسته': 'pack',
+      'متر': 'length',
+      'لیتر': 'volume',
+    };
+    const parse = (v: number, unit: string): { v: number; f: string } | null => {
+      const f = FAMILY[unit];
+      if (!f) return null;
+      if (unit === 'تن') return { v: v * 1000, f };
+      if (unit === 'گرم') return { v: v / 1000, f };
+      return { v, f };
+    };
+    const buyer = parse(buyerAmount, buyerUnit);
+    const stock = parse(Math.max(1, sellerStock), sellerUnit);
+    const min = parse(sellerMin, sellerUnit);
+    if (!buyer || !stock || !min || buyer.f !== stock.f) return 10; // غیرقابل‌مقایسه — بی‌طرف
+
+    if (buyer.v >= min.v && buyer.v <= Math.max(min.v, stock.v)) {
+      // داخل بازهٔ معامله — خرید بزرگ‌تر از عرضهٔ فروشنده به‌صرفه‌تر
+      return 18 + 7 * Math.min(1, buyer.v / stock.v);
     }
-    return [...best.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, 24);
+    if (buyer.v < min.v) return 25 * (buyer.v / min.v) * 0.8; // زیر حداقل سفارش فروشنده
+    return 25 * (stock.v / buyer.v) * 0.8; // بیش از موجودی فروشنده
   }
 
   /**
@@ -608,11 +733,19 @@ export class BuyRequestsService {
   /**
    * join نام‌ها برای نمایش — کاربران/شهرها کوئری دسته‌ای + درخت کش‌شده دسته‌ها.
    */
-  private async hydrateNames(rows: Array<{ userId: string; categoryId: number; cityId: number | null }>): Promise<NameMaps> {
+  private async hydrateNames(
+    rows: Array<{
+      userId: string;
+      categoryId: number;
+      provinceId: number | null;
+      cityId: number | null;
+    }>,
+  ): Promise<NameMaps> {
     if (rows.length === 0) {
-      return { users: new Map(), cats: new Map(), cities: new Map() };
+      return { users: new Map(), cats: new Map(), provinces: new Map(), cities: new Map() };
     }
     const userIds = [...new Set(rows.map((r) => r.userId))];
+    const provinceIds = [...new Set(rows.map((r) => r.provinceId).filter((p): p is number => p != null))];
     const cityIds = [...new Set(rows.map((r) => r.cityId).filter((c): c is number => c != null))];
     const catIds = [...new Set(rows.map((r) => r.categoryId))];
 
@@ -622,7 +755,7 @@ export class BuyRequestsService {
         select: { id: true, firstName: true, lastName: true, isVerified: true },
       }),
       this.categories.getNameMap(), // کش‌شده
-      this.locations.getNames([], cityIds),
+      this.locations.getNames(provinceIds, cityIds),
     ]);
 
     return {
@@ -630,6 +763,7 @@ export class BuyRequestsService {
         userRows.map((u) => [u.id, { firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified }]),
       ),
       cats: new Map(catIds.map((id) => [id, catMap.get(id)?.category_name ?? '—'])),
+      provinces: locNames.provinces,
       cities: locNames.cities,
     };
   }
@@ -642,6 +776,7 @@ export class BuyRequestsService {
       requirementAmount: number;
       unit: string;
       userId: string;
+      provinceId: number | null;
       cityId: number | null;
       createdAt: Date;
     },
@@ -659,6 +794,9 @@ export class BuyRequestsService {
       firstName: buyer?.firstName ?? '—',
       lastName: buyer?.lastName ?? '—',
       city: (r.cityId != null ? names.cities.get(r.cityId) : undefined) ?? '—',
+      provinceId: r.provinceId ?? null,
+      cityId: r.cityId ?? null,
+      province: (r.provinceId != null ? names.provinces.get(r.provinceId) : undefined) ?? null,
       isVerified: buyer?.isVerified ?? false,
       createdAt: r.createdAt,
     };
