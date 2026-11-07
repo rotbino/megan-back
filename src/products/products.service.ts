@@ -16,6 +16,7 @@ import type {
   GetProductListDto,
   GetRelatedProductsDto,
   GetSellerProductsDto,
+  UpdateMyPriceDto,
   UpdateMyProductDto,
 } from './dto';
 import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages.service';
@@ -26,6 +27,14 @@ export const PRODUCT_CAPACITY = FREE_PRODUCT_CAPACITY;
 export const UNLIMITED_CAPACITY = -1;
 const PER_PAGE_DEFAULT = 16;
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
+const DAY_MS = 86_400_000;
+
+/** انقضای قیمت (خواسته مالک ۷-۱۱ دور هفدهم): مهر آخرین تغییر قیمت + پنجرهٔ
+ *  اعتبار گذشته باشد ⇒ منقضی. آگهی‌های قدیمیِ بدون مهر منقضی فرض نمی‌شوند. */
+const isPriceExpired = (p: { priceUpdatedAt: Date | null; priceValidityDays?: number | null }): boolean =>
+  p.priceUpdatedAt
+    ? Date.now() > new Date(p.priceUpdatedAt).getTime() + (p.priceValidityDays ?? 3) * DAY_MS
+    : false;
 
 /** اسنپ‌شات فیلدهای حساسِ تاریخچه — قیمت/حداقل فروش/موجودی (خواسته مالک ۳-۱۱) */
 function historySnapshot(p: {
@@ -74,6 +83,10 @@ export interface ProductDto {
   hasVideo: boolean;
   isOld: boolean;
   viewCount: number;
+  /** اعتبار قیمت به روز + مهر آخرین تغییر قیمت + پرچم انقضا (۷-۱۱ دور هفدهم) */
+  priceValidityDays: number;
+  priceUpdatedAt: string;
+  priceExpired: boolean;
   createdAt: string;
   updatedAt: string;
   photos: string[];
@@ -401,6 +414,9 @@ export class ProductsService {
         stock: dto.stock,
         minSaleAmount: dto.minSaleAmount,
         minSalePrice: dto.minSalePrice,
+        // اعتبار قیمت (۷-۱۱ دور هفدهم) — پیش‌فرض ۳ روز؛ مهر تغییر قیمت = الان
+        priceValidityDays: dto.priceValidityDays ?? 3,
+        priceUpdatedAt: new Date(),
         features: (dto.features ?? []) as unknown as object,
         status: 'pending',
         userId: user.id,
@@ -803,6 +819,10 @@ export class ProductsService {
         stock: dto.stock,
         minSaleAmount: dto.minSaleAmount,
         minSalePrice: dto.minSalePrice,
+        // اعتبار قیمت (۷-۱۱ دور هفدهم): همیشه از فرم می‌آید (پیش‌فرض ۳)؛
+        // مهر تغییر قیمت فقط وقتی تازه می‌شود که خود قیمت واقعاً عوض شده باشد
+        priceValidityDays: dto.priceValidityDays ?? p.priceValidityDays ?? 3,
+        ...(dto.minSalePrice !== p.minSalePrice ? { priceUpdatedAt: new Date() } : {}),
         features: (dto.features ?? []) as unknown as object,
         // بدون تایید مجدد (خواسته مالک ۴-۱۱): وضعیت فعلی می‌ماند؛ فقط ردشده
         // برای بازبینیِ اصلاحات به «در انتظار» می‌رود
@@ -863,10 +883,13 @@ export class ProductsService {
     for (const it of dto.items) {
       const p = byId.get(it.id);
       if (!p) continue; // آگهی خودم نیست/حذف شده — بی‌صدا رد
+      // اعتبار ارسال‌شده = همان مقدار قبلی وقتی کلاینت تغییرش نداده است
+      const nextValidity = it.priceValidityDays ?? p.priceValidityDays ?? 3;
       if (
         p.minSalePrice === it.minSalePrice &&
         p.stock === it.stock &&
-        p.minSaleAmount === it.minSaleAmount
+        p.minSaleAmount === it.minSaleAmount &&
+        p.priceValidityDays === nextValidity
       )
         continue; // بدون تغییر
 
@@ -876,6 +899,10 @@ export class ProductsService {
           minSalePrice: it.minSalePrice,
           stock: it.stock,
           minSaleAmount: it.minSaleAmount,
+          // مهر تغییر قیمت فقط با تغییر واقعی قیمت (۷-۱۱ دور هفدهم) — تغییر
+          // اعتبار به‌تنهایی پنجره را باز/بسته می‌کند ولی مهر را جابه‌جا نمی‌کند
+          priceValidityDays: nextValidity,
+          ...(it.minSalePrice !== p.minSalePrice ? { priceUpdatedAt: new Date() } : {}),
         },
       });
       updated++;
@@ -896,6 +923,52 @@ export class ProductsService {
       for (const id of touchedIds) this.cache.invalidateTag(`product:${id}`);
     }
     return { updated, total: dto.items.length };
+  }
+
+  /** POST /products/updateMyPrice — آپدیت سریع قیمت از کارت آگهی (خواسته مالک
+   *  ۷-۱۱ دور هفدهم): مدال کوچک «قیمت + اعتبار»؛ مهر زمانی قیمت تازه می‌شود،
+   *  انقضا صفر می‌شود و سوابق در ProductEditHistory می‌ماند؛ بدون تایید مجدد. */
+  async updateMyPrice(user: AuthUser, dto: UpdateMyPriceDto) {
+    if (dto.minSalePrice !== 0 && dto.minSalePrice < 1000) {
+      throw AppError.badRequest(
+        'قیمت باید حداقل ۱۰۰۰ تومان باشد (یا ۰ = تماس بگیرید).',
+        'BAD_PRICE',
+      );
+    }
+    const p = await this.prisma.product.findUnique({ where: { id: dto.id } });
+    if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
+    if (p.status === 'deleted') throw AppError.notFound('این آگهی حذف شده است.');
+
+    const priceChanged = p.minSalePrice !== dto.minSalePrice;
+    const next = await this.prisma.product.update({
+      where: { id: dto.id },
+      data: {
+        minSalePrice: dto.minSalePrice,
+        priceValidityDays: dto.priceValidityDays ?? p.priceValidityDays ?? 3,
+        ...(priceChanged ? { priceUpdatedAt: new Date() } : {}),
+      },
+    });
+
+    if (priceChanged) {
+      await this.prisma.productEditHistory.create({
+        data: {
+          productId: dto.id,
+          userId: user.id,
+          action: 'edit',
+          before: historySnapshot(p),
+          after: historySnapshot(next),
+        },
+      });
+    }
+
+    this.cache.invalidateTag('products');
+    this.cache.invalidateTag(`product:${dto.id}`);
+    return {
+      id: next.id,
+      minSalePrice: next.minSalePrice,
+      priceValidityDays: next.priceValidityDays,
+      priceExpired: isPriceExpired(next),
+    };
   }
 
   /** POST /products/reviewProduct (ادمین) — تأیید/رد آگهی در انتظار تایید */
@@ -1269,6 +1342,8 @@ export class ProductsService {
       hasVideo: boolean;
       isOld: boolean;
       viewCount: number;
+      priceValidityDays?: number | null;
+      priceUpdatedAt?: Date | null;
       status: string;
       features: unknown;
       rejectionReasons: unknown;
@@ -1320,6 +1395,14 @@ export class ProductsService {
       hasVideo: p.hasVideo,
       isOld: p.isOld,
       viewCount: p.viewCount,
+      // اعتبار قیمت + مهر آخرین تغییر + پرچم انقضا (۷-۱۱ دور هفدهم) — پنل
+      // «محصولات من» بج «قیمت منقضی شده» را با همین می‌سازد
+      priceValidityDays: p.priceValidityDays ?? 3,
+      priceUpdatedAt: fmtDate(p.priceUpdatedAt ?? null),
+      priceExpired: isPriceExpired({
+        priceUpdatedAt: p.priceUpdatedAt ?? null,
+        priceValidityDays: p.priceValidityDays,
+      }),
       createdAt: fmtDate(p.createdAt),
       updatedAt: fmtDate(p.updatedAt),
       photos,

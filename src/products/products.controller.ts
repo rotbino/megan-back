@@ -16,6 +16,7 @@ import {
   GetSellerProductsDto,
   ReportViewDto,
   SearchSuggestionsDto,
+  UpdateMyPriceDto,
   UpdateMyProductDto,
 } from './dto';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
@@ -120,6 +121,17 @@ export class ProductsController {
       await this.products.bulkUpdatePrices(user, dto),
       'قیمت‌ها و موجودی‌های تغییر یافته ذخیره شد.',
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('updateMyPrice')
+  @ApiOperation({
+    summary:
+      'آپدیت سریع قیمت آگهی خودم از کارت (مدال کوچک) — مهر قیمت تازه و انقضا صفر می‌شود؛ بدون تایید مجدد',
+  })
+  async updateMyPrice(@CurrentUser() user: AuthUser, @Body() dto: UpdateMyPriceDto) {
+    return ok(await this.products.updateMyPrice(user, dto), 'قیمت آگهی به‌روزرسانی شد.');
   }
 
   @UseGuards(JwtAuthGuard)

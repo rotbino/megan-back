@@ -123,6 +123,15 @@ export class CreateProductDto {
   @Min(0)
   minSalePrice!: number;
 
+  /** اعتبار قیمت به روز — ۱ تا ۵ روز + گزینهٔ «سایر» با عدد بزرگ‌تر؛
+   *  پیش‌فرض ۳ روز (خواسته مالک ۷-۱۱ دور هفدهم) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  priceValidityDays?: number;
+
   @IsString()
   @Length(30, 4000)
   description!: string;
@@ -260,6 +269,36 @@ export class BulkPriceItemDto {
   @IsInt()
   @Min(0)
   minSaleAmount!: number;
+
+  /** اعتبار قیمت — اختیاری؛ فقط وقتی فرستاده شود تغییر می‌کند (۷-۱۱ دور هفدهم:
+   *  «اگر در ویرایش کالا وارد نکرده بود از همین‌جا بگیرد») */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  priceValidityDays?: number;
+}
+
+/** POST /products/updateMyPrice — آپدیت سریع قیمت از کارت آگهی (۷-۱۱ دور هفدهم):
+ *  مدال کوچک قیمت + اعتبار؛ مهر زمانی قیمت تازه می‌شود و انقضا صفر می‌شود */
+export class UpdateMyPriceDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  /** کف قیمت هر واحد (تومان) — 0 یعنی «تماس بگیرید» */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  minSalePrice!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  priceValidityDays?: number;
 }
 
 /** POST /products/bulkUpdatePrices — تغییر گروهی قیمت/موجودی (خواسته مالک ۴-۱۱) */

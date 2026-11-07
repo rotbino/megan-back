@@ -411,6 +411,15 @@ model Product {
   /// کف قیمت هر واحد (تومان) — 0 یعنی «تماس بگیرید»
   minSalePrice  Int     @map("min_sale_price")
 
+  /// اعتبار قیمت به روز (خواسته مالک ۷-۱۱ دور هفدهم) — پیش‌فرض ۳ روز؛
+  /// بعد از این پنجره اگر قیمت تازه نشود، آگهی بج «قیمت منقضی شده» می‌گیرد
+  /// تا خریدار قیمت کهنه نبیند و فروشنده ترغیب به آپدیت شود
+  priceValidityDays Int       @default(3) @map("price_validity_days")
+  /// مهر زمانی آخرین تغییر واقعیِ قیمت — مبنای محاسبهٔ انقضا
+  /// (priceUpdatedAt + priceValidityDays < اکنون ⇒ منقضی؛ null = آگهی قدیمی
+  /// بدون مهر → منقضی فرض نمی‌شود تا داده‌های موجود جریمه نشوند)
+  priceUpdatedAt    DateTime? @map("price_updated_at")
+
   /// جزئیات نهایی مرحله ۶ ویزارد — [{key, value}]
   features      Json?
   status        String  @default("pending") // pending | confirmed | rejected | deleted
