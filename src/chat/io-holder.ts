@@ -25,6 +25,12 @@ export function getIo(): ServerLike | null {
   return io;
 }
 
+/** رویدادهای WS گفتگوی پشتیبانی — قرارداد ثابت کلاینت/سرور (خواسته مالک ۸-۱۱) */
+export const SUPPORT_EVENTS = {
+  /** پاسخ تازهٔ پشتیبان برای کاربر — ریل‌تایم + بج/لینک در چت */
+  NEW_MESSAGE: 'support:newMessage',
+} as const;
+
 /** رویدادهای WS چت — قرارداد ثابت کلاینت/سرور */
 export const CHAT_EVENTS = {
   /** پیام جدید برای گیرنده */

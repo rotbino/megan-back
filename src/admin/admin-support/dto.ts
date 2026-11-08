@@ -7,8 +7,11 @@ import {
   IsString,
   Length,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
+
+const SUPPORT_KINDS = ['text', 'image', 'video', 'file'] as const;
 
 const OID_MSG = 'شناسه کاربر معتبر نیست.';
 
@@ -50,7 +53,43 @@ export class SendSupportReplyDto {
   @IsNotEmpty({ message: OID_MSG })
   userId!: string;
 
+  /** نوع پیام — پیش‌فرض متن (خواسته مالک ۸-۱۱: پیوست در پشتیبانی) */
+  @IsOptional()
+  @IsIn(SUPPORT_KINDS)
+  kind?: 'text' | 'image' | 'video' | 'file';
+
+  /** متن یا کپشن — با پیوست می‌تواند خالی باشد */
+  @IsOptional()
   @IsString()
-  @Length(1, 2000, { message: 'متن پاسخ باید بین ۱ تا ۲۰۰۰ نویسه باشد.' })
-  text!: string;
+  @Length(0, 2000)
+  text?: string;
+
+  /** URL عمومی فایل — از /admin/support/uploadFile آمده */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  fileUrl?: string;
+
+  /** کلید ذخیره‌سازی — مالکیت با الگوی support-admin/<adminId>/… چک می‌شود */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  fileKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(190)
+  fileName?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(5 * 1024 * 1024)
+  fileSize?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  fileMime?: string;
 }

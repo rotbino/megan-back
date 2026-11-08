@@ -1,6 +1,7 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { FastifyRequest } from 'fastify';
 import { JwtAuthGuard, type AuthUser } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ok } from '../common/api-response';
@@ -27,10 +28,22 @@ export class SupportController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } }) // آپلود محدود — ضد سوءاستفاده
+  @Post('uploadFile')
+  @ApiOperation({ summary: 'آپلود پیوست گفتگوی پشتیبانی — تصویر/ویدئو/سند تا ۵MB' })
+  async uploadFile(@Req() req: FastifyRequest, @CurrentUser() user: AuthUser) {
+    return ok(await this.support.uploadFile(user.id, req));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Throttle({ default: { limit: 20, ttl: 60_000 } }) // ارسال محدود — ضد اسپم
   @Post('sendMessage')
-  @ApiOperation({ summary: 'ارسال پیام به پشتیبان' })
+  @ApiOperation({ summary: 'ارسال پیام به پشتیبان — متن یا فایل + کپشن' })
   async sendMessage(@CurrentUser() user: AuthUser, @Body() dto: SendMessageDto) {
-    return ok(await this.support.sendMessage(user.id, dto.text), 'پیام شما برای پشتیبانی ارسال شد.');
+    return ok(
+      await this.support.sendMessage(user.id, dto),
+      'پیام شما برای پشتیبانی ارسال شد.',
+    );
   }
 }

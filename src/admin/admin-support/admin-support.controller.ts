@@ -1,4 +1,5 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminJwtAuthGuard } from '../admin-auth/admin-jwt.guard';
@@ -35,14 +36,21 @@ export class AdminSupportController {
     return ok(data);
   }
 
+  @Throttle({ default: { limit: 30, ttl: 60_000 } }) // آپلود محدود
+  @Post('uploadFile')
+  @ApiOperation({ summary: 'آپلود پیوست پاسخ پشتیبان — تصویر/ویدئو/سند تا ۵MB' })
+  async uploadFile(@AdminId() adminId: string, @Req() req: FastifyRequest) {
+    return ok(await this.support.uploadFile(adminId, req));
+  }
+
   @Post('sendMessage')
-  @ApiOperation({ summary: 'پاسخ پشتیبان به کاربر' })
+  @ApiOperation({ summary: 'پاسخ پشتیبان به کاربر — متن یا فایل + کپشن (push لحظه‌ای به کاربر)' })
   async sendMessage(
-    @AdminId() _adminId: string,
+    @AdminId() adminId: string,
     @AdminUsername() adminUsername: string,
     @Body() dto: SendSupportReplyDto,
   ) {
-    const msg = await this.support.sendMessage(adminUsername, dto.userId, dto.text);
+    const msg = await this.support.sendMessage(adminUsername, adminId, dto.userId, dto);
     if (!msg) throw AppError.notFound('کاربر یافت نشد.');
     return ok(msg, 'پاسخ شما برای کاربر ارسال شد.');
   }

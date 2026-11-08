@@ -10,6 +10,7 @@ import { CHAT_EVENTS, emitToUser, isUserOnline } from './io-holder';
 import { PushService } from '../push/push.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { buildStorage, type StorageDriver } from '../uploads/storage';
+import { validateConversationUpload } from '../common/file-upload/rules';
 import {
   EditMessageDto,
   GetThreadMessagesDto,
@@ -106,54 +107,10 @@ export class ChatService {
 
   // ─── آپلود فایل چت (خواسته مالک ۷-۱۱) ─────────────────────────────────────
 
-  /** سقف حجم فایل چت — ۵ مگابایت */
+  /** سقف حجم فایل چت — ۵ مگابایت (قواعد مشترک در common/file-upload/rules) */
   static readonly MAX_FILE_BYTES = 5 * 1024 * 1024;
 
-  /** پسوندهای مجاز به تفکیک نوع — لیست سفید؛ هر چیز دیگر (exe، sh، js،
-   *  php، svg، zip و…) رد می‌شود تا فایل قابل‌سوءاستفاده وارد چت نشود. */
-  private static readonly FILE_RULES = {
-    image: {
-      exts: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-      mimes: ['image/jpeg', 'image/pjpeg', 'image/png', 'image/gif', 'image/webp'],
-    },
-    video: {
-      exts: ['mp4', 'webm', 'mov'],
-      mimes: ['video/mp4', 'video/webm', 'video/quicktime'],
-    },
-    file: {
-      // اسناد رایج اداری — svg و html و js و بقیهٔ کد/اجرایی‌ها عمداً نیستند
-      exts: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'],
-      mimes: [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-powerpoint',
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'text/plain',
-        'text/csv',
-      ],
-    },
-  } as const;
 
-  /** بایتهای جادویی رایج — تقلب MIME/پسوند را می‌گیرد (فایل exe با نام jpg رد) */
-  private static sniffKind(buf: Buffer): string | null {
-    if (buf.length < 4) return null;
-    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
-    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
-    if (buf.subarray(0, 4).toString('ascii') === 'GIF8') return 'gif';
-    if (buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP')
-      return 'webp';
-    if (buf.subarray(0, 4).toString('ascii') === '%PDF') return 'pdf';
-    if (buf.subarray(4, 8).toString('ascii') === 'ftyp') return 'mp4-like'; // mp4 / mov
-    if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'webm-ebml';
-    if (buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 3 || buf[2] === 5 || buf[2] === 7))
-      return 'zip'; // docx / xlsx / pptx
-    if (buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0)
-      return 'ole'; // doc / xls / ppt قدیمی
-    return null;
-  }
 
   /**
    * POST /chat/uploadFile — آپلود پیوست چت (multipart، سقف ۵MB، لیست سفید).
@@ -172,59 +129,7 @@ export class ChatService {
     if (!file) throw AppError.badRequest('فایل ارسال نشده است.', 'FILE_REQUIRED');
 
     const { buffer, mimetype, filename } = file;
-
-    if (buffer.length === 0) throw AppError.badRequest('فایل خالی است.', 'FILE_EMPTY');
-    if (buffer.length > ChatService.MAX_FILE_BYTES) {
-      throw AppError.badRequest('حجم فایل نباید بیشتر از ۵ مگابایت باشد.', 'FILE_TOO_LARGE');
-    }
-
-    // نام امن — فقط basename؛ کاراکترهای کنترلی و مسیر حذف
-    const safeName =
-      filename
-        .split(/[/\\]/)
-        .pop()!
-        .replace(/[\u0000-\u001f<>:"|?*]/g, '')
-        .slice(0, 180) || 'فایل';
-
-    const ext = (safeName.includes('.') ? safeName.split('.').pop()! : '').toLowerCase();
-    if (!ext || !/^[a-z0-9]{1,9}$/.test(ext)) {
-      throw AppError.badRequest('پسوند فایل معتبر نیست.', 'BAD_EXTENSION');
-    }
-
-    // پیدا کردن نوع مجاز مطابق پسوند + MIME (هر دو باید بخوانند)
-    let kind: 'image' | 'video' | 'file' | null = null;
-    for (const [k, rule] of Object.entries(ChatService.FILE_RULES) as Array<
-      ['image' | 'video' | 'file', (typeof ChatService.FILE_RULES)['image']]
-    >) {
-      if ((rule.exts as readonly string[]).includes(ext) && (rule.mimes as readonly string[]).includes(mimetype)) {
-        kind = k;
-        break;
-      }
-    }
-    if (!kind) {
-      throw AppError.badRequest(
-        'این نوع فایل مجاز نیست. تصویر (jpg، png، gif، webp)، ویدئو (mp4، webm، mov) یا سند (pdf، آفیس، متن) ارسال کنید.',
-        'FILE_TYPE_FORBIDDEN',
-      );
-    }
-
-    // بایتهای جادویی — تقلب پسوند/MIME را می‌گیرد (چت قابل سوءاستفاده نیست)
-    const sniff = ChatService.sniffKind(buffer);
-    if (sniff) {
-      const ok =
-        (kind === 'image' && ['jpeg', 'png', 'gif', 'webp'].includes(sniff)) ||
-        (kind === 'video' && ['mp4-like', 'webm-ebml'].includes(sniff)) ||
-        (kind === 'file' &&
-          ((ext === 'pdf' && sniff === 'pdf') ||
-            (['docx', 'xlsx', 'pptx'].includes(ext) && sniff === 'zip') ||
-            (['doc', 'xls', 'ppt'].includes(ext) && sniff === 'ole')));
-      if (!ok) {
-        throw AppError.badRequest('محتوای فایل با نوع اعلام‌شده نمی‌خواند.', 'FILE_CONTENT_MISMATCH');
-      }
-    } else if (kind !== 'file') {
-      // تصویر/ویدئوی ناشناخته = مشکوک — رد
-      throw AppError.badRequest('محتوای فایل معتبر نیست.', 'FILE_CONTENT_MISMATCH');
-    }
+    const { kind, ext, safeName } = validateConversationUpload(buffer, mimetype, filename);
 
     const stamp = Date.now().toString(36);
     const rand = randomBytes(5).toString('hex');
@@ -788,8 +693,17 @@ export class ChatService {
 
   // ─── پیام‌های پشتیبانی (ادمین → کاربر) ────────────────────────────────────
 
-  /** POST /chat/unreadCount — بج هدر/فوتر: مجموع خوانده‌نشده چت + پشتیبانی */
-  async getUnreadCount(user: AuthUser): Promise<{ count: number; chat: number; support: number }> {
+  /**
+   * POST /chat/unreadCount — بج هدر/فوتر/منوها:
+   *  • chat — پیام‌های خوانده‌نشدهٔ مکالمات
+   *  • support — پیام‌های مستقیم پشتیبانی (AdminMessage)
+   *  • ticket — پاسخ‌های خوانده‌نشدهٔ گفتگوی پشتیبانی (خواسته مالک ۸-۱۱:
+   *    بج قرمز منوی «پشتیبانی» + پیام لینک‌دار در چت)
+   *  • count — مجموع هر سه (قیف کشف: بج → چت → لینک → تیکت)
+   */
+  async getUnreadCount(
+    user: AuthUser,
+  ): Promise<{ count: number; chat: number; support: number; ticket: number }> {
     // شفای خودکار + یک کوئری: جفت تکراری ادغام و همان ردیف‌ها بج را می‌سازند
     // (۵۰۰ مکالمه اخیر — بج «پیام جدید» است؛ نخ‌های خفته قدیمی بی‌اثرند)
     let rows = await this.prisma.chatThread.findMany({
@@ -809,7 +723,7 @@ export class ChatService {
       });
     }
 
-    const [chat, support] = await Promise.all([
+    const [chat, support, ticket] = await Promise.all([
       rows.length
         ? this.prisma.chatMessage.count({
             where: {
@@ -820,9 +734,10 @@ export class ChatService {
           })
         : Promise.resolve(0),
       this.prisma.adminMessage.count({ where: { userId: user.id, readAt: null } }),
+      this.prisma.supportMessage.count({ where: { userId: user.id, senderRole: 'admin', readAt: null } }),
     ]);
 
-    return { count: chat + support, chat, support };
+    return { count: chat + support + ticket, chat, support, ticket };
   }
 
   /** POST /chat/getMyAdminMessages — آخرین پیام‌های پشتیبانی من (صعودی) + خوانده‌نشده */

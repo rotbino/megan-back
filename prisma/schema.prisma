@@ -927,8 +927,21 @@ model SupportMessage {
   /// نام کاربری ادمین پاسخ‌دهنده — فقط وقتی senderRole = admin
   adminUsername String? @map("admin_username")
 
-  /// متن پیام — ساده در v1 (بدون فایل)
+  /// متن یا کپشن پیام — با پیوست فایل می‌تواند خالی باشد (خواسته مالک ۸-۱۱)
   text String
+
+  /// نوع پیام — متن | تصویر | ویدئو | فایل (قرینهٔ ChatMessage)
+  kind      String  @default("text") @map("kind")
+  /// URL عمومی فایل پیوست — null یعنی پیام متنی
+  fileUrl   String? @map("file_url")
+  /// کلید ذخیره‌سازی (برای پاک‌سازی آتی فایل‌های یتیم)
+  fileKey   String? @map("file_key")
+  /// نام اصلی فایل (نمایش/دانلود)
+  fileName  String? @map("file_name")
+  /// حجم بایت
+  fileSize  Int?    @map("file_size")
+  /// MIME اعلام‌شده هنگام آپلود
+  fileMime  String? @map("file_mime")
 
   /// null = گیرنده هنوز نخوانده
   readAt   DateTime? @map("read_at")

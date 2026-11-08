@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
+import { UploadsModule } from '../../uploads/uploads.module';
+import { PushModule } from '../../push/push.module';
 import { AdminSupportController } from './admin-support.controller';
 import { AdminSupportService } from './admin-support.service';
 
@@ -9,7 +11,7 @@ import { AdminSupportService } from './admin-support.service';
  * یک کاربر، پاسخ پشتیبان و آمار (بج منو/داشبورد) را می‌دهد.
  */
 @Module({
-  imports: [AdminAuthModule],
+  imports: [AdminAuthModule, UploadsModule, PushModule],
   controllers: [AdminSupportController],
   providers: [AdminSupportService],
   exports: [AdminSupportService], // داشبورد ادمین برای آمار پشتیبانی
