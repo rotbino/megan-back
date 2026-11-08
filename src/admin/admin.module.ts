@@ -6,6 +6,7 @@ import { AdminBaseDataModule } from './admin-base-data/admin-base-data.module';
 import { AdminUsersModule } from './admin-users/admin-users.module';
 import { AdminProductsModule } from './admin-products/admin-products.module';
 import { AdminBuyRequestsModule } from './admin-buy-requests/admin-buy-requests.module';
+import { AdminBuyerBookModule } from './admin-buyer-book/admin-buyer-book.module';
 import { AdminActionsModule } from './admin-actions/admin-actions.module';
 import { AdminActionInterceptor } from './admin-actions/admin-action.interceptor';
 import { AdminWalletModule } from './admin-wallet/admin-wallet.module';
@@ -37,6 +38,7 @@ import { AdminSettingsModule } from './admin-settings/admin-settings.module';
     AdminUsersModule,
     AdminProductsModule,
     AdminBuyRequestsModule,
+    AdminBuyerBookModule, // بازبینی کالاهای دفتر خرید (درخواست‌های دوره‌ای)
     AdminActionsModule,
     AdminWalletModule,
     AdminPackagesModule, // صف بازبینی فیش‌های خرید بسته اشتراک

@@ -104,7 +104,9 @@ export class BuyersService {
 
   // ─── دفتر خرید من ──────────────────────────────────────────────────────────
 
-  /** POST /buyers/getMyBook — ردیف‌های دفتر خرید من با نام دسته و مسیر */
+  /** POST /buyers/getMyBook — ردیف‌های دفتر خرید من با نام دسته و مسیر
+   *  + وضعیت بازبینی ادمین و دلایل رد (خواستهٔ مالک ۸-۱۱: درخواست‌های خرید
+   *  دوره‌ای هم مثل فوری سه تب تایید/در انتظار/ردشده دارند) */
   async getMyBook(userId: string) {
     const rows = await this.prisma.buyerCategory.findMany({
       where: { userId },
@@ -123,6 +125,8 @@ export class BuyersService {
           unit: r.unit,
           minAmount: r.volumeMin,
           period: r.period,
+          status: r.status as 'pending' | 'confirmed' | 'rejected',
+          rejectionReasons: r.rejectionReasons ?? [],
         };
       }),
     };
@@ -160,10 +164,35 @@ export class BuyersService {
     const periodOf = (p: string) =>
       (BUYER_PERIODS as readonly string[]).includes(p) ? p : 'monthly';
 
+    // حفظ وضعیت بازبینی ردیف‌های موجود (خواستهٔ مالک ۸-۱۱): ذخیرهٔ دفتر
+    // جایگزینی کامل است، پس وضعیت هر ردیف از رویِ خودِ ردیف تعیین می‌شود:
+    //  • تاییدشده بدون تغییر مقدار/دوره → تاییدشده می‌ماند (ویرایش جزئی)
+    //  • ردشده بدون تغییر → رد می‌ماند (دلیلش هم می‌ماند)؛ با تغییر مقدار/دوره
+    //    دوباره «در انتظار تایید» می‌شود (ارسال مجدد)
+    //  • دستهٔ تازه همیشه «در انتظار تایید» است
+    const existing = await this.prisma.buyerCategory.findMany({
+      where: { userId, categoryId: { in: [...seen] } },
+      select: { categoryId: true, volumeMin: true, period: true, status: true, rejectionReasons: true, reviewedAt: true },
+    });
+    const prevByCat = new Map(existing.map((e) => [e.categoryId, e]));
+
     await this.prisma.$transaction([
       this.prisma.buyerCategory.deleteMany({ where: { userId } }),
       ...items.map((it: BuyerBookItemDto) => {
         const cat = cats.get(it.categoryId);
+        const prev = prevByCat.get(it.categoryId);
+        const sameContent =
+          prev != null &&
+          prev.volumeMin === it.volumeMin &&
+          prev.period === periodOf(it.period);
+        const status =
+          prev == null
+            ? 'pending'
+            : sameContent
+              ? prev.status // بدون تغییر — همان وضعیت قبلی
+              : prev.status === 'confirmed'
+                ? 'confirmed' // تاییدشده فقط جزئیاتش عوض شد
+                : 'pending'; // تغییر ردشده/در انتظار → بازبینی دوباره
         return this.prisma.buyerCategory.create({
           data: {
             userId,
@@ -171,6 +200,13 @@ export class BuyersService {
             volumeMin: it.volumeMin,
             period: periodOf(it.period),
             unit: cat?.unit ?? 'کیلوگرم',
+            status,
+            ...(status === 'rejected' && prev
+              ? { rejectionReasons: prev.rejectionReasons, reviewedAt: prev.reviewedAt }
+              : {}),
+            ...(status === 'confirmed' && prev?.reviewedAt
+              ? { reviewedAt: prev.reviewedAt }
+              : {}),
           },
         });
       }),
@@ -197,8 +233,10 @@ export class BuyersService {
       : null;
 
     // ردیف‌های دفتر خرید در این دسته‌ها (سقف اطمینان ۵۰۰۰ — دایرکتوری سبک می‌ماند)
+    // فقط تاییدشده‌ها — ردیف تازه تا بازبینی ادمین برای فروشندگان نامرئی است
     const rows = await this.prisma.buyerCategory.findMany({
       where: {
+        status: 'confirmed',
         ...(leafSet ? { categoryId: { in: [...leafSet] } } : {}),
         ...(dto.period ? { period: dto.period } : {}),
         ...(viewerId ? { userId: { not: viewerId } } : {}),

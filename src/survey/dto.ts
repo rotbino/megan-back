@@ -11,12 +11,6 @@ export class SubmitFeedbackDto {
   @IsIn(FEEDBACK_CATEGORIES as unknown as string[], { message: 'دسته بازخورد معتبر نیست.' })
   category: FeedbackCategory;
 
-  @ApiProperty({ description: 'عنوان کوتاه', minLength: 5, maxLength: 120 })
-  @IsString()
-  @MinLength(5, { message: 'عنوان دست‌کم ۵ نویسه باشد.' })
-  @MaxLength(120, { message: 'عنوان حداکثر ۱۲۰ نویسه باشد.' })
-  title: string;
-
   @ApiProperty({ description: 'شرح کامل نیاز/مشکل', minLength: 20, maxLength: 2000 })
   @IsString()
   @MinLength(20, { message: 'شرح دست‌کم ۲۰ نویسه باشد.' })

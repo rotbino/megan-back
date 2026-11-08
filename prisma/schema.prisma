@@ -1032,8 +1032,8 @@ model FeedbackItem {
 
   /// bug | critique | improvement | feature (۴ دسته بازخورد)
   category String
-  /// عنوان کوتاه — ۵ تا ۱۲۰ نویسه
-  title String
+  /// عنوان کوتاه — قدیمی؛ فرم جدید فقط شرح دارد (خواستهٔ مالک ۸-۱۱)
+  title String?
   /// شرح کامل نیاز/مشکل — ۲۰ تا ۲۰۰۰ نویسه
   body  String
 
@@ -1196,6 +1196,14 @@ model BuyerCategory {
   period     String @default("monthly") @map("period")
   /// واحد دسته (denorm برای نمایش) — کیلوگرم | تن | عدد | بسته | لیتر
   unit       String @default("کیلوگرم")
+
+  /// pending | confirmed | rejected — بازبینی ادمین (خواستهٔ مالک ۸-۱۱:
+  /// درخواست‌های خرید دوره‌ای هم مثل فوری تایید ادمین می‌خواهند)
+  status     String @default("pending") @map("status")
+  /// دلایل رد ادمین — در پنل خریدار کنار آیتم نمایش داده می‌شود
+  rejectionReasons String[] @default([]) @map("rejection_reasons")
+  /// زمان بازبینی آخر
+  reviewedAt DateTime? @map("reviewed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

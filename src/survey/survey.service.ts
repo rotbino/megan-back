@@ -7,7 +7,6 @@ import { FEEDBACK_CATEGORIES, type FeedbackCategory } from './dto';
 export interface FeedbackRow {
   id: string;
   category: FeedbackCategory;
-  title: string;
   body: string;
   isStaff: boolean;
   isMine: boolean;
@@ -72,7 +71,6 @@ export class SurveyService {
       items: rows.map((r) => ({
         id: r.id,
         category: isCategory(r.category) ? r.category : 'critique',
-        title: r.title,
         body: r.body,
         isStaff: r.isStaff,
         isMine: r.userId === userId,
@@ -91,13 +89,12 @@ export class SurveyService {
   /** POST /survey/submit — ثبت بازخورد/نیاز جدید (چندتایی؛ محدودیت نرخ در کنترلر) */
   async submit(
     userId: string,
-    dto: { category: FeedbackCategory; title: string; body: string },
+    dto: { category: FeedbackCategory; body: string },
   ): Promise<FeedbackRow> {
     const row = await this.prisma.feedbackItem.create({
       data: {
         userId,
         category: dto.category,
-        title: dto.title.trim(),
         body: dto.body.trim(),
       },
       include: { user: { select: { firstName: true, lastName: true } }, _count: { select: { upvotes: true } } },
@@ -105,7 +102,6 @@ export class SurveyService {
     return {
       id: row.id,
       category: isCategory(row.category) ? row.category : 'critique',
-      title: row.title,
       body: row.body,
       isStaff: row.isStaff,
       isMine: true,

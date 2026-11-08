@@ -6,7 +6,6 @@ import { FEEDBACK_CATEGORIES } from '../../survey/dto';
 export interface SurveyAdminRow {
   id: string;
   category: string;
-  title: string;
   body: string;
   isStaff: boolean;
   upvoteCount: number;
@@ -49,14 +48,13 @@ export class AdminSurveysService {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? 20));
 
-    // جستجو: متن بازخورد (عنوان/شرح) یا مشخصات نویسنده
+    // جستجو: متن بازخورد (شرح) یا مشخصات نویسنده
     const term = dto.search?.trim();
     const where = {
       ...(dto.category ? { category: dto.category } : {}),
       ...(term
         ? {
             OR: [
-              { title: { contains: term } },
               { body: { contains: term } },
               {
                 user: {
@@ -96,7 +94,6 @@ export class AdminSurveysService {
       items: rows.map((r) => ({
         id: r.id,
         category: r.category,
-        title: r.title,
         body: r.body,
         isStaff: r.isStaff,
         upvoteCount: r._count.upvotes,
