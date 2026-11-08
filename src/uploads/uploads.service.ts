@@ -19,6 +19,8 @@
 import { Injectable, HttpStatus, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService } from '../common/cache/cache.module';
 import { storage, FILES_STAGING_TTL_DAYS } from '../common/config/env';
@@ -75,6 +77,32 @@ export interface ProcessedImage {
   thumb: Buffer | null;
   width: number;
   height: number;
+  /** واترمارک ایمچ داخل پیکسل‌های فایل ذخیره شد؟ (خواسته مالک ۸-۱۱ دور ۲۷) */
+  watermarked: boolean;
+}
+
+// ─── واترمارک دائمی تصاویر آگهی (خواسته مالک ۸-۱۱ دور ۲۷) ─────────────────
+// واترمارک باید «جزء عکس» باشد نه لایهٔ نمایشی CSS — لایهٔ نمایشی با ذخیره‌کردن
+// عکس از بین می‌رود و ضد سرقت نیست. اینجا الگوی قطری لوگوی ایمچ (سفید +
+// دورخط تیره — روی هر پس‌زمینه‌ای خوانا) قبل از ذخیره داخل پیکسل‌های اصلی و
+// تامبنیل می‌نشیند تا هر نسخهٔ ذخیره/کپی/برش‌شده هم واترمارک را با خود داشته
+// باشد. فقط تصاویر «Product» واترمارک می‌گیرند (آواتار/مدارک نه).
+// Asset: assets/watermark-tile.png — رندر یک‌بار با scripts/make-watermark-asset.mjs
+// (فونت قفل‌شده؛ در زمان اجرا هیچ SVG/فونتی پردازش نمی‌شود).
+
+/** ابعاد PNG کاشی — برای حفظ نسبت در resize */
+const WM_TILE_W = 354;
+const WM_TILE_H = 150;
+/** شفافیت نهایی نشان‌ها — تعادل ضدسرقت/دید جنس */
+const WM_OPACITY = 0.28;
+/** زاویهٔ الگوی قطری (درجه) */
+const WM_ANGLE = -25;
+
+/** کاشی یک‌بار خوانده و کش می‌شود (src و dist هر دو دو سطح بالاتر ریشه‌اند) */
+let wmTileCache: Buffer | null = null;
+async function watermarkTile(): Promise<Buffer> {
+  wmTileCache ??= await readFile(join(__dirname, '..', '..', 'assets', 'watermark-tile.png'));
+  return wmTileCache;
 }
 
 /** شکل عمومی برگشتی به کلاینت — کلید ذخیره‌سازی هرگز لو نمی‌رود. */
@@ -164,51 +192,123 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   private static readonly MAIN_MAX_BYTES = 500 * 1024;
   private static readonly THUMB_MAX_WIDTH = 500;
 
-  private async processFile(buffer: Buffer, mime: string): Promise<ProcessedImage> {
+  /** لایهٔ واترمارک تمام‌تصویر — الگوی قطری <pattern> با کاشی محوشده
+   *  (dest-in). اندازهٔ کاشی نسبت‌دار با عرض تصویر (۲۲٪، مقید ۷۶..۳۰۰px)،
+   *  خانهٔ الگو ۲× عرض / ۲.۵× ارتفاع کاشی ≈ ۱۰-۱۵ نشان در تصویر.
+   *  تصاویر خیلی کوچک واترمارک نمی‌گیرند (جا نیست). */
+  private async watermarkLayer(w: number, h: number): Promise<Buffer | null> {
+    if (w < 160 || h < 120) return null;
+    try {
+      const sharp = (await import('sharp')).default;
+      const tw = Math.max(76, Math.min(300, Math.round(w * 0.22)));
+      const th = Math.round((tw * WM_TILE_H) / WM_TILE_W);
+      // محو کردن کاشی — آلفای PNG با dest-in در ضرب می‌شود (شفافیت یکنواخت)
+      const base = await sharp(await watermarkTile()).resize(tw, th).png().toBuffer();
+      const fade = Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${th}">` +
+          `<rect width="100%" height="100%" fill="#000" fill-opacity="${WM_OPACITY}"/></svg>`,
+      );
+      const tile = await sharp(base).composite([{ input: fade, blend: 'dest-in' }]).png().toBuffer();
+      const cellW = Math.round(tw * 2);
+      const cellH = Math.round(th * 2.5);
+      const svg = Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+          `<defs><pattern id="wm" patternUnits="userSpaceOnUse" width="${cellW}" height="${cellH}" patternTransform="rotate(${WM_ANGLE})">` +
+          `<image href="data:image/png;base64,${tile.toString('base64')}" x="0" y="0" width="${tw}" height="${th}"/>` +
+          `</pattern></defs>` +
+          `<rect width="${w}" height="${h}" fill="url(#wm)"/></svg>`,
+      );
+      return await sharp(svg).png().toBuffer();
+    } catch {
+      // واترمارک بهترین‌حال است — خطای آن هرگز آپلود را نمی‌شکند
+      return null;
+    }
+  }
+
+  /** ابعاد خروجی resize «inside» بدون بزرگ‌سازی — برای ساختن لایهٔ واترمارک
+   *  قبل از اجرای پایپ‌لاین (چون composite باید داخل همان پایپ‌لاین بنشیند
+   *  تا انکود دوباره و افت کیفیت نباشد). EXIF orientation ≥ ۵ عرض/طول را جابه‌جا می‌کند. */
+  private static fittedSize(
+    meta: { width?: number; height?: number; orientation?: number },
+    maxW: number,
+    maxH: number,
+  ): { w: number; h: number } {
+    const swap = (meta.orientation ?? 1) >= 5;
+    const rw = (swap ? meta.height : meta.width) || maxW;
+    const rh = (swap ? meta.width : meta.height) || maxH;
+    const scale = Math.min(maxW / rw, maxH / rh, 1);
+    return { w: Math.max(1, Math.round(rw * scale)), h: Math.max(1, Math.round(rh * scale)) };
+  }
+
+  private async processFile(
+    buffer: Buffer,
+    mime: string,
+    watermark = false,
+  ): Promise<ProcessedImage> {
     try {
       const sharp = (await import('sharp')).default;
       const meta = await sharp(buffer).metadata();
       const hasAlpha = !!meta.hasAlpha;
       const isWebp = mime === 'image/webp';
 
+      // لایهٔ واترمارک (خواسته مالک ۸-۱۱ دور ۲۷) — قبل از انکود، داخل همان
+      // پایپ‌لاین؛ ابعاد پس از rotate/resize از پیش حساب می‌شود.
+      const mainFit = UploadsService.fittedSize(meta, UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH);
+      const wmMain = watermark ? await this.watermarkLayer(mainFit.w, mainFit.h) : null;
+      const thumbFit = UploadsService.fittedSize(meta, UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH);
+      const wmThumb = watermark ? await this.watermarkLayer(thumbFit.w, thumbFit.h) : null;
+
       // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
-      const mainPipeline = sharp(buffer).rotate();
+      let mainPipeline = sharp(buffer).rotate().resize(
+        UploadsService.MAIN_MAX_WIDTH,
+        UploadsService.MAIN_MAX_WIDTH,
+        { fit: 'inside', withoutEnlargement: true },
+      );
+      if (wmMain) mainPipeline = mainPipeline.composite([{ input: wmMain, left: 0, top: 0 }]);
       let main = await mainPipeline
-        .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        })
         .toFormat(isWebp ? 'webp' : hasAlpha ? 'png' : 'jpeg', isWebp ? { quality: 84 } : hasAlpha ? { compressionLevel: 9 } : { quality: 84, mozjpeg: true })
         .toBuffer();
 
       // پله‌ای فشرده‌تر — تا زیر ۵۰۰KB بیاید (فقط jpeg/webp؛ png شفاف را دست نمی‌زنیم)
       if (!hasAlpha && main.length > UploadsService.MAIN_MAX_BYTES) {
         for (const quality of [78, 72, 66, 60, 54, 48]) {
-          main = await sharp(buffer)
+          let rePipeline = sharp(buffer)
             .rotate()
             .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, {
               fit: 'inside',
               withoutEnlargement: true,
-            })
+            });
+          if (wmMain) rePipeline = rePipeline.composite([{ input: wmMain, left: 0, top: 0 }]);
+          main = await rePipeline
             .toFormat(isWebp ? 'webp' : 'jpeg', isWebp ? { quality } : { quality, mozjpeg: true })
             .toBuffer();
           if (main.length <= UploadsService.MAIN_MAX_BYTES) break;
         }
       }
 
-      const thumb = await sharp(buffer)
+      let thumbPipeline = sharp(buffer)
         .rotate()
-        .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true })
+        .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
+      if (wmThumb) thumbPipeline = thumbPipeline.composite([{ input: wmThumb, left: 0, top: 0 }]);
+      const thumb = await thumbPipeline
         .toFormat('jpeg', { quality: 78, mozjpeg: true }) // تامبنیل همیشه jpeg
         .toBuffer();
 
       const outMeta = await sharp(main).metadata();
       const mainMime = isWebp ? 'image/webp' : hasAlpha ? 'image/png' : 'image/jpeg';
       const mainExt = isWebp ? 'webp' : hasAlpha ? 'png' : 'jpg';
-      return { main, mainMime, mainExt, thumb, width: outMeta.width ?? 0, height: outMeta.height ?? 0 };
+      return {
+        main,
+        mainMime,
+        mainExt,
+        thumb,
+        width: outMeta.width ?? 0,
+        height: outMeta.height ?? 0,
+        watermarked: !!wmMain,
+      };
     } catch {
       // تصویر خراب/فرمت پشتیبانی‌نشده — بایت‌های اصلی را نگه دار، رد نکن
-      return { main: buffer, mainMime: mime, mainExt: MIME_EXT[mime] ?? 'bin', thumb: null, width: 0, height: 0 };
+      return { main: buffer, mainMime: mime, mainExt: MIME_EXT[mime] ?? 'bin', thumb: null, width: 0, height: 0, watermarked: false };
     }
   }
 
@@ -424,7 +524,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     const modelId = input.modelId || null;
     await this.resolveTarget(user, input.model, modelId);
 
-    const processed = await this.processFile(file.buffer, file.mimetype);
+    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — آواتار/مدارک/فیش نه
+    const processed = await this.processFile(file.buffer, file.mimetype, input.model === 'Product');
     // ابعاد واقعی (پس از decode با sharp) — عکس‌های ریز/زباله رد می‌شوند؛
     // width=0 یعنی sharp نتوانست decode کند → همان مسیر قدیمی ادامه می‌دهد.
     if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
@@ -462,6 +563,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
           originalSize: file.buffer.length,
           width: processed.width,
           height: processed.height,
+          ...(processed.watermarked ? { watermarked: true } : {}),
         } as unknown as object,
       },
     });

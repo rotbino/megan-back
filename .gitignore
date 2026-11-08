@@ -16,7 +16,8 @@ logs/
 
 # فایل‌های آپلودشده درایور local (APP_PROFILE=local / STORAGE_DRIVER=local)
 # — بایت‌های کاربر، جایی در گیت ندارند
-uploads/
+# (لنگر ریشه: قبلا «uploads/» بود و src/uploads ماژول را هم می‌گرفت)
+/uploads/
 
 # فایل‌های پشتیبان/دامپ محلی
 *.tar.gz

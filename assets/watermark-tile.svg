@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 118 50" fill="none">
+    <!-- کاشی واترمارک ایمچ — الگوی قطری ضد سرقت (خواسته مالک ۸-۱۱ دور ۲۷)
+         لوگوی «imach» به سبک استیکر: سفید + دورخط تیرهٔ کرisp + هالهٔ نرم —
+         روی هر پس‌زمینه‌ای (روشن/تیره/تصویر واقعی) خوانا می‌ماند. اندازهٔ
+         دورخط‌ها برای font-size=32 است؛ کل SVG بعداً مقیاس می‌گیرد.
+         شفافیت نهایی در زمان composite با dest-in اعمال می‌شود.
+         رندر: assets/watermark-tile.png (۳x = 354×150) با
+         scripts/make-watermark-asset.mjs — فونت DejaVu Sans Bold قفل شده. -->
+    <defs>
+        <filter id="halo" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2"/>
+        </filter>
+    </defs>
+
+    <!-- ۱) کپی تیرهٔ ضخیم (دورخط) — دقیقاً زیر نسخهٔ سفید، ۱.۳px پایین‌تر -->
+    <g transform="translate(2.35, 4.3)" fill="#000000" stroke="#000000">
+        <text x="-2" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="5">i</text>
+        <g transform="translate(10, 4)">
+            <circle cx="6" cy="6" r="7"/>
+            <path d="M5 30 V19 L16 23 L27 11 V28" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <text x="44" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="5">a</text>
+        <text x="65" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="5">c</text>
+        <text x="84" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="5">h</text>
+    </g>
+
+    <!-- ۲) هالهٔ نرم گسترده — پیوستگی دورخط روی بافت‌های شلوغ -->
+    <g transform="translate(3, 3.8)" fill="#000000" stroke="#000000" opacity="0.45" filter="url(#halo)">
+        <text x="-2" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="3">i</text>
+        <g transform="translate(10, 4)">
+            <circle cx="6" cy="6" r="6.4"/>
+            <path d="M5 30 V19 L16 23 L27 11 V28" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <text x="44" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="3">a</text>
+        <text x="65" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="3">c</text>
+        <text x="84" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" stroke-width="3">h</text>
+    </g>
+
+    <!-- ۳) لوگوی سفید روی همه -->
+    <g transform="translate(3, 3)">
+        <text x="-2" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" fill="#ffffff">i</text>
+        <g transform="translate(10, 4)">
+            <circle cx="6" cy="6" r="5.5" fill="#ffffff"/>
+            <path d="M5 30 V19 L16 23 L27 11 V28" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <text x="44" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" fill="#ffffff">a</text>
+        <text x="65" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" fill="#ffffff">c</text>
+        <text x="84" y="37" font-family="DejaVu Sans, Verdana, Geneva, sans-serif" font-size="32" font-weight="700" fill="#ffffff">h</text>
+    </g>
+</svg>
