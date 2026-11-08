@@ -700,7 +700,7 @@ model SalesCampaign {
   title     String
   /// شعار/توضیح — بالای بسته‌ها در صفحه قیمت‌ها نمایش داده می‌شود
   description String?
-  /// time | quantity
+  /// time | quantity | new_user
   type      String   @default("time")
   /// درصد تخفیف (پایه — در نوع زمانی همان جاری)
   discountPercent Int @default(0)
@@ -710,6 +710,12 @@ model SalesCampaign {
   finalPercent Int? @map("final_percent")
   /// شمار دستی/نمایشی خریداران — مؤثر = max(purchaseCount, این عدد)
   manualPurchaseCount Int? @map("manual_purchase_count")
+  /// نوع کاربران جدید: طول پنجرهٔ تخفیف پس از ثبت‌نام (روز) — مهلت شخصی
+  /// هر کاربر = createdAt همان کاربر + این تعداد روز (خواسته مالک ۹-۱۱)
+  newUserDays Int? @map("new_user_days")
+  /// نوع کاربران جدید: سقف تعداد خرید بسته با تخفیف برای هر کاربر —
+  /// پس از این تعداد خرید (یا پایان پنجره) تخفیف همان کاربر برداشته می‌شود
+  newUserMaxPurchases Int? @map("new_user_max_purchases")
   startsAt  DateTime @default(now()) @map("starts_at")
   /// پایان کمپین — null یعنی بی‌پایان (تا غیرفعال شود)
   endsAt    DateTime? @map("ends_at")

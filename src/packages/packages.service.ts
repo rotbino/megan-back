@@ -18,10 +18,14 @@ import type { GetPackageOrdersDto } from './dto';
  *  • بسته‌های پولی (از جدول Plan — ادمین تعریف/ویرایش می‌کند) — ثبت نامحدود
  *    محصول + دسترسی نامحدود به همه خریداران + نشان فروشنده ویژه.
  *
- * کمپین فروش (خواسته مالک ۳۱-۱۰):
+ * کمپین فروش (خواسته مالک ۳۱-۱۰ + ۹-۱۱):
  *  • زمانی — درصد ثابت تا تاریخ پایان (مثلاً جشنواره ۵۰٪ آغاز فعالیت).
  *  • تعدادی — پله‌ای بر اساس شمار خریداران؛ تخفیف جاری از purchaseCount
  *    محاسبه می‌شود و ادمین می‌تواند manualDiscountPercent را دستی ست کند.
+ *  • کاربران جدید (۹-۱۱) — بیننده‌محور: هر کاربر تا N روز پس از ثبت‌نام
+ *    (createdAt + newUserDays) و تا M خرید بسته، درصد تخفیف دارد؛ پایان
+ *    پنجره یا پر شدن سهمیه = حذف تخفیف همان کاربر. مهلت شخصی به‌صورت
+ *    شمارشگر معکوس در صفحه قیمت‌ها نمایش داده می‌شود.
  *  • عنوان/شعار کمپین بالای بسته‌ها در صفحه قیمت‌ها نمایش داده می‌شود؛
  *    قیمت نهایی = قیمت پایه × (۱ − درصد تخفیف جاری).
  *
@@ -166,8 +170,10 @@ export interface ActiveCampaignInfo {
   id: string;
   title: string;
   description: string | null;
-  type: 'time' | 'quantity';
-  /** درصد جاری — در تعدادی از پله/override دستی، در زمانی همان discountPercent */
+  type: 'time' | 'quantity' | 'new_user';
+  /** درصد جاری — در تعدادی از پله/override دستی، در زمانی همان discountPercent؛
+   *  در کاربران جدید: درصد مؤثر «همین بیننده» (مهمان = درصد تبلیغ‌شده، کاربر
+   *  واجد شرایط = درصد کمپین، کاربر نا‌موجود/تمام‌شده = ۰) */
   discountPercent: number;
   endsAt: Date | null;
   /** شمار مؤثر خریداران (بیشینهٔ واقعی/دستی) — عددی که به کاربر نمایش داده می‌شود */
@@ -184,6 +190,56 @@ export interface ActiveCampaignInfo {
   tiers: CampaignTier[];
   /** درصد عمومی پس از اتمام پله‌های محدود — تا پایان کمپین (خواسته مالک ۳۱-۱۰) */
   finalPercent: number | null;
+  /** نوع کاربران جدید — طول پنجره پس از ثبت‌نام (روز)؛ بقیه انواع = null */
+  newUserDays: number | null;
+  /** نوع کاربران جدید — سقف خرید بسته با تخفیف برای هر کاربر */
+  newUserMaxPurchases: number | null;
+  /** مهلت شخصی همین کاربر (createdAt + newUserDays) — مبنا شمارشگر معکوس؛
+   *  مهمان یا نوع غیر کاربران‌جدید = null (خواسته مالک ۹-۱۱) */
+  userDeadline: Date | null;
+  /** خریدهای باقی‌مانده همین کاربر با تخفیف — مهمان/نوع دیگر = null */
+  userPurchasesLeft: number | null;
+  /** آیا همین بیننده الان مشمول تخفیف است؟ (مهمان = false) */
+  userEligible: boolean;
+}
+
+/** وضعیت کاربر برای کمپین کاربران جدید — محاسبهٔ مشترک getPlans/createPackageOrder */
+export interface NewUserContext {
+  /** مهلت شخصی = createdAt کاربر + newUserDays روز */
+  deadline: Date;
+  /** پنجره باز است؟ (الان < مهلت) */
+  windowOpen: boolean;
+  /** خریدهای ثبت‌شده همین کاربر در همین کمپین (ردشده‌ها برنمی‌گردند) */
+  used: number;
+  /** سقف خرید با تخفیف */
+  maxPurchases: number;
+  /** خرید باقی‌مانده با تخفیف */
+  purchasesLeft: number;
+  /** واجد شرایط = پنجره باز + خرید باقی‌مانده */
+  eligible: boolean;
+}
+
+/** پنجرهٔ شخصی کمپین کاربران جدید — خالص و تست‌پذیر (خواسته مالک ۹-۱۱) */
+export function resolveNewUserWindow(
+  campaign: { newUserDays: number | null; newUserMaxPurchases: number | null },
+  userCreatedAt: Date,
+  purchasesUsed: number,
+  now = new Date(),
+): NewUserContext {
+  const days = Math.max(1, campaign.newUserDays ?? 7);
+  const maxPurchases = Math.max(1, campaign.newUserMaxPurchases ?? 1);
+  const deadline = new Date(userCreatedAt.getTime() + days * 86_400_000);
+  const windowOpen = deadline.getTime() > now.getTime();
+  const used = Math.max(0, purchasesUsed);
+  const purchasesLeft = Math.max(0, maxPurchases - used);
+  return {
+    deadline,
+    windowOpen,
+    used,
+    maxPurchases,
+    purchasesLeft,
+    eligible: windowOpen && purchasesLeft > 0,
+  };
 }
 
 @Injectable()
@@ -295,7 +351,9 @@ export class PackagesService {
     return clampPercent(campaign.discountPercent);
   }
 
-  /** شکل عمومی کمپین فعال — برای getPlans و getMyPackage */
+  /** شکل عمومی کمپین فعال — برای getPlans و getMyPackage.
+   *  کمپین کاربران جدید «بیننده‌محور» است: درصد و مهلت برای هر کاربر جدا
+   *  محاسبه می‌شود (خواسته مالک ۹-۱۱) — userCtx از resolveNewUserContext. */
   private campaignInfo(
     c: {
       id: string;
@@ -309,34 +367,75 @@ export class PackagesService {
       endsAt: Date | null;
       tiers: Prisma.JsonValue | null;
       purchaseCount: number;
+      newUserDays: number | null;
+      newUserMaxPurchases: number | null;
     } | null,
+    userCtx: NewUserContext | null = null,
   ): ActiveCampaignInfo | null {
     if (!c) return null;
     const tiers = readTiers(c.tiers);
     const count = effectivePurchaseCount(c.purchaseCount, c.manualPurchaseCount);
-    const percent = this.currentPercent(c, count);
+    const isNewUser = c.type === 'new_user';
+
+    // درصد جاری:
+    //  • کاربران جدید → درصد تبلیغ‌شده برای مهمان/واجد شرایط، صفر برای ناموجود
+    //  • بقیه انواع → محاسبهٔ عمومی قبلی
+    const percent = isNewUser
+      ? userCtx
+        ? userCtx.eligible
+          ? this.currentPercent(c, count)
+          : 0
+        : this.currentPercent(c, count)
+      : this.currentPercent(c, count);
     const currentTier =
       c.type === 'quantity' ? PackagesService.tierReport(tiers, c.finalPercent, count) : null;
     return {
       id: c.id,
       title: c.title,
       description: c.description,
-      type: c.type === 'quantity' ? 'quantity' : 'time',
+      type: isNewUser ? 'new_user' : c.type === 'quantity' ? 'quantity' : 'time',
       discountPercent: percent,
       endsAt: c.endsAt,
       purchaseCount: count,
       currentTier,
       tiers,
       finalPercent: c.finalPercent ?? null,
+      newUserDays: isNewUser ? (c.newUserDays ?? 7) : null,
+      newUserMaxPurchases: isNewUser ? (c.newUserMaxPurchases ?? 1) : null,
+      userDeadline: isNewUser && userCtx ? userCtx.deadline : null,
+      userPurchasesLeft: isNewUser && userCtx ? userCtx.purchasesLeft : null,
+      userEligible: Boolean(isNewUser && userCtx?.eligible),
     };
+  }
+
+  /** پنجرهٔ شخصی کمپین کاربران جدید برای یک کاربر مشخص — null = مهمان/کاربر
+   *  ناموجود/کمپین از نوع دیگر. خریدهای ردشده سهمیه را پس نمی‌دهند (ادمین
+   *  ملاک فیش واریز شده است، نه تأیید نهایی). */
+  async resolveNewUserContext(
+    campaign: { id: string; type: string; newUserDays: number | null; newUserMaxPurchases: number | null } | null,
+    userId: string | null | undefined,
+  ): Promise<NewUserContext | null> {
+    if (!campaign || campaign.type !== 'new_user' || !userId) return null;
+    const me = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { createdAt: true },
+    });
+    if (!me) return null;
+    const used = await this.prisma.packageOrder.count({
+      where: { userId, campaignId: campaign.id, status: { not: 'rejected' } },
+    });
+    return resolveNewUserWindow(campaign, me.createdAt, used);
   }
 
   // ─── عمومی ────────────────────────────────────────────────────────────────
 
-  /** POST /packages/getPlans — عمومی: بسته‌ها (با تخفیف جاری) + کمپین + کارت واریز */
-  async getPlans() {
+  /** POST /packages/getPlans — عمومی: بسته‌ها (با تخفیف جاری) + کمپین + کارت واریز.
+   *  توکن «اختیاری» است: با ورود کاربر، کمپین کاربران جدید بیننده‌محور می‌شود
+   *  (درصد مؤثر + مهلت شخصی برای شمارشگر معکوس — خواسته مالک ۹-۱۱). */
+  async getPlans(user?: { id: string } | null) {
     const [plans, campaign] = await Promise.all([this.activePlans(), this.activeCampaign()]);
-    const info = this.campaignInfo(campaign);
+    const userCtx = await this.resolveNewUserContext(campaign, user?.id);
+    const info = this.campaignInfo(campaign, userCtx);
     const percent = info?.discountPercent ?? 0;
 
     const publicPlans: PublicPlan[] = plans.map((p) => ({
@@ -454,14 +553,37 @@ export class PackagesService {
       throw AppError.badRequest('تصویر فیش واریزی الزامی است.', 'RECEIPT_MISSING');
     }
 
-    // تخفیف کمپین جاری — snapshot روی سفارش
+    // تخفیف کمپین جاری — snapshot روی سفارش.
+    // کمپین کاربران جدید بیننده‌محور است: اگر پنجرهٔ شخصی کاربر بسته شده یا
+    // سهمیهٔ خریدش پر شده باشد، تخفیف همین کاربر صفر است (خواسته مالک ۹-۱۱).
     const campaign = await this.activeCampaign();
-    const percent = campaign ? this.currentPercent(campaign, campaign.purchaseCount) : 0;
-    const finalAmount = Math.round((plan.amount * (100 - percent)) / 100);
+    const basePercent = campaign
+      ? this.currentPercent(campaign, campaign.purchaseCount)
+      : 0;
+    const isNewUserCampaign = campaign?.type === 'new_user';
 
     // ۲) سفارش (ردیف مرجع) → ۳) چسباندن فیش با جبران کامل در خطا
-    //    شمارنده‌های جذب (کمپین + بسته) اتمیک با سفارش بالا می‌روند
+    //    شمارنده‌های جذب (کمپین + بسته) اتمیک با سفارش بالا می‌روند.
+    //    برای کاربران جدید درصد داخل تراکنش دوباره چک می‌شود تا دو سفارش
+    //    هم‌زمان نتوانند یک سهمیه را دوبار خرج کنند.
     const order = await this.prisma.$transaction(async (tx) => {
+      let percent = basePercent;
+      if (isNewUserCampaign && campaign) {
+        const me = await tx.user.findUnique({
+          where: { id: user.id },
+          select: { createdAt: true },
+        });
+        const used = await tx.packageOrder.count({
+          where: { userId: user.id, campaignId: campaign.id, status: { not: 'rejected' } },
+        });
+        const ctx = resolveNewUserWindow(
+          campaign,
+          me?.createdAt ?? new Date(0),
+          used,
+        );
+        percent = ctx.eligible ? basePercent : 0;
+      }
+      const finalAmount = Math.round((plan.amount * (100 - percent)) / 100);
       const created = await tx.packageOrder.create({
         data: {
           userId: user.id,
@@ -512,9 +634,9 @@ export class PackagesService {
       orderId: order.id,
       planKey: plan.key,
       months: plan.months,
-      amount: finalAmount,
+      amount: order.amount,
       baseAmount: plan.amount,
-      discountPercent: percent,
+      discountPercent: order.discountPercent,
       status: 'pending' as const,
     };
   }

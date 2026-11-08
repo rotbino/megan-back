@@ -26,7 +26,8 @@ const OID_RE = /^[0-9a-fA-F]{24}$/;
  * مدیریت بسته‌های اشتراک و کمپین‌های فروش (admin/packages/*) — خواسته مالک ۳۱-۱۰:
  *  • بسته‌ها: تعریف/ویرایش کامل (قیمت، مدت، عنوان، ویژگی‌ها) — قیمت دیگر ثابت نیست.
  *  • کمپین‌ها: زمانی (٪ ثابت تا پایان) و تعدادی (پله‌ای: ۱۰ نفر اول ۷۰٪، …) +
- *    تغییر دستی درصد جاری + آمار جذب هر کمپین/بسته.
+ *    کاربران جدید (۹-۱۱: ٪ تخفیف تا N روز پس از ثبت‌نام و تا M خرید برای هر
+ *    کاربر — مهلت شخصی، شمارشگر معکوس) + تغییر دستی درصد جاری + آمار جذب.
  * منطق صف و بازبینی سفارش‌ها از PackagesService مصرف می‌شود — کپی نمی‌شود.
  */
 @Injectable()
@@ -171,21 +172,26 @@ export class AdminPackagesService {
         const running = c.isActive && c.startsAt <= now && !expired;
         const tiers = readTiers(c.tiers);
         const effectiveCount = effectivePurchaseCount(c.purchaseCount, c.manualPurchaseCount);
+        const type = c.type === 'quantity' ? 'quantity' : c.type === 'new_user' ? 'new_user' : 'time';
         return {
           id: c.id,
           title: c.title,
           description: c.description,
-          type: c.type === 'quantity' ? 'quantity' : 'time',
+          type,
           discountPercent: c.discountPercent,
           manualDiscountPercent: c.manualDiscountPercent,
           finalPercent: c.finalPercent ?? null,
           manualPurchaseCount: c.manualPurchaseCount ?? null,
+          /** نوع کاربران جدید — پنجره پس از ثبت‌نام و سقف خرید (خواسته مالک ۹-۱۱) */
+          newUserDays: type === 'new_user' ? (c.newUserDays ?? 7) : null,
+          newUserMaxPurchases: type === 'new_user' ? (c.newUserMaxPurchases ?? 1) : null,
           startsAt: c.startsAt,
           endsAt: c.endsAt,
           isActive: c.isActive,
           expired,
           running,
-          /** درصد جاری مؤثر (روی صفحه بسته‌ها همین اعمال می‌شود) */
+          /** درصد جاری مؤثر (روی صفحه بسته‌ها همین اعمال می‌شود) — در
+           *  کاربران جدید: درصد تبلیغ‌شده برای بینندهٔ واجد شرایط */
           currentPercent: running
             ? this.packages.currentPercent(c, c.purchaseCount)
             : 0,
@@ -208,10 +214,18 @@ export class AdminPackagesService {
     if (title.length < 3) {
       throw AppError.badRequest('عنوان کمپین حداقل ۳ نویسه است.', 'CAMPAIGN_TITLE_INVALID');
     }
-    const type = dto.type === 'quantity' ? 'quantity' : 'time';
+    const type = dto.type === 'quantity' ? 'quantity' : dto.type === 'new_user' ? 'new_user' : 'time';
     const percent = Math.max(0, Math.min(100, Math.round(dto.discountPercent)));
-    if (type === 'time' && percent <= 0) {
-      throw AppError.badRequest('درصد تخفیف کمپین زمانی باید بزرگ‌تر از صفر باشد.', 'CAMPAIGN_PERCENT_INVALID');
+    if ((type === 'time' || type === 'new_user') && percent <= 0) {
+      throw AppError.badRequest('درصد تخفیف کمپین باید بزرگ‌تر از صفر باشد.', 'CAMPAIGN_PERCENT_INVALID');
+    }
+
+    // پیکربندی کمپین کاربران جدید — پنجره پس از ثبت‌نام + سقف خرید (خواسته مالک ۹-۱۱)
+    let newUserDays: number | null = null;
+    let newUserMaxPurchases: number | null = null;
+    if (type === 'new_user') {
+      newUserDays = Math.min(365, Math.max(1, Math.round(dto.newUserDays ?? 7)));
+      newUserMaxPurchases = Math.min(100, Math.max(1, Math.round(dto.newUserMaxPurchases ?? 3)));
     }
 
     // اعتبارسنجی پله‌ها (فقط تعدادی) — از مجاور و صعودی
@@ -268,6 +282,8 @@ export class AdminPackagesService {
       manualDiscountPercent: manual,
       finalPercent,
       manualPurchaseCount,
+      newUserDays,
+      newUserMaxPurchases,
       startsAt,
       endsAt,
       isActive: dto.isActive,

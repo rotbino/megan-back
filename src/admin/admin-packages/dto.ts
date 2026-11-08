@@ -168,9 +168,9 @@ export class UpsertCampaignDto {
   @MaxLength(400)
   description?: string;
 
-  /** time | quantity */
-  @IsIn(['time', 'quantity'])
-  type!: 'time' | 'quantity';
+  /** time | quantity | new_user (کاربران جدید — خواسته مالک ۹-۱۱) */
+  @IsIn(['time', 'quantity', 'new_user'])
+  type!: 'time' | 'quantity' | 'new_user';
 
   /** درصد تخفیف پایه (در زمانی = جاری) */
   @Type(() => Number)
@@ -178,6 +178,22 @@ export class UpsertCampaignDto {
   @Min(0)
   @Max(100)
   discountPercent!: number;
+
+  /** new_user — طول پنجرهٔ تخفیف پس از ثبت‌نام (روز؛ پیش‌فرض ۷) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  newUserDays?: number;
+
+  /** new_user — سقف خرید بسته با تخفیف برای هر کاربر (پیش‌فرض ۳) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  newUserMaxPurchases?: number;
 
   /** override دستی درصد جاری — null = خودکار پله‌ای */
   @IsOptional()

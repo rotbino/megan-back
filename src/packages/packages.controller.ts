@@ -3,8 +3,8 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { PackagesService } from './packages.service';
-import { JwtAuthGuard } from '../common/guards';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
+import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 
@@ -15,10 +15,14 @@ import { ok } from '../common/api-response';
 export class PackagesController {
   constructor(private readonly packages: PackagesService) {}
 
+  /** توکن اختیاری — کمپین «کاربران جدید» بیننده‌محور است: با ورود، مهلت
+   *  شخصی (createdAt + N روز) و درصد مؤثر همان کاربر برمی‌گردد (خواسته
+   *  مالک ۹-۱۱)؛ مهمان درصد تبلیغ‌شده را می‌بیند. */
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('getPlans')
   @ApiOperation({ summary: 'پلن‌های اشتراک + کمپین جاری + امکانات بسته رایگان + کارت واریز (عمومی)' })
-  async getPlans() {
-    return ok(await this.packages.getPlans());
+  async getPlans(@MaybeCurrentUser() user: AuthUser | null) {
+    return ok(await this.packages.getPlans(user));
   }
 
   @UseGuards(JwtAuthGuard)
