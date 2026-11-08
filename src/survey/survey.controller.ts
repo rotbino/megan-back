@@ -5,9 +5,9 @@ import { JwtAuthGuard, type AuthUser } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ok } from '../common/api-response';
 import { SurveyService } from './survey.service';
-import { SubmitSurveyDto } from './dto';
+import { ListFeedbackDto, SubmitFeedbackDto, UpvoteFeedbackDto } from './dto';
 
-/** نظرسنجی عملکرد ایمچ — فقط با توکن (پاسخ می‌آید تا فرم ویرایش پر شود). */
+/** نظرسنجی — تخته بازخورد و نیازها (تحقیقات بازار)؛ فقط با توکن. */
 @ApiTags('survey')
 @Controller('survey')
 export class SurveyController {
@@ -15,19 +15,37 @@ export class SurveyController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @Post('getMine')
-  @ApiOperation({ summary: 'پاسخ نظرسنجی من (null = هنوز نداده‌ام)' })
-  async getMine(@CurrentUser() user: AuthUser) {
-    return ok(await this.survey.getMine(user.id));
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post('list')
+  @ApiOperation({ summary: 'فید بازخوردها (فیلتر دسته + مرتب‌سازی جدیدترین/پرموافق‌ترین)' })
+  async list(@CurrentUser() user: AuthUser, @Body() dto: ListFeedbackDto) {
+    return ok(await this.survey.list(user.id, dto));
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } }) // ثبت/ویرایش محدود
+  @Throttle({ default: { limit: 6, ttl: 3_600_000 } }) // حداکثر ۶ بازخورد در ساعت — اسپم‌گیری
   @Post('submit')
-  @ApiOperation({ summary: 'ثبت/ویرایش پاسخ نظرسنجی (upsert — یک پاسخ به ازای کاربر)' })
-  async submit(@CurrentUser() user: AuthUser, @Body() dto: SubmitSurveyDto) {
-    return ok(await this.survey.submit(user.id, dto), 'نظر شما ثبت شد.');
+  @ApiOperation({ summary: 'ثبت بازخورد/نیاز جدید (چندتایی)' })
+  async submit(@CurrentUser() user: AuthUser, @Body() dto: SubmitFeedbackDto) {
+    return ok(await this.survey.submit(user.id, dto), 'بازخورد شما ثبت شد.');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('upvote')
+  @ApiOperation({ summary: 'toggle موافقت — «من هم همین را دارم»' })
+  async upvote(@CurrentUser() user: AuthUser, @Body() dto: UpvoteFeedbackDto) {
+    return ok(await this.survey.upvote(user.id, dto.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('deleteMine')
+  @ApiOperation({ summary: 'حذف بازخورد خودم' })
+  async deleteMine(@CurrentUser() user: AuthUser, @Body() dto: UpvoteFeedbackDto) {
+    return ok(await this.survey.deleteMine(user.id, dto.id), 'بازخورد حذف شد.');
   }
 }

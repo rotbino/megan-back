@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { SURVEY_SCORES } from '../../survey/dto';
+import { FEEDBACK_CATEGORIES } from '../../survey/dto';
 
 export class GetSurveyListDto {
   @ApiPropertyOptional({ description: 'جستجو: نام/نام خانوادگی/موبایل/یوزرنیم' })
@@ -10,15 +10,10 @@ export class GetSurveyListDto {
   @MaxLength(80)
   search?: string;
 
-  @ApiPropertyOptional({ enum: SURVEY_SCORES, description: 'فیلتر امتیاز' })
+  @ApiPropertyOptional({ enum: FEEDBACK_CATEGORIES, description: 'فیلتر دسته بازخورد' })
   @IsOptional()
-  @IsIn(SURVEY_SCORES as unknown as string[])
-  score?: string;
-
-  @ApiPropertyOptional({ description: 'فقط پاسخ‌های یادداشت‌دار' })
-  @IsOptional()
-  @IsString()
-  withNote?: string; // 'true' | 'false'
+  @IsIn(FEEDBACK_CATEGORIES as unknown as string[])
+  category?: string;
 
   @ApiPropertyOptional({ description: 'صفحه (پیش‌فرض ۱)' })
   @IsOptional()
@@ -37,7 +32,7 @@ export class GetSurveyListDto {
 }
 
 export class DeleteSurveyDto {
-  @ApiPropertyOptional({ description: 'شناسه پاسخ (SurveyResponse.id)' })
+  @ApiPropertyOptional({ description: 'شناسه بازخورد (FeedbackItem.id)' })
   @IsString()
   @MaxLength(40)
   id: string;

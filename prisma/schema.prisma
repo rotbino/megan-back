@@ -112,8 +112,10 @@ model User {
   reviewsWritten SellerReview[] @relation("ReviewAuthor")
   /// سفارش‌های خرید بسته اشتراک این کاربر (کارت‌به‌کارت + فیش)
   packageOrders  PackageOrder[] @relation("PackageOrderOwner")
-  /// پاسخ نظرسنجی عملکرد ایمچ (یکی؛ userId یکتا)
-  surveyResponse  SurveyResponse? @relation("SurveyOwner")
+  /// بازخورد و نیازهای این کاربر در نظرسنجی (چندتایی — /panel/survey)
+  feedbackItems   FeedbackItem[]  @relation("FeedbackAuthor")
+  /// موافقت‌های این کاربر با بازخورد دیگران («من هم همین را دارم»)
+  feedbackUpvotes FeedbackUpvote[] @relation("FeedbackUpvoter")
   /// گفتگوی پشتیبانی این کاربر (دوطرفه: کاربر ↔ پشتیبان — /panel/support)
   supportMessages SupportMessage[] @relation("SupportMessageOwner")
   /// آگهی‌هایی که این کاربر نشان کرده (علاقه‌مندی‌ها — ۳۰-۱۰)
@@ -1018,24 +1020,50 @@ model SellerReview {
   @@index([status, createdAt(sort: Desc)])
 }
 
-/// نظرسنجی عملکرد ایمچ (عین نظرسنجی باسکول): امتیاز ۵گانه + متن دلخواه.
-/// هر کاربر حداکثر یک پاسخ (userId یکتا) — ثبت مجدد یعنی ویرایش نظر خودش.
-/// پنل ادمین فهرست/آمار/حذف دارد (ماژول admin-surveys).
-model SurveyResponse {
+/// بازخورد/نیاز کاربر در نظرسنجی ایمچ — «تحقیقات بازار»:
+/// خطا و مشکل، انتقاد از امکان فعلی، پیشنهاد بهبود یا نیاز جدید.
+/// برخلاف مدل قبلی (SurveyResponse یکتا با امتیاز پنج‌گانه)، هر کاربر
+/// می‌تواند چند بازخورد بفرستد و همه کاربران فید عمومی را می‌بینند.
+model FeedbackItem {
   id String @id @default(auto()) @map("_id") @db.ObjectId
 
-  user   User   @relation("SurveyOwner", fields: [userId], references: [id], onDelete: Cascade)
-  userId String @unique @map("user_id") @db.ObjectId
+  user   User  @relation("FeedbackAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.ObjectId
 
-  /// excellent | good | average | bad | very_bad (۵گانه نظرسنجی)
-  score String
-  /// متن دلخواه — حداکثر ۱۰۰۰ نویسه
-  note  String?
+  /// bug | critique | improvement | feature (۴ دسته بازخورد)
+  category String
+  /// عنوان کوتاه — ۵ تا ۱۲۰ نویسه
+  title String
+  /// شرح کامل نیاز/مشکل — ۲۰ تا ۲۰۰۰ نویسه
+  body  String
+
+  /// نوشته تیم ایمچ؟ (بج «تیم ایمچ» در فید — نمونه‌های راهنما)
+  isStaff Boolean @default(false)
+
+  /// موافقت‌ها — «من هم همین را دارم» (سیگنال تقاضا برای تیم)
+  upvotes FeedbackUpvote[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([score])
+  @@index([category])
+  @@index([createdAt])
+}
+
+/// موافقت یک کاربر با یک بازخورد — یکتا به‌ازای (item, user)؛ toggle در سرویس.
+model FeedbackUpvote {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  item FeedbackItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId String @map("item_id") @db.ObjectId
+
+  user User  @relation("FeedbackUpvoter", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.ObjectId
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([itemId, userId])
+  @@index([userId])
 }
 
 // ─── فعالیت کاربران (خواسته مالک ۳۰-۱۰) ─────────────────────────────────────

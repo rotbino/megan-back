@@ -377,17 +377,22 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // ۸) نظرسنجی — هر کاربر یک پاسخ: پاسخ حساب فعلی برتر است
+    // ۸) نظرسنجی — بازخوردها (چندتایی) به حساب جذب‌شده منتقل می‌شوند
     {
-      const staleSurvey = await p.surveyResponse.findUnique({ where: { userId: sid } });
-      if (staleSurvey) {
-        const keeperSurvey = await p.surveyResponse.findUnique({ where: { userId: kid } });
-        if (keeperSurvey)
-          await p.surveyResponse.delete({ where: { id: staleSurvey.id } }).catch(() => undefined);
-        else
-          await p.surveyResponse
-            .update({ where: { id: staleSurvey.id }, data: { userId: kid } })
-            .catch(() => undefined);
+      await p.feedbackItem
+        .updateMany({ where: { userId: sid }, data: { userId: kid } })
+        .catch(() => undefined);
+      // موافقت‌ها تک‌تک — تداخل با موافقت قبلی حساب جذب‌شده (یکتایی item+user) نادیده گرفته می‌شود
+      const staleVotes = await p.feedbackUpvote.findMany({ where: { userId: sid }, select: { itemId: true } });
+      for (const v of staleVotes) {
+        await p.feedbackUpvote
+          .upsert({
+            where: { itemId_userId: { itemId: v.itemId, userId: kid } },
+            create: { itemId: v.itemId, userId: kid },
+            update: {},
+          })
+          .then(() => p.feedbackUpvote.deleteMany({ where: { itemId: v.itemId, userId: sid } }))
+          .catch(() => undefined);
       }
     }
 

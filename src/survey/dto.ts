@@ -1,19 +1,59 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
-/** پنج گزینه نظرسنجی — عین MHTML باسکول (عالی تا خیلی بد) */
-export const SURVEY_SCORES = ['excellent', 'good', 'average', 'bad', 'very_bad'] as const;
-export type SurveyScore = (typeof SURVEY_SCORES)[number];
+/** چهار دسته بازخورد نظرسنجی — «تحقیقات بازار» به‌جای امتیازدهی۵گانه */
+export const FEEDBACK_CATEGORIES = ['bug', 'critique', 'improvement', 'feature'] as const;
+export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 
-export class SubmitSurveyDto {
-  @ApiProperty({ enum: SURVEY_SCORES, description: 'امتیاز عملکرد ایمچ' })
-  @IsIn(SURVEY_SCORES as unknown as string[], { message: 'امتیاز نظرسنجی معتبر نیست.' })
-  score: SurveyScore;
+export class SubmitFeedbackDto {
+  @ApiProperty({ enum: FEEDBACK_CATEGORIES, description: 'دسته بازخورد' })
+  @IsIn(FEEDBACK_CATEGORIES as unknown as string[], { message: 'دسته بازخورد معتبر نیست.' })
+  category: FeedbackCategory;
 
-  @ApiPropertyOptional({ description: 'متن دلخواه (چه خوب بود؟ چه چیزی بهتر شود؟)', maxLength: 1000 })
-  @IsOptional()
+  @ApiProperty({ description: 'عنوان کوتاه', minLength: 5, maxLength: 120 })
   @IsString()
-  @MinLength(3)
-  @MaxLength(1000)
-  note?: string;
+  @MinLength(5, { message: 'عنوان دست‌کم ۵ نویسه باشد.' })
+  @MaxLength(120, { message: 'عنوان حداکثر ۱۲۰ نویسه باشد.' })
+  title: string;
+
+  @ApiProperty({ description: 'شرح کامل نیاز/مشکل', minLength: 20, maxLength: 2000 })
+  @IsString()
+  @MinLength(20, { message: 'شرح دست‌کم ۲۰ نویسه باشد.' })
+  @MaxLength(2000, { message: 'شرح حداکثر ۲۰۰۰ نویسه باشد.' })
+  body: string;
+}
+
+export class UpvoteFeedbackDto {
+  @ApiProperty({ description: 'شناسه بازخورد (FeedbackItem.id)' })
+  @IsString()
+  @MaxLength(40)
+  id: string;
+}
+
+export class ListFeedbackDto {
+  @ApiPropertyOptional({ enum: FEEDBACK_CATEGORIES, description: 'فیلتر دسته' })
+  @IsOptional()
+  @IsIn(FEEDBACK_CATEGORIES as unknown as string[])
+  category?: string;
+
+  @ApiPropertyOptional({ description: 'مرتب‌سازی: recent (جدیدترین) | top (پرموافق‌ترین)' })
+  @IsOptional()
+  @IsIn(['recent', 'top'])
+  sort?: string;
+
+  @ApiPropertyOptional({ description: 'صفحه (پیش‌فرض ۱)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ description: 'در هر صفحه (پیش‌فرض ۱۰، حداکثر ۳۰)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  perPage?: number;
 }

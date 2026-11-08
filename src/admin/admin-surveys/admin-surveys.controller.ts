@@ -16,15 +16,15 @@ export class AdminSurveysController {
 
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('getSurveyList')
-  @ApiOperation({ summary: 'فهرست پاسخ‌های نظرسنجی + آمار توزیع/یادداشت' })
+  @ApiOperation({ summary: 'فهرست بازخوردها + آمار دسته‌ای و مجموع موافقت‌ها' })
   async getSurveyList(@Body() dto: GetSurveyListDto) {
     return ok(await this.surveys.getSurveyList(dto));
   }
 
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('deleteSurveyResponse')
-  @ApiOperation({ summary: 'حذف یک پاسخ نظرسنجی' })
+  @ApiOperation({ summary: 'حذف یک بازخورد نظرسنجی' })
   async deleteSurveyResponse(@Body() dto: DeleteSurveyDto) {
-    return ok(await this.surveys.deleteSurveyResponse(dto.id), 'پاسخ نظرسنجی حذف شد.');
+    return ok(await this.surveys.deleteSurveyResponse(dto.id), 'بازخورد حذف شد.');
   }
 }

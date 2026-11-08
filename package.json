@@ -20,7 +20,8 @@
     "test:offer-flow": "node scripts/test-offer-flow.mjs",
     "test:b9": "node scripts/test-b9.mjs",
     "backup": "node scripts/backup.mjs",
-    "test:priority": "node scripts/test-follow-priority.mjs"
+    "test:priority": "node scripts/test-follow-priority.mjs",
+    "seed:feedback": "node scripts/seed-feedback.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1138.0",
