@@ -81,21 +81,23 @@ export interface ProcessedImage {
   watermarked: boolean;
 }
 
-// ─── واترمارک دائمی تصاویر آگهی (خواسته مالک ۸-۱۱ دور ۲۷) ─────────────────
+// ─── واترمارک دائمی تصاویر آگهی (خواسته مالک ۸-۱۱ دور ۲۷؛ اصلاح دور ۲۸) ────
 // واترمارک باید «جزء عکس» باشد نه لایهٔ نمایشی CSS — لایهٔ نمایشی با ذخیره‌کردن
-// عکس از بین می‌رود و ضد سرقت نیست. اینجا الگوی قطری لوگوی ایمچ (سفید +
-// دورخط تیره — روی هر پس‌زمینه‌ای خوانا) قبل از ذخیره داخل پیکسل‌های اصلی و
-// تامبنیل می‌نشیند تا هر نسخهٔ ذخیره/کپی/برش‌شده هم واترمارک را با خود داشته
-// باشد. فقط تصاویر «Product» واترمارک می‌گیرند (آواتار/مدارک نه).
+// عکس از بین می‌رود و ضد سرقت نیست. اینجا نشانِ ایمچ (سفید + دورخط تیره — روی
+// هر پس‌زمینه‌ای خوانا) قبل از ذخیره داخل پیکسل‌های اصلی و تامبنیل می‌نشیند تا
+// هر نسخهٔ ذخیره/کپی/برش‌شده هم واترمارک را با خود داشته باشد.
+// دور ۲۸ (خواستهٔ مالک ۸-۱۱): فقط «یک» نشان در مرکز تصویر — الگوی قطریِ
+// تکرارشونده حذف شد چون چندین نشانِ پخش‌شده خودِ عکس را خراب می‌کرد.
+// فقط تصاویر «Product» واترمارک می‌گیرند (آواتار/مدارک نه).
 // Asset: assets/watermark-tile.png — رندر یک‌بار با scripts/make-watermark-asset.mjs
 // (فونت قفل‌شده؛ در زمان اجرا هیچ SVG/فونتی پردازش نمی‌شود).
 
-/** ابعاد PNG کاشی — برای حفظ نسبت در resize */
+/** ابعاد PNG نشان — برای حفظ نسبت در resize */
 const WM_TILE_W = 354;
 const WM_TILE_H = 150;
-/** شفافیت نهایی نشان‌ها — تعادل ضدسرقت/دید جنس */
+/** شفافیت نهایی نشان — تعادل ضدسرقت/دید جنس */
 const WM_OPACITY = 0.28;
-/** زاویهٔ الگوی قطری (درجه) */
+/** زاویهٔ چرخش نشان مرکزی (درجه) */
 const WM_ANGLE = -25;
 
 /** کاشی یک‌بار خوانده و کش می‌شود (src و dist هر دو دو سطح بالاتر ریشه‌اند) */
@@ -192,31 +194,31 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   private static readonly MAIN_MAX_BYTES = 500 * 1024;
   private static readonly THUMB_MAX_WIDTH = 500;
 
-  /** لایهٔ واترمارک تمام‌تصویر — الگوی قطری <pattern> با کاشی محوشده
-   *  (dest-in). اندازهٔ کاشی نسبت‌دار با عرض تصویر (۲۲٪، مقید ۷۶..۳۰۰px)،
-   *  خانهٔ الگو ۲× عرض / ۲.۵× ارتفاع کاشی ≈ ۱۰-۱۵ نشان در تصویر.
-   *  تصاویر خیلی کوچک واترمارک نمی‌گیرند (جا نیست). */
+  /** لایهٔ واترمارک — «یک» نشانِ محوشده در مرکز تصویر با چرخش ملایم
+   *  (خواستهٔ مالک ۸-۱۱ دور ۲۸: چندین نشانِ تکرارشونده عکس را خراب می‌کرد؛
+   *  عرض نشان ~۴۵٪ عرض تصویر، مقید ۱۴۰..۵۲۰px). تصاویر خیلی کوچک واترمارک
+   *  نمی‌گیرند (جا نیست). */
   private async watermarkLayer(w: number, h: number): Promise<Buffer | null> {
     if (w < 160 || h < 120) return null;
     try {
       const sharp = (await import('sharp')).default;
-      const tw = Math.max(76, Math.min(300, Math.round(w * 0.22)));
+      const tw = Math.max(140, Math.min(520, Math.round(w * 0.45)));
       const th = Math.round((tw * WM_TILE_H) / WM_TILE_W);
-      // محو کردن کاشی — آلفای PNG با dest-in در ضرب می‌شود (شفافیت یکنواخت)
+      // محو کردن نشان — آلفای PNG با dest-in در ضرب می‌شود (شفافیت یکنواخت)
       const base = await sharp(await watermarkTile()).resize(tw, th).png().toBuffer();
       const fade = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="${th}">` +
           `<rect width="100%" height="100%" fill="#000" fill-opacity="${WM_OPACITY}"/></svg>`,
       );
       const tile = await sharp(base).composite([{ input: fade, blend: 'dest-in' }]).png().toBuffer();
-      const cellW = Math.round(tw * 2);
-      const cellH = Math.round(th * 2.5);
+      // نشانِ تنها در مرکز، چرخیده حول مرکز تصویر — بیرون‌زدگی گوشه‌ها
+      // توسط خود بوم SVG (w×h) بریده می‌شود
+      const cx = Math.round(w / 2);
+      const cy = Math.round(h / 2);
       const svg = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
-          `<defs><pattern id="wm" patternUnits="userSpaceOnUse" width="${cellW}" height="${cellH}" patternTransform="rotate(${WM_ANGLE})">` +
-          `<image href="data:image/png;base64,${tile.toString('base64')}" x="0" y="0" width="${tw}" height="${th}"/>` +
-          `</pattern></defs>` +
-          `<rect width="${w}" height="${h}" fill="url(#wm)"/></svg>`,
+          `<image href="data:image/png;base64,${tile.toString('base64')}" x="${cx - Math.round(tw / 2)}" y="${cy - Math.round(th / 2)}" width="${tw}" height="${th}" transform="rotate(${WM_ANGLE} ${cx} ${cy})"/>` +
+          `</svg>`,
       );
       return await sharp(svg).png().toBuffer();
     } catch {

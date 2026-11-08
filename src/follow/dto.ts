@@ -37,19 +37,34 @@ export type FollowPriority = (typeof FOLLOW_PRIORITIES)[number];
 export const FOLLOW_TARGET_TYPES = ['buy_request', 'product'] as const;
 export type FollowTargetType = (typeof FOLLOW_TARGET_TYPES)[number];
 
+/** نوع پرونده/سرنخ — مستقل‌سازی کامل دو نوع (خواستهٔ مالک ۸-۱۱ دور ۲۸):
+ *  buy: سرنخ خرید — آگهی فروشِ ذخیره‌شده (دید خریدار)
+ *  sell: سرنخ فروش — درخواست خریدِ ذخیره‌شده (دید فروشنده) */
+export const FOLLOW_FOLDER_KINDS = ['buy', 'sell'] as const;
+export type FollowFolderKind = (typeof FOLLOW_FOLDER_KINDS)[number];
+
 const OID_RE = /^[0-9a-fA-F]{24}$/;
 export function isOid(v: unknown): v is string {
   return typeof v === 'string' && OID_RE.test(v);
 }
 
-/** POST /follow/getFolders — پرونده‌های کاربر با تعداد و خلاصه قیف */
-export class GetFoldersDto {}
+/** POST /follow/getFolders — پرونده‌های کاربر با تعداد و خلاصه قیف؛
+ *  kind اختیاری: فقط پرونده‌های همان نوع سرنخ (خرید/فروش) */
+export class GetFoldersDto {
+  @IsOptional()
+  @IsIn(FOLLOW_FOLDER_KINDS as unknown as string[])
+  kind?: FollowFolderKind;
+}
 
-/** POST /follow/createFolder — «پرونده جدید» با نام یکتا */
+/** POST /follow/createFolder — «پرونده جدید» با نام یکتا در همان نوع سرنخ */
 export class CreateFolderDto {
   @IsString()
   @Length(1, 60)
   name!: string;
+
+  @IsOptional()
+  @IsIn(FOLLOW_FOLDER_KINDS as unknown as string[])
+  kind?: FollowFolderKind;
 }
 
 /** POST /follow/renameFolder — تغییر نام پرونده */
@@ -188,5 +203,10 @@ export class GetFollowingMapDto {
   targetType!: FollowTargetType;
 }
 
-/** POST /follow/getAllItems — همهٔ موارد کاربر از همهٔ پرونده‌ها (تک‌صفحهٔ CRM) */
-export class GetAllItemsDto {}
+/** POST /follow/getAllItems — همهٔ موارد کاربر از همهٔ پرونده‌ها (تک‌صفحهٔ CRM)؛
+ *  targetType اختیاری: فقط همان نوع (product=سرنخ خرید / buy_request=سرنخ فروش) */
+export class GetAllItemsDto {
+  @IsOptional()
+  @IsIn(FOLLOW_TARGET_TYPES as unknown as string[])
+  targetType?: FollowTargetType;
+}

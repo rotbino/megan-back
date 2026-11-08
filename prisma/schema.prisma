@@ -551,13 +551,19 @@ model FollowFolder {
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("FollowFolderOwner", fields: [userId], references: [id], onDelete: Cascade)
 
+  /// نوع سرنخ — buy: سرنخ خرید (آگهی فروشِ ذخیره‌شده، دید خریدار) |
+  /// sell: سرنخ فروش (درخواست خریدِ ذخیره‌شده، دید فروشنده).
+  /// مستقل‌سازی کامل دو نوع (خواستهٔ مالک ۸-۱۱ دور ۲۸): پرونده‌ها، نام‌ها و
+  /// همه‌چیز جدا — «کارخانه‌ای رب می‌فروشد و گوجه می‌خرد».
+  /// null = ردیف قدیمی قبل از این دور — با اولین ذخیره به kind درست تبدیل می‌شود.
+  kind  String?
   name  String
   items FollowItem[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([userId, name])
+  @@unique([userId, kind, name])
 }
 
 /// مورد پیگیری — هدف چندریخت: درخواست خرید (دید فروشنده) یا آگهی فروش (دید خریدار).

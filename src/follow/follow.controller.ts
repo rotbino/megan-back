@@ -39,9 +39,9 @@ export class FollowController {
   constructor(private readonly follow: FollowService) {}
 
   @Post('getFolders')
-  @ApiOperation({ summary: 'پرونده‌های پیگیری کاربر + تعداد + خلاصه قیف وضعیت‌ها' })
-  async getFolders(@CurrentUser() user: AuthUser, @Body() _dto: GetFoldersDto) {
-    return ok(await this.follow.getFolders(user.id));
+  @ApiOperation({ summary: 'پرونده‌های پیگیری کاربر + تعداد + خلاصه قیف وضعیت‌ها — kind: فقط همان نوع سرنخ' })
+  async getFolders(@CurrentUser() user: AuthUser, @Body() dto: GetFoldersDto) {
+    return ok(await this.follow.getFolders(user.id, dto.kind));
   }
 
   @Post('createFolder')
@@ -71,9 +71,9 @@ export class FollowController {
   }
 
   @Post('getAllItems')
-  @ApiOperation({ summary: 'همهٔ موارد کاربر از همهٔ پرونده‌ها — تک‌صفحهٔ CRM (جستجو/فیلتر سمت فرانت)' })
-  async getAllItems(@CurrentUser() user: AuthUser, @Body() _dto: GetAllItemsDto) {
-    return ok(await this.follow.getAllItems(user));
+  @ApiOperation({ summary: 'همهٔ موارد کاربر از همهٔ پرونده‌ها — تک‌صفحهٔ CRM — targetType: فقط همان نوع سرنخ' })
+  async getAllItems(@CurrentUser() user: AuthUser, @Body() dto: GetAllItemsDto) {
+    return ok(await this.follow.getAllItems(user, dto.targetType));
   }
 
   @Post('upsertItem')

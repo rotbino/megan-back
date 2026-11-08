@@ -10,6 +10,7 @@ import type {
   AddItemNoteDto,
   CreateFolderDto,
   DeleteFolderDto,
+  FollowFolderKind,
   FollowStatus,
   FollowTargetType,
   GetFolderItemsDto,
@@ -80,11 +81,23 @@ export class FollowService {
 
   // ─── پرونده‌ها ─────────────────────────────────────────────────────────────
 
+  /** نوع پروندهٔ متناظر هر نوع هدف — آگهی (product) → سرنخ خرید،
+   *  درخواست خرید (buy_request) → سرنخ فروش (خواستهٔ مالک ۸-۱۱ دور ۲۸) */
+  private static kindOfTarget(targetType: FollowTargetType): FollowFolderKind {
+    return targetType === 'buy_request' ? 'sell' : 'buy';
+  }
+
+  /** برچسب فارسی نوع سرنخ — برای پیام خطای پروندهٔ ناهمخوان */
+  private static kindLabel(kind: FollowFolderKind): string {
+    return kind === 'sell' ? 'فروش' : 'خرید';
+  }
+
   /** POST /follow/getFolders — پرونده‌های کاربر با تعداد و خلاصه قیف؛
+   *  kind اختیاری: فقط همان نوع سرنخ — پرونده‌های خرید و فروش مستقل‌اند.
    *  سورت بر اساس آخرین تحول (آخرین تغییر روی موارد یا خود پرونده) */
-  async getFolders(userId: string): Promise<FollowFolderDto[]> {
+  async getFolders(userId: string, kind?: FollowFolderKind): Promise<FollowFolderDto[]> {
     const [folders, items] = await Promise.all([
-      this.prisma.followFolder.findMany({ where: { userId } }),
+      this.prisma.followFolder.findMany({ where: { userId, ...(kind ? { kind } : {}) } }),
       this.prisma.followItem.findMany({
         where: { userId },
         select: { folderId: true, status: true, updatedAt: true },
@@ -110,13 +123,14 @@ export class FollowService {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  /** POST /follow/createFolder — نام یکتا به‌ازای کاربر */
+  /** POST /follow/createFolder — نام یکتا به‌ازای کاربر در همان نوع سرنخ */
   async createFolder(user: AuthUser, dto: CreateFolderDto): Promise<FollowFolderDto> {
     const name = dto.name.trim();
     if (!name) throw AppError.badRequest('نام پرونده نمی‌تواند خالی باشد.');
-    const dupe = await this.prisma.followFolder.findFirst({ where: { userId: user.id, name } });
+    const kind = dto.kind ?? 'buy';
+    const dupe = await this.prisma.followFolder.findFirst({ where: { userId: user.id, name, kind } });
     if (dupe) throw AppError.badRequest('پرونده‌ای با همین نام دارید.');
-    const folder = await this.prisma.followFolder.create({ data: { userId: user.id, name } });
+    const folder = await this.prisma.followFolder.create({ data: { userId: user.id, name, kind } });
     return {
       id: folder.id,
       name: folder.name,
@@ -132,7 +146,9 @@ export class FollowService {
     if (!name) throw AppError.badRequest('نام پرونده نمی‌تواند خالی باشد.');
     const folder = await this.ownFolder(user.id, dto.folderId);
     if (folder.name !== name) {
-      const dupe = await this.prisma.followFolder.findFirst({ where: { userId: user.id, name } });
+      const dupe = await this.prisma.followFolder.findFirst({
+        where: { userId: user.id, name, kind: folder.kind },
+      });
       if (dupe) throw AppError.badRequest('پرونده‌ای با همین نام دارید.');
       await this.prisma.followFolder.update({ where: { id: folder.id }, data: { name } });
     }
@@ -159,9 +175,11 @@ export class FollowService {
 
   /** POST /follow/upsertItem — گام ۲ جریان ذخیره.
    *  هدف تازه: ایجاد در پرونده با وضعیت (+ اولویت + یادآور + یادداشت اختیاری).
-   *  هدف از قبل ذخیره‌شده: انتقال به پروندهٔ انتخابی + به‌روزرسانی وضعیت/اولویت/یادآور. */
+   *  هدف از قبل ذخیره‌شده: انتقال به پروندهٔ انتخابی + به‌روزرسانی وضعیت/اولویت/یادآور.
+   *  دور ۲۸: پروندهٔ ناهمخوان با نوع سرنخ رد می‌شود؛ پروندهٔ قدیمیِ بی‌نوع
+   *  (قبل از دور ۲۸) با اولین ذخیره به نوع درست برچسب می‌خورد. */
   async upsertItem(user: AuthUser, dto: UpsertItemDto): Promise<FollowItemDto> {
-    const folder = await this.ownFolder(user.id, dto.folderId);
+    const folder = await this.assertFolderKind(user.id, dto.folderId, dto.targetType);
     await this.assertTargetExists(dto.targetType, dto.targetId);
 
     const note = dto.note?.trim();
@@ -234,10 +252,10 @@ export class FollowService {
     });
   }
 
-  /** POST /follow/moveItem — انتقال به پرونده دیگر */
+  /** POST /follow/moveItem — انتقال به پروندهٔ دیگر (از همان نوع سرنخ — دور ۲۸) */
   async moveItem(user: AuthUser, dto: MoveItemDto): Promise<void> {
     const item = await this.ownItem(user.id, dto.itemId);
-    const dest = await this.ownFolder(user.id, dto.folderId);
+    const dest = await this.assertFolderKind(user.id, dto.folderId, item.targetType as FollowTargetType);
     if (item.folderId !== dest.id) {
       await this.prisma.followItem.update({
         where: { id: item.id },
@@ -294,10 +312,11 @@ export class FollowService {
   }
 
   /** POST /follow/getAllItems — همهٔ موارد کاربر از همهٔ پرونده‌ها (تک‌صفحهٔ CRM:
-   *  جستجو + فیلتر پرونده/وضعیت/شهر سمت فرانت روی همین لیست انجام می‌شود). */
-  async getAllItems(user: AuthUser): Promise<FollowItemDto[]> {
+   *  جستجو + فیلتر پرونده/وضعیت/شهر سمت فرانت روی همین لیست انجام می‌شود).
+   *  targetType اختیاری — صفحات سرنخ خرید و سرنخ فروش مستقل‌اند (دور ۲۸). */
+  async getAllItems(user: AuthUser, targetType?: FollowTargetType): Promise<FollowItemDto[]> {
     const items = await this.prisma.followItem.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, ...(targetType ? { targetType } : {}) },
       include: { notes: true, folder: { select: { name: true } } },
       orderBy: { updatedAt: 'desc' },
     });
@@ -310,6 +329,26 @@ export class FollowService {
   private async ownFolder(userId: string, folderId: string) {
     const folder = await this.prisma.followFolder.findFirst({ where: { id: folderId, userId } });
     if (!folder) throw AppError.notFound('پرونده پیدا نشد.');
+    return folder;
+  }
+
+  /** پروندهٔ متعلق به کاربر با نوع درست سرنخ — مستقل‌سازی خرید/فروش (دور ۲۸):
+   *  پروندهٔ قدیمیِ بی‌نوع با اولین استفاده برچسب می‌خورد؛ پروندهٔ ناهمخوان
+   *  پیام روشن می‌دهد تا سرنخ خرید و فروش هرگز در هم مخلوط نشوند. */
+  private async assertFolderKind(userId: string, folderId: string, targetType: FollowTargetType) {
+    const folder = await this.ownFolder(userId, folderId);
+    const expected = FollowService.kindOfTarget(targetType);
+    if (folder.kind && folder.kind !== expected) {
+      throw AppError.badRequest(
+        `این پرونده مخصوص سرنخ‌های ${FollowService.kindLabel(folder.kind as FollowFolderKind)} است — برای این ذخیره پرونده‌ای از سرنخ‌های ${FollowService.kindLabel(expected)} انتخاب کنید.`,
+      );
+    }
+    if (!folder.kind) {
+      await this.prisma.followFolder.update({
+        where: { id: folder.id },
+        data: { kind: expected },
+      }).catch(() => undefined); // برچسب‌خوردن بهترین‌حال است
+    }
     return folder;
   }
 
