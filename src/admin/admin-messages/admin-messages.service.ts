@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.module';
 import { AppError } from '../../common/errors/app-error';
 import { PushService } from '../../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../../chat/io-holder';
+import { USER_SELECT, toUserCard, type UserCard } from '../user-card';
 import type {
   GetUserMessagesDto,
   SendToAllDto,
@@ -21,6 +23,21 @@ export interface AdminMessageRow {
   text: string;
   read_at: Date | null;
   created_at: Date;
+}
+
+/** دستهٔ ارسال در «آخرین ارسال‌ها» (خواستهٔ مالک ۸-۱۱ دور ۲۴) */
+export interface AdminSendBatch {
+  batchId: string;
+  text: string;
+  adminUsername: string;
+  /** لحظهٔ ارسال (جدیدترین ردیف دسته) */
+  at: Date;
+  /** شمار گیرندگان دسته */
+  total: number;
+  /** چند نفر خوانده‌اند */
+  read: number;
+  /** حداکثر ۶ گیرندهٔ اول برای نمایش — بقیه با «+N دیگر» */
+  recipients: UserCard[];
 }
 
 /** مخاطب ارسال گروهی → شرط پرایسما (همان فیلترهای لیست کاربران) */
@@ -65,7 +82,13 @@ export class AdminMessagesService {
     if (!user) throw AppError.notFound('کاربر یافت نشد.');
 
     const message = await this.prisma.adminMessage.create({
-      data: { userId: user.id, adminUsername, text: dto.text.trim(), readAt: null },
+      data: {
+        userId: user.id,
+        adminUsername,
+        text: dto.text.trim(),
+        batchId: randomUUID(),
+        readAt: null,
+      },
     });
 
     this.notifyOne({
@@ -89,8 +112,9 @@ export class AdminMessagesService {
     });
     if (!users.length) throw AppError.notFound('کاربری یافت نشد.');
 
+    const batchId = randomUUID();
     await this.insertChunks(
-      users.map((u) => ({ userId: u.id, adminUsername, text: dto.text.trim(), readAt: null })),
+      users.map((u) => ({ userId: u.id, adminUsername, text: dto.text.trim(), batchId, readAt: null })),
     );
 
     // اطلاع‌رسانی پس‌زمینه — پاسخ HTTP منتظر پوش نمی‌ماند
@@ -119,8 +143,9 @@ export class AdminMessagesService {
       return { sent: 0, audience };
     }
 
+    const batchId = randomUUID();
     await this.insertChunks(
-      users.map((u) => ({ userId: u.id, adminUsername, text: dto.text.trim(), readAt: null })),
+      users.map((u) => ({ userId: u.id, adminUsername, text: dto.text.trim(), batchId, readAt: null })),
     );
 
     void this.notifyAll(
@@ -163,11 +188,55 @@ export class AdminMessagesService {
     };
   }
 
+  // ─── آخرین ارسال‌ها (صفحهٔ «پیام به کاربران») ──────────────────────────
+
+  /**
+   * POST /admin/messages/getRecentSends — دسته‌های ارسال اخیر، جدیدترین اول.
+   * هر ارسال (تکی/چندتایی/گروهی) یک batchId دارد؛ ردیف‌های قدیمی بدون
+   * batchId هرکدام دستهٔ تک‌نفرهٔ خودشان می‌شوند.
+   */
+  async getRecentSends(): Promise<{ items: AdminSendBatch[] }> {
+    const rows = await this.prisma.adminMessage.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+      include: { user: { select: USER_SELECT } },
+    });
+
+    const byBatch = new Map<string, AdminSendBatch>();
+    const seenUsers = new Map<string, Set<string>>(); // جلوگیری از تکرار گیرنده در دسته
+    for (const m of rows) {
+      const key = m.batchId ?? `solo:${m.id}`;
+      let batch = byBatch.get(key);
+      if (!batch) {
+        batch = {
+          batchId: key,
+          text: m.text,
+          adminUsername: m.adminUsername,
+          at: m.createdAt,
+          total: 0,
+          read: 0,
+          recipients: [],
+        };
+        byBatch.set(key, batch);
+        seenUsers.set(key, new Set());
+      }
+      batch.total += 1;
+      if (m.readAt) batch.read += 1;
+      const seen = seenUsers.get(key)!;
+      if (!seen.has(m.userId) && batch.recipients.length < 6) {
+        seen.add(m.userId);
+        batch.recipients.push(toUserCard(m.user));
+      }
+    }
+
+    return { items: [...byBatch.values()].slice(0, 30) };
+  }
+
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
   /** createMany قطعه‌قطعه — مونگو در یک insert چند هزار ردیف را دوست ندارد */
   private async insertChunks(
-    data: Array<{ userId: string; adminUsername: string; text: string; readAt: null }>,
+    data: Array<{ userId: string; adminUsername: string; text: string; batchId: string; readAt: null }>,
   ): Promise<void> {
     for (let i = 0; i < data.length; i += CREATE_CHUNK) {
       await this.prisma.adminMessage.createMany({ data: data.slice(i, i + CREATE_CHUNK) });

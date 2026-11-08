@@ -2,11 +2,20 @@ import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
+import { IsBoolean, IsOptional } from 'class-validator';
 import { JwtAuthGuard, type AuthUser } from '../common/guards';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ok } from '../common/api-response';
 import { SupportService } from './support.service';
 import { SendMessageDto } from './dto';
+
+class GetConversationDto {
+  /** true = صفحهٔ پشتیبانی واقعاً مرئی است؛ پیام‌های پشتیبان خوانده می‌شوند.
+   *  پیش‌فرض false — fetch خالص (polling/WS) بج را نمی‌شکند (رفع باگ دور ۲۴) */
+  @IsOptional()
+  @IsBoolean()
+  markRead?: boolean;
+}
 
 /**
  * گفتگوی پشتیبانی — سمت کاربر (صفحه /panel/support).
@@ -21,9 +30,18 @@ export class SupportController {
   @ApiBearerAuth()
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Post('getConversation')
-  @ApiOperation({ summary: 'گفتگوی پشتیبانی من — پیام‌های پشتیبان خوانده‌شده علامت می‌خورند' })
-  async getConversation(@CurrentUser() user: AuthUser) {
-    return ok(await this.support.getConversation(user.id));
+  @ApiOperation({ summary: 'گفتگوی پشتیبانی من — خواندن فقط با markRead صریح (تب مرئی)' })
+  async getConversation(@CurrentUser() user: AuthUser, @Body() dto: GetConversationDto) {
+    return ok(await this.support.getConversation(user.id, dto.markRead === true));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('markRead')
+  @ApiOperation({ summary: 'خواندن پاسخ‌های پشتیبان — باز کردن واقعی صفحهٔ پشتیبانی' })
+  async markRead(@CurrentUser() user: AuthUser) {
+    return ok(await this.support.markRead(user.id));
   }
 
   @UseGuards(JwtAuthGuard)

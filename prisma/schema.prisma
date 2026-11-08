@@ -902,6 +902,11 @@ model AdminMessage {
   /// متن پیام — ساده در v1 (بدون فایل/عنوان)
   text    String
 
+  /// شناسهٔ دستهٔ ارسال (خواستهٔ مالک ۸-۱۱ دور ۲۴: «پیام به کاربران») —
+  /// ارسال گروهی = چند ردیف با batchId یکسان؛ تاریخچه به‌صورت دسته نمایش
+  /// داده می‌شود. null = ردیف‌های قدیمی پیش از این فیلد (هرکدام دسته خودش)
+  batchId String? @map("batch_id")
+
   /// null = خوانده‌نشده — با باز کردن مکالمه پشتیبانی توسط کاربر پر می‌شود
   readAt  DateTime? @map("read_at")
 
@@ -909,6 +914,7 @@ model AdminMessage {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([readAt, createdAt(sort: Desc)])
+  @@index([batchId, createdAt(sort: Desc)])
 }
 
 /// گفتگوی پشتیبانی کاربر ↔ پشتیبان — دوطرفه (خواستهٔ مالک ۸-۱۱ دور ۲۱).

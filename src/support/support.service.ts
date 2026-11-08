@@ -111,15 +111,17 @@ export class SupportService {
     this.storage = buildStorage();
   }
 
-  /** کل گفتگوی پشتیبانی کاربر — باز کردن = خواندن پیام‌های پشتیبان */
-  async getConversation(userId: string) {
+  /** کل گفتگوی پشتیبانی کاربر — خواندن فقط با فراخوانی صریح markRead
+   *  (رفع باگ ۸-۱۱ دور ۲۴: قبلاً هر fetch (polling پس‌زمینه/تب مخفی) بج
+   *  پشتیبانی را بی‌آنکه کاربر ببیند صفر می‌کرد — حلقهٔ اعلان می‌شکست) */
+  async getConversation(userId: string, markRead = false) {
     // اول شمار پاسخ‌های خوانده‌نشده پشتیبان (برای toast/بج فرانت)
     const unreadFromAdmin = await this.prisma.supportMessage.count({
       where: { userId, senderRole: 'admin', readAt: null },
     });
 
-    // باز کردن گفتگو = پیام‌های پشتیبان خوانده‌شده (الگوی AdminMessage)
-    if (unreadFromAdmin > 0) {
+    // فقط با فراخوانی صریح (تب مرئی + کاربر واقعاً صفحه را می‌بیند)
+    if (markRead && unreadFromAdmin > 0) {
       await this.prisma.supportMessage.updateMany({
         where: { userId, senderRole: 'admin', readAt: null },
         data: { readAt: new Date() },
@@ -134,6 +136,16 @@ export class SupportService {
     });
 
     return { messages: messages.map(toSupportDto), unreadFromAdmin };
+  }
+
+  /** POST /support/markRead — باز کردن واقعی صفحهٔ پشتیبانی = خواندن
+   *  پاسخ‌های پشتیبان؛ بج‌ها (ticket) صفر می‌شوند. */
+  async markRead(userId: string): Promise<{ read: number }> {
+    const r = await this.prisma.supportMessage.updateMany({
+      where: { userId, senderRole: 'admin', readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { read: r.count };
   }
 
   /**

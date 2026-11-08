@@ -66,4 +66,10 @@ export class AdminMessagesController {
   async getUserMessages(@Body() dto: GetUserMessagesDto) {
     return ok(await this.messages.getUserMessages(dto));
   }
+
+  @Post('getRecentSends')
+  @ApiOperation({ summary: 'آخرین ارسال‌های «پیام به کاربران» — دسته‌ای، جدیدترین اول' })
+  async getRecentSends() {
+    return ok(await this.messages.getRecentSends());
+  }
 }
