@@ -133,6 +133,10 @@ model User {
   /// مخاطبین گوشی این کاربر — «ارسال به مخاطبین» (۴-۱۱): یک‌بار از
   /// Contact Picker مرورگر لود می‌شود و در ایمچ می‌ماند
   contacts Contact[] @relation("ContactOwner")
+  /// کاتالوگ محصول این کاربر — صفحهٔ عمومی مستقل /catalog/{pageId} (۱۰-۱۱)
+  catalog UserCatalog? @relation("UserCatalogOwner")
+  /// کاتالوگ‌هایی که این کاربر ذخیره کرده — دفترچهٔ پنل خریدار (۱۰-۱۱)
+  savedCatalogs SavedCatalog[] @relation("SavedCatalogOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1278,4 +1282,51 @@ model SupplyOffer {
   @@index([sellerId, createdAt(sort: Desc)])
   @@index([buyerId, createdAt(sort: Desc)])
   @@index([buyerId, categoryId])
+}
+
+// ─── کاتالوگ محصول (خواسته مالک ۱۰-۱۱) ───────────────────────────────
+// صفحهٔ عمومی مستقل فروشنده در /catalog/{pageId} — بدون هدر/فوتر/نوار ایمچ؛
+// فروشنده لینکش را برای مشتری‌های خودش می‌فرستد. محصولات و نظرات از همان
+// دیتای ایمچ می‌آیند (getSeller)؛ این‌جا فقط تنظیمات اختصاصی پیج است.
+
+/// تنظیمات کاتالوگ — هر کاربر حداکثر یک کاتالوگ (یک‌به‌یک)
+model UserCatalog {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// صاحب کاتالوگ
+  user   User   @relation("UserCatalogOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique @map("user_id") @db.ObjectId
+
+  /// آیدی یکتای پیج — آدرس عمومی /catalog/{pageId}؛ لاتین کوچک/عدد/خط تیره، ۳ تا ۳۰ نویسه
+  pageId String @unique
+  /// رنگ برند (hex) — کل تم صفحهٔ کاتالوگ با آن رنگ می‌شود
+  brandColor String @default("#0f766e") @map("brand_color")
+  /// آیدی اینستاگرام بدون @ (null = دکمهٔ اینستاگرام مخفی است)
+  instagramId String? @map("instagram_id")
+  /// شماره واتساپ 09xxxxxxxxx (null = دکمهٔ واتساپ مخفی است)
+  whatsappNumber String? @map("whatsapp_number")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime? @map("updated_at")
+
+  /// کسانی که این کاتالوگ را ذخیره کرده‌اند
+  savedBy SavedCatalog[] @relation("SavedCatalogTarget")
+}
+
+/// کاتالوگ ذخیره‌شدهٔ خریدار — «کاتالوگهای ذخیره شده» پنل خرید (دفترچهٔ تلفن)
+model SavedCatalog {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// ذخیره‌کننده (خریدار)
+  user   User   @relation("SavedCatalogOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.ObjectId
+
+  /// کاتالوگ ذخیره‌شده
+  catalog   UserCatalog @relation("SavedCatalogTarget", fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String @map("catalog_id") @db.ObjectId
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, catalogId])
+  @@index([catalogId, createdAt(sort: Desc)])
 }

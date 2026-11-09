@@ -16,6 +16,7 @@
     "seed:products": "node scripts/seed-products.mjs",
     "make-admin": "node scripts/make-admin.mjs",
     "test:api": "node scripts/test-api.mjs",
+    "test:catalog": "node scripts/test-catalog.mjs",
     "test:quota": "node scripts/test-quota.mjs",
     "test:offer-flow": "node scripts/test-offer-flow.mjs",
     "test:b9": "node scripts/test-b9.mjs",

@@ -77,6 +77,8 @@ export interface ProductDto {
     lastName: string;
     activePakageType: 0;
     isVerified: boolean;
+    /** کاتالوگ محصول فروشنده (۱۰-۱۱) — دکمهٔ «کاتالوگ محصول» کنار پروفایل؛ null = ندارد */
+    catalog: { pageId: string } | null;
   };
   isLadder: boolean;
   isElevated: boolean;
@@ -109,6 +111,8 @@ interface NameMaps {
   cats: Map<number, string>;
   provs: Map<number, string>;
   cities: Map<number, string>;
+  /** آیدی پیج کاتالوگ هر فروشنده (۱۰-۱۱) — خالی یعنی کاتالوگ ندارد */
+  catalogs: Map<string, string>;
 }
 
 const EMPTY_MAPS: NameMaps = {
@@ -116,6 +120,7 @@ const EMPTY_MAPS: NameMaps = {
   cats: new Map(),
   provs: new Map(),
   cities: new Map(),
+  catalogs: new Map(),
 };
 
 @Injectable()
@@ -1149,7 +1154,7 @@ export class ProductsService {
       })
     ).map((t) => t.id);
 
-    const [gallery, names, avatarFile, userGallery, userCertificates, locNames, reviewAgg, chatStats] = await Promise.all([
+    const [gallery, names, avatarFile, userGallery, userCertificates, locNames, reviewAgg, chatStats, catalogRow] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
       this.prisma.file.findFirst({
@@ -1195,6 +1200,11 @@ export class ProductsService {
             }),
           ])
         : [[], []],
+      // کاتالوگ محصول فروشنده (۱۰-۱۱) — دکمهٔ «کاتالوگ محصول» کنار پروفایل
+      this.prisma.userCatalog.findUnique({
+        where: { userId: seller.id },
+        select: { pageId: true },
+      }),
     ]);
 
     const buyerThreads = new Set(chatStats[0].map((g) => g.threadId));
@@ -1241,6 +1251,8 @@ export class ProductsService {
         responseRate,
         productCount: rows.length,
         totalStock,
+        // کاتالوگ محصول (۱۰-۱۱) — دکمهٔ «کاتالوگ محصول» روی پروفایل عمومی
+        catalog: catalogRow ? { pageId: catalogRow.pageId } : null,
       },
       products: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
     };
@@ -1300,13 +1312,18 @@ export class ProductsService {
     const cityIds = [...new Set(rows.map((r) => r.cityId))];
     const catIds = [...new Set(rows.flatMap((r) => [r.categoryId, r.subCategoryId]))];
 
-    const [userRows, catMap, locNames] = await Promise.all([
+    const [userRows, catMap, locNames, catalogRows] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
         select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
       }),
       this.categories.getNameMap(), // کش‌شده
       this.locations.getNames(provinceIds, cityIds),
+      // کاتالوگ فروشندگان همین ردیف‌ها (۱۰-۱۱) — کوئری تکیِ batch‌شده
+      this.prisma.userCatalog.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true, pageId: true },
+      }),
     ]);
 
     const users = new Map(
@@ -1317,8 +1334,9 @@ export class ProductsService {
     );
     const cats = new Map<number, string>();
     for (const id of catIds) cats.set(id, catMap.get(id)?.category_name ?? '—');
+    const catalogs = new Map(catalogRows.map((c) => [c.userId, c.pageId]));
 
-    return { users, cats, provs: locNames.provinces, cities: locNames.cities };
+    return { users, cats, provs: locNames.provinces, cities: locNames.cities, catalogs };
   }
 
   /** نگاشت ردیف DB → DTO فرانت (camelCase) + عکس‌ها از جدول File + نام‌های join‌شده */
@@ -1389,6 +1407,8 @@ export class ProductsService {
         lastName: seller?.lastName ?? UNKNOWN,
         activePakageType: 0,
         isVerified: seller?.isVerified ?? false,
+        // کاتالوگ فروشنده (۱۰-۱۱) — دکمهٔ «کاتالوگ محصول» صفحهٔ آگهی
+        catalog: names.catalogs.has(p.userId) ? { pageId: names.catalogs.get(p.userId)! } : null,
       },
       isLadder: p.isLadder,
       isElevated: p.isElevated, // فروشنده ویژه — denorm از بسته فعال (۳۰-۱۰)

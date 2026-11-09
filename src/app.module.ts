@@ -29,6 +29,7 @@ import { PushModule } from './push/push.module';
 import { ActivityModule } from './activity/activity.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { CatalogModule } from './catalog/catalog.module';
 import { AdminModule } from './admin/admin.module';
 
 /**
@@ -65,6 +66,7 @@ import { AdminModule } from './admin/admin.module';
     ActivityModule, // فعالیت کاربران — جستجو/دسته/صفحه (۳۰-۱۰)
     FavoritesModule, // علاقه‌مندی‌ها — آگهی + فروشنده (۳۰-۱۰)
     ContactsModule, // مخاطبین گوشی — «ارسال به مخاطبین» (۴-۱۱)
+    CatalogModule, // کاتالوگ محصول — صفحهٔ عمومی مستقل فروشنده (۱۰-۱۱)
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],
   controllers: [HealthController],
