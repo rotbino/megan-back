@@ -11,6 +11,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { LocationsModule } from './locations/locations.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ProductsModule } from './products/products.module';
+import { CityMarketModule } from './city-market/city-market.module';
 import { VerificationModule } from './verification/verification.module';
 import { BuyRequestsModule } from './buy-requests/buy-requests.module';
 import { FollowModule } from './follow/follow.module';
@@ -46,6 +47,7 @@ import { AdminModule } from './admin/admin.module';
     LocationsModule,
     UploadsModule,
     ProductsModule,
+    CityMarketModule, // بازار عمدهٔ شهری — اندپوینت مستقل چندشهری (۹-۱۱)
     VerificationModule,
     BuyRequestsModule,
     FollowModule, // پیگیری‌ها — CRM کوچک (جایگزین نشان‌شده‌های باسکول)

@@ -22,7 +22,7 @@ export const BUYER_BOOK_MAX = 15;
 /** دوره‌های خرید — ترتیب نمایش در همه‌جا یکسان است: روزانه، هفتگی، ماهیانه، سالیانه، موردی */
 export const BUYER_PERIODS = ['daily', 'weekly', 'monthly', 'yearly', 'occasional'] as const;
 
-/** ردیف دفتر خرید — دستهٔ برگ + حداقل حجم + دوره؛ واحد از خود دسته می‌آید */
+/** ردیف دفتر خرید — دستهٔ برگ + حداقل حجم + دوره + نوع اختیاری؛ واحد از خود دسته می‌آید */
 export class BuyerBookItemDto {
   @Type(() => Number)
   @IsInt()
@@ -37,6 +37,13 @@ export class BuyerBookItemDto {
 
   @IsIn(BUYER_PERIODS)
   period!: string;
+
+  /** «نوع کالا» — آزاد مثل: قرمز (اختیاری، عین درخواست فوری — خواستهٔ مالک
+   *  ۹-۱۱: «سیب از نوع قرمز»؛ مثالش از دستهٔ آخر به کاربر نشان داده می‌شود) */
+  @IsOptional()
+  @IsString()
+  @Length(2, 100)
+  productType?: string;
 }
 
 /** POST /buyers/saveMyBook — جایگزینی کامل دفتر خرید من */

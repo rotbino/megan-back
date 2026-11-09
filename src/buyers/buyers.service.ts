@@ -38,6 +38,9 @@ import {
 
 const OID_RE = /^[0-9a-fA-F]{24}$/;
 
+/** شروع id نوع‌های تازه — عین buy-requests (بالای idهای باسکول) */
+const GOOD_START_ID = 900_000;
+
 /** مرز کم‌رنگ‌شدن — خریدار غایبِ بیش از ۹۰ روز «کم‌رنگ» می‌شود (نه حذف) */
 const ACTIVE_WINDOW_MS = 90 * 86_400_000;
 /** پنجرهٔ کامل دایرکتوری — ردیف‌های قدیمی‌تر از این مدت اصلاً نمی‌آیند */
@@ -73,6 +76,8 @@ export interface BuyerDirectoryEntry {
   unit: string;
   minAmount: number;
   period: string;
+  /** «نوع کالا» اختیاری — «سیب از نوع قرمز» (خواستهٔ مالک ۹-۱۱) */
+  productType: string | null;
   province: string | null;
   city: string | null;
   lastActiveAt: Date;
@@ -106,13 +111,16 @@ export class BuyersService {
 
   /** POST /buyers/getMyBook — ردیف‌های دفتر خرید من با نام دسته و مسیر
    *  + وضعیت بازبینی ادمین و دلایل رد (خواستهٔ مالک ۸-۱۱: درخواست‌های خرید
-   *  دوره‌ای هم مثل فوری سه تب تایید/در انتظار/ردشده دارند) */
+   *  دوره‌ای هم مثل فوری سه تب تایید/در انتظار/ردشده دارند) + «نوع کالا»
+   *  اختیاری (خواستهٔ مالک ۹-۱۱ — عین درخواست فوری) و مثال نوع همان دسته
+   *  برای پلیس‌هولدر فرم ویرایش */
   async getMyBook(userId: string) {
     const rows = await this.prisma.buyerCategory.findMany({
       where: { userId },
       orderBy: { createdAt: 'asc' },
     });
     const cats = await this.categoriesWithPath(rows.map((r) => r.categoryId));
+    const goods = await this.goodNameMap(rows.map((r) => r.goodId));
     return {
       max: BUYER_BOOK_MAX,
       items: rows.map((r) => {
@@ -125,6 +133,8 @@ export class BuyersService {
           unit: r.unit,
           minAmount: r.volumeMin,
           period: r.period,
+          productType: r.goodId != null ? (goods.get(r.goodId) ?? null) : null,
+          example: cat?.example ?? null,
           status: r.status as 'pending' | 'confirmed' | 'rejected',
           rejectionReasons: r.rejectionReasons ?? [],
         };
@@ -164,27 +174,55 @@ export class BuyersService {
     const periodOf = (p: string) =>
       (BUYER_PERIODS as readonly string[]).includes(p) ? p : 'monthly';
 
+    // «نوع کالا» → ردیف Good (idempotent، عین درخواست فوری — خواستهٔ مالک ۹-۱۱).
+    // قبل از تراکنش حل می‌شود؛ goodId هر دسته برای مقایسه با قبلی نگه می‌ماند.
+    const goodIdOf = new Map<number, number | null>();
+    for (const it of items) {
+      const typeName = it.productType?.trim();
+      goodIdOf.set(
+        it.categoryId,
+        typeName ? await this.upsertGood(it.categoryId, typeName, userId) : null,
+      );
+    }
+
     // حفظ وضعیت بازبینی ردیف‌های موجود (خواستهٔ مالک ۸-۱۱): ذخیرهٔ دفتر
     // جایگزینی کامل است، پس وضعیت هر ردیف از رویِ خودِ ردیف تعیین می‌شود:
-    //  • تاییدشده بدون تغییر مقدار/دوره → تاییدشده می‌ماند (ویرایش جزئی)
-    //  • ردشده بدون تغییر → رد می‌ماند (دلیلش هم می‌ماند)؛ با تغییر مقدار/دوره
+    //  • تاییدشده بدون تغییر مقدار/دوره/نوع → تاییدشده می‌ماند (ویرایش جزئی)
+    //  • ردشده بدون تغییر → رد می‌ماند (دلیلش هم می‌ماند)؛ با تغییر مقدار/دوره/نوع
     //    دوباره «در انتظار تایید» می‌شود (ارسال مجدد)
     //  • دستهٔ تازه همیشه «در انتظار تایید» است
     const existing = await this.prisma.buyerCategory.findMany({
-      where: { userId, categoryId: { in: [...seen] } },
-      select: { categoryId: true, volumeMin: true, period: true, status: true, rejectionReasons: true, reviewedAt: true },
+      where: { userId },
+      select: { categoryId: true, volumeMin: true, period: true, status: true, rejectionReasons: true, reviewedAt: true, goodId: true },
     });
     const prevByCat = new Map(existing.map((e) => [e.categoryId, e]));
 
+    // اصلاح شمارندهٔ استفادهٔ Goodها — upsertGood برای نوعِ حفظ‌شده هم +۱ زده،
+    // پس هر ردیفِ قبلیِ دارای نوع یکبار کم می‌شود: حفظ‌شده خالص صفر، حذف/عوض‌شده
+    // منهای یک — آمار «دفعات استفاده» همیشه درست می‌ماند
+    const decrementGoods = new Map<number, number>();
+    for (const prev of existing) {
+      if (prev.goodId == null) continue;
+      decrementGoods.set(prev.goodId, (decrementGoods.get(prev.goodId) ?? 0) + 1);
+    }
+
     await this.prisma.$transaction([
       this.prisma.buyerCategory.deleteMany({ where: { userId } }),
+      ...[...decrementGoods.entries()].map(([goodId, n]) =>
+        this.prisma.good.update({
+          where: { id: goodId },
+          data: { usageCount: { decrement: n } },
+        }),
+      ),
       ...items.map((it: BuyerBookItemDto) => {
         const cat = cats.get(it.categoryId);
         const prev = prevByCat.get(it.categoryId);
+        const goodId = goodIdOf.get(it.categoryId) ?? null;
         const sameContent =
           prev != null &&
           prev.volumeMin === it.volumeMin &&
-          prev.period === periodOf(it.period);
+          prev.period === periodOf(it.period) &&
+          prev.goodId === goodId;
         const status =
           prev == null
             ? 'pending'
@@ -200,6 +238,7 @@ export class BuyersService {
             volumeMin: it.volumeMin,
             period: periodOf(it.period),
             unit: cat?.unit ?? 'کیلوگرم',
+            goodId,
             status,
             ...(status === 'rejected' && prev
               ? { rejectionReasons: prev.rejectionReasons, reviewedAt: prev.reviewedAt }
@@ -248,14 +287,17 @@ export class BuyersService {
         volumeMin: true,
         period: true,
         unit: true,
+        goodId: true,
       },
       take: 5000,
     });
 
     // نام دسته‌ها + مسیر — برای نمایش و جستجو
     const cats = await this.categoriesWithPath(rows.map((r) => r.categoryId));
+    // نام «نوع کالا» (خواستهٔ مالک ۹-۱۱) — «سیب از نوع قرمز» روی کارت
+    const goods = await this.goodNameMap(rows.map((r) => r.goodId));
 
-    // جستجوی متنی روی نام/مسیر دسته
+    // جستجوی متنی روی نام/مسیر دسته + نوع کالا
     const needle = dto.s?.trim() ?? '';
     const matched = needle
       ? rows.filter((r) => {
@@ -264,7 +306,8 @@ export class BuyersService {
             !!cat &&
             (cat.name.includes(needle) ||
               cat.parentName.includes(needle) ||
-              cat.rootName.includes(needle))
+              cat.rootName.includes(needle) ||
+              (r.goodId != null && (goods.get(r.goodId)?.includes(needle) ?? false)))
           );
         })
       : rows;
@@ -323,6 +366,7 @@ export class BuyersService {
         unit: r.unit,
         minAmount: r.volumeMin,
         period: r.period,
+        productType: r.goodId != null ? (goods.get(r.goodId) ?? null) : null,
         province: u.provinceId != null ? (locations.get(`p${u.provinceId}`) ?? null) : null,
         city: u.cityId != null ? (locations.get(`c${u.cityId}`) ?? null) : null,
         lastActiveAt: last,
@@ -1077,12 +1121,12 @@ export class BuyersService {
   /** نام دسته + مسیر (ریشه/پدر) و واحد بر اساس id — دو کوئری حداکثر */
   private async categoriesWithPath(ids: number[]) {
     if (ids.length === 0) {
-      return new Map<number, { name: string; rootName: string; parentName: string; unit: string }>();
+      return new Map<number, { name: string; rootName: string; parentName: string; unit: string; example: string | null }>();
     }
     const uniq = [...new Set(ids)];
     const rows = await this.prisma.category.findMany({
       where: { id: { in: uniq } },
-      select: { id: true, categoryName: true, parentId: true, unit: true },
+      select: { id: true, categoryName: true, parentId: true, unit: true, example: true },
     });
     const parentIds = [...new Set(rows.map((r) => r.parentId).filter((x): x is number => x != null))];
     const parents = parentIds.length
@@ -1104,7 +1148,7 @@ export class BuyersService {
     const grandById = new Map(grands.map((g) => [g.id, g]));
     const out = new Map<
       number,
-      { name: string; rootName: string; parentName: string; unit: string }
+      { name: string; rootName: string; parentName: string; unit: string; example: string | null }
     >();
     for (const r of rows) {
       const parent = r.parentId != null ? parentById.get(r.parentId) : undefined;
@@ -1114,9 +1158,56 @@ export class BuyersService {
         unit: r.unit ?? 'کیلوگرم',
         parentName: parent?.categoryName ?? '',
         rootName: root?.categoryName ?? parent?.categoryName ?? '',
+        example: r.example ?? null,
       });
     }
     return out;
+  }
+
+  /** نام نوع‌ها از id — یک کوئری؛ ورودی‌های null/خالی حذف می‌شوند */
+  private async goodNameMap(goodIds: Array<number | null | undefined>): Promise<Map<number, string>> {
+    const uniq = [...new Set(goodIds.filter((x): x is number => x != null))];
+    if (uniq.length === 0) return new Map();
+    const rows = await this.prisma.good.findMany({
+      where: { id: { in: uniq } },
+      select: { id: true, name: true },
+    });
+    return new Map(rows.map((g) => [g.id, g.name]));
+  }
+
+  /**
+   * نوع کالا (Good) — عین upsertGood درخواست فوری (buy-requests)، اینجا
+   * کپی شده تا ماژول خریداران مستقل بماند: نوع موجود بازمصرف (+۱ استفاده)،
+   * نوع تازه با id از Counter('good') ساخته می‌شود. جدول دسته‌ها دست نمی‌خورد.
+   */
+  private async upsertGood(categoryId: number, name: string, createdById: string): Promise<number> {
+    const existing = await this.prisma.good.findUnique({
+      where: { categoryId_name: { categoryId, name } },
+      select: { id: true },
+    });
+    if (existing) {
+      await this.prisma.good.update({
+        where: { id: existing.id },
+        data: { usageCount: { increment: 1 } },
+      });
+      return existing.id;
+    }
+
+    const counter = await this.prisma.counter.upsert({
+      where: { id: 'good' },
+      create: { id: 'good', seq: GOOD_START_ID },
+      update: { seq: { increment: 1 } },
+    });
+    const good = await this.prisma.good.create({
+      data: {
+        id: counter.seq,
+        categoryId,
+        name,
+        createdById,
+        usageCount: 1,
+      },
+    });
+    return good.id;
   }
 
   /** نام استان/شهر — پیشوند p (استان) و c (شهر) برای تفکیک buskolId */

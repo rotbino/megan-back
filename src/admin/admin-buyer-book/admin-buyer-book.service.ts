@@ -11,6 +11,8 @@ export interface AdminBookRow {
   minAmount: number;
   period: string;
   unit: string;
+  /** «نوع کالا» اختیاری — «سیب از نوع قرمز» (خواستهٔ مالک ۹-۱۱) */
+  productType: string | null;
   status: string;
   rejectionReasons: string[];
   createdAt: Date;
@@ -84,6 +86,7 @@ export class AdminBuyerBookService {
     // جستجوی نام دسته — دسته‌های منطبق + زیردرختشان (شاخهٔ منطبق، برگ‌هایش را
     // هم می‌آورد)؛ در کوئری اصلی با OR به جستجوی مشخصات خریدار وصل می‌شود
     let catIdFilter: number[] | null = null;
+    let goodIdFilter: number[] | null = null;
     if (term) {
       const matched = await this.prisma.category.findMany({
         where: { categoryName: { contains: term } },
@@ -94,6 +97,12 @@ export class AdminBuyerBookService {
         for (const id of await this.categories.getSubtreeIds(m.id)) ids.add(id);
       }
       if (ids.size > 0) catIdFilter = [...ids];
+      // جستجو در «نوع کالا» هم — مثل دایرکتوری عمومی (خواستهٔ مالک ۹-۱۱)
+      const goods = await this.prisma.good.findMany({
+        where: { name: { contains: term } },
+        select: { id: true },
+      });
+      if (goods.length > 0) goodIdFilter = goods.map((g) => g.id);
     }
 
     const where: Prisma.BuyerCategoryWhereInput = {
@@ -102,6 +111,7 @@ export class AdminBuyerBookService {
         ? {
             OR: [
               ...(catIdFilter ? [{ categoryId: { in: catIdFilter } }] : []),
+              ...(goodIdFilter ? [{ goodId: { in: goodIdFilter } }] : []),
               {
                 user: {
                   OR: [
@@ -144,6 +154,12 @@ export class AdminBuyerBookService {
 
     // نام دسته‌ها + مسیر — برای نمایش
     const cats = await this.categoriesWithPath(rows.map((r) => r.categoryId));
+    // نام «نوع کالا» — برای نمایش و جستجو (خواستهٔ مالک ۹-۱۱)
+    const goodIds = [...new Set(rows.map((r) => r.goodId).filter((x): x is number => x != null))];
+    const goods = goodIds.length
+      ? await this.prisma.good.findMany({ where: { id: { in: goodIds } }, select: { id: true, name: true } })
+      : [];
+    const goodName = new Map(goods.map((g) => [g.id, g.name]));
     const items = rows.map((r) => ({
       id: r.id,
       user: r.user,
@@ -156,6 +172,7 @@ export class AdminBuyerBookService {
       minAmount: r.volumeMin,
       period: r.period,
       unit: r.unit,
+      productType: r.goodId != null ? (goodName.get(r.goodId) ?? null) : null,
       status: r.status,
       rejectionReasons: r.rejectionReasons ?? [],
       createdAt: r.createdAt,

@@ -463,6 +463,9 @@ model Product {
   @@index([status, isLadder, isElevated, updatedAt(sort: Desc)])
   @@index([subCategoryId, status])
   @@index([provinceId, cityId, status])
+  /// جستجوی چندشهری بازار شهری (/cityMarket/getProducts — cityId IN (…))
+  /// بدون استان — سریع روی ۵۰هزار آگهی (خواستهٔ مالک ۹-۱۱)
+  @@index([cityId, status])
   @@index([userId, status])
   @@index([slug])
 }
@@ -1208,6 +1211,10 @@ model BuyerCategory {
   period     String @default("monthly") @map("period")
   /// واحد دسته (denorm برای نمایش) — کیلوگرم | تن | عدد | بسته | لیتر
   unit       String @default("کیلوگرم")
+
+  /// نوع کالای انتخابی — ارجاع به جدول Good (اختیاری، عین درخواست فوری —
+  /// خواستهٔ مالک ۹-۱۱: کاربر می‌تواند مثل درخواست فوری «سیب از نوع قرمز» ثبت کند)
+  goodId     Int?   @map("good_id")
 
   /// pending | confirmed | rejected — بازبینی ادمین (خواستهٔ مالک ۸-۱۱:
   /// درخواست‌های خرید دوره‌ای هم مثل فوری تایید ادمین می‌خواهند)
