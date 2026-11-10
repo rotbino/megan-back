@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 /**
- * تست سرتاسری «کاتالوگ محصول» (خواسته مالک ۱۰-۱۱).
+ * تست سرتاسری «کاتالوگ کاربر» (خواسته مالک ۱۰-۱۱ + بازنگری دور ۲/۳).
  * اجرا: node scripts/test-catalog.mjs   (پیش‌نیاز: سرور روی :4000)
  * مسیر پایه با CATALOG_TEST_BASE قابل تغییر است.
  *
- * جریان: دو کاربر تستی (فروشنده/خریدار) → ساخت کاتالوگ → ویرایش آیدی و
- * رنگ → صفحهٔ عمومی → ذخیره/دفترچه/ذخیره‌کنندگان → فیلد catalog در
- * getSeller → پاک‌سازی کامل کاربران تستی (cascade خودش کاتالوگ را می‌برد).
+ * قرارداد جدید: کاتالوگ فروشنده همان صفحهٔ عمومی اوست (/c/{catalogId})؛
+ * کلید همه‌جا userName است و اندپوینت‌ها getMySettings / updateSettings /
+ * resolvePublicId / isSaved / toggleSave / getMySaved / getSavers هستند —
+ * عین استاب سندباکس (megan-web/scripts/stub-backend.mjs).
+ *
+ * جریان: دو کاربر تستی (فروشنده/خریدار) → پیش‌فرض‌های getMySettings →
+ * ذخیرهٔ شخصی‌سازی (ولیدیشن + یکتایی آیدی) → resolvePublicId →
+ * ذخیره/دفترچه/ذخیره‌کنندگان → پاک‌سازی کامل کاربران تستی (cascade خودش
+ * تنظیمات/ذخیره‌ها را می‌برد).
  */
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env', override: true });
@@ -46,7 +52,12 @@ async function cleanup() {
 async function login(phone) {
   const r = await post('/auth/login', { phone });
   if (!r.json?.data?.accessToken) throw new Error(`ورود ${phone} ناموفق: ${JSON.stringify(r.json)}`);
-  return { token: r.json.data.accessToken, isNewUser: r.json.data.isNewUser, hasPassword: r.json.data.hasPassword };
+  // پاسخ login فقط توکن می‌دهد؛ userName از پیش‌فرضِ getMySettings می‌آید
+  // (catalogId بدون شخصی‌سازی = userName صاحب حساب)
+  const s = await post('/catalog/getMySettings', {}, r.json.data.accessToken);
+  const userName = s.json?.data?.settings?.catalogId;
+  if (!userName) throw new Error(`گرفتن userName ${phone} ناموفق: ${JSON.stringify(s.json)}`);
+  return { token: r.json.data.accessToken, userName, isNewUser: r.json.data.isNewUser };
 }
 
 async function main() {
@@ -56,112 +67,120 @@ async function main() {
   const buyer = await login(BUYER_PHONE);
   show('ورود دو کاربر تستی (بدون رمز)', seller.isNewUser === true && buyer.isNewUser === true);
 
-  const pageId = `test-catalog-${Math.floor(1000 + Math.random() * 8999)}`;
+  // ── getMySettings: پیش‌فرض‌ها (بدون هیچ ردیفی) ──
+  const noAuth = await post('/catalog/getMySettings', {});
+  show('getMySettings بدون ورود → 401 فارسی', noAuth.status === 401 && noAuth.json?.status === false);
 
-  // ── checkPageId ──
-  const badId = await post('/catalog/checkPageId', { pageId: 'XX' });
-  show('checkPageId قالب نامعتبر → available:false (عمومی)', badId.json?.data?.available === false);
-  const freeId = await post('/catalog/checkPageId', { pageId });
-  show('checkPageId آزاد → available:true', freeId.json?.data?.available === true);
+  const mine0 = await post('/catalog/getMySettings', {}, seller.token);
+  const s0 = mine0.json?.data?.settings;
+  show(
+    'getMySettings اولیه → همه‌چیز پیش‌فرض (آیدی=userName، آیکون=store، رنگ=null)',
+    mine0.json?.status === true &&
+      s0?.catalogId === seller.userName &&
+      typeof s0?.brandName === 'string' &&
+      s0?.brandColor === null &&
+      s0?.brandIcon === 'store',
+    `catalogId=${s0?.catalogId}`,
+  );
 
-  // ── create: اعتبارسنجی ──
-  const badCreate = await post('/catalog/create', { pageId: 'AB' }, seller.token);
-  show('create آیدی نامعتبر → 400 INVALID_PAGE_ID', badCreate.status === 400 && badCreate.json?.code === 'INVALID_PAGE_ID');
-  const badWa = await post('/catalog/create', { pageId, whatsappNumber: '12345' }, seller.token);
-  show('create واتساپ خراب → 400 INVALID_WHATSAPP', badWa.status === 400 && badWa.json?.code === 'INVALID_WHATSAPP');
-  const noAuth = await post('/catalog/create', { pageId });
-  show('create بدون ورود → 401 فارسی', noAuth.status === 401 && noAuth.json?.status === false);
+  // ── updateSettings: ولیدیشن ──
+  const badId = await post('/catalog/updateSettings', { catalogId: 'AB' }, seller.token);
+  show('updateSettings آیدی نامعتبر → 400', badId.status === 400 && badId.json?.status === false);
+  const badColor = await post('/catalog/updateSettings', { brandColor: 'green' }, seller.token);
+  show('updateSettings رنگ خراب → 400', badColor.status === 400 && badColor.json?.status === false);
+  const badIcon = await post('/catalog/updateSettings', { brandIcon: 'XD!' }, seller.token);
+  show('updateSettings آیکون نامعتبر → 400', badIcon.status === 400 && badIcon.json?.status === false);
+  const longName = await post('/catalog/updateSettings', { brandName: 'برند'.repeat(15) }, seller.token);
+  show('updateSettings نام برند بلند → 400', longName.status === 400 && longName.json?.status === false);
 
-  // ── create: موفق ──
-  const created = await post(
-    '/catalog/create',
-    { pageId, brandColor: '#7c3aed', instagramId: '@test.shop', whatsappNumber: '۰۹۱۵۰۰۰۱۲۳۴' },
+  // ── updateSettings: موفق (فقط فیلدهای ارسالی عوض می‌شوند) ──
+  const customId = `test-c-${Math.floor(1000 + Math.random() * 8999)}`;
+  const saved = await post(
+    '/catalog/updateSettings',
+    { catalogId: customId, brandName: 'هایپر تست', brandColor: '#7C3AED', brandIcon: 'shopping-basket' },
     seller.token,
   );
+  const s1 = saved.json?.data?.settings;
   show(
-    'create → کاتالوگ با نرمال‌سازی اینستاگرام/واتساپ فارسی',
-    created.json?.status === true &&
-      created.json?.data?.pageId === pageId &&
-      created.json?.data?.brandColor === '#7c3aed' &&
-      created.json?.data?.instagramId === 'test.shop' &&
-      created.json?.data?.whatsappNumber === '09150001234',
+    'updateSettings → آیدی سفارشی + برند + رنگ (نرمال lowercase) + آیکون',
+    saved.json?.status === true &&
+      s1?.catalogId === customId &&
+      s1?.brandName === 'هایپر تست' &&
+      s1?.brandColor === '#7c3aed' &&
+      s1?.brandIcon === 'shopping-basket',
   );
 
-  // ── یکتایی ──
-  const again = await post('/catalog/create', { pageId: `${pageId}-x` }, seller.token);
-  show('create دومین بار → 409 CATALOG_EXISTS', again.status === 409 && again.json?.code === 'CATALOG_EXISTS');
-  const taken = await post('/catalog/checkPageId', { pageId }, buyer.token);
-  show('checkPageId آیدی گرفته‌شده → available:false', taken.json?.data?.available === false);
+  const mine1 = await post('/catalog/getMySettings', {}, seller.token);
+  show('getMySettings بعد از ذخیره → همان مقادیر', mine1.json?.data?.settings?.catalogId === customId);
 
-  // ── getMine ──
-  const mine = await post('/catalog/getMine', {}, seller.token);
-  show('getMine → همان کاتالوگ', mine.json?.data?.pageId === pageId && mine.json?.data?.updatedAt === null);
-
-  // ── update: آیدی جدید + رنگ + پاک‌کردن اینستاگرام ──
-  const pageId2 = `${pageId}-v2`;
-  const updated = await post(
-    '/catalog/update',
-    { pageId: pageId2, brandColor: '#0891b2', instagramId: null },
-    seller.token,
-  );
+  // ── یکتایی آیدی ──
+  const taken = await post('/catalog/updateSettings', { catalogId: customId }, buyer.token);
+  show('آیدی تکراری → 409', taken.status === 409 && taken.json?.status === false);
+  const takenUserName = await post('/catalog/updateSettings', { catalogId: buyer.userName }, seller.token);
+  show('آیدی = userName دیگری → 409', takenUserName.status === 409 && takenUserName.json?.status === false);
+  const ownUserName = await post('/catalog/updateSettings', { catalogId: seller.userName }, seller.token);
   show(
-    'update → آیدی جدید + رنگ + حذف اینستاگرام + مهر updatedAt',
-    updated.json?.data?.pageId === pageId2 &&
-      updated.json?.data?.brandColor === '#0891b2' &&
-      updated.json?.data?.instagramId === null &&
-      !!updated.json?.data?.updatedAt,
+    'آیدی = userName خودم → مجاز؛ برگشت به پیش‌فرض',
+    ownUserName.json?.data?.settings?.catalogId === seller.userName,
   );
-  const oldPage = await post('/catalog/getByPageId', { pageId });
-  show('getByPageId آیدی قدیمی → null (۴۰۴ فرانت)', oldPage.json?.data === null);
+  // دوباره سفارشی کن برای ادامهٔ تست
+  await post('/catalog/updateSettings', { catalogId: customId }, seller.token);
 
-  // ── صفحهٔ عمومی (بدون توکن) ──
-  const pub = await post('/catalog/getByPageId', { pageId: pageId2 });
+  // ── resolvePublicId (عمومی — بدون توکن) ──
+  const byCustom = await post('/catalog/resolvePublicId', { id: customId });
   show(
-    'getByPageId عمومی → catalog + userName + saversCount',
-    pub.json?.data?.catalog?.pageId === pageId2 && !!pub.json?.data?.userName && pub.json?.data?.saversCount === 0,
+    'resolvePublicId آیدی سفارشی → userName + تنظیمات',
+    byCustom.json?.data?.userName === seller.userName && byCustom.json?.data?.settings?.brandName === 'هایپر تست',
   );
+  const byUserName = await post('/catalog/resolvePublicId', { id: seller.userName });
+  show(
+    'resolvePublicId userName → همان کاربر + تنظیماتش',
+    byUserName.json?.data?.userName === seller.userName && byUserName.json?.data?.settings?.catalogId === customId,
+  );
+  const unknown = await post('/catalog/resolvePublicId', { id: 'nobody-xyz-404' });
+  show('resolvePublicId ناشناخته → null (۴۰۴ فرانت)', unknown.json?.data === null);
 
-  // ── ذخیرهٔ خریدار ──
-  const before = await post('/catalog/isSaved', { pageId: pageId2 }, buyer.token);
+  // ── ذخیرهٔ خریدار (کلید = userName فروشنده) ──
+  const before = await post('/catalog/isSaved', { userName: seller.userName }, buyer.token);
   show('isSaved اولیه → false', before.json?.data?.saved === false);
-  const toggled = await post('/catalog/toggleSave', { pageId: pageId2 }, buyer.token);
+  const toggled = await post('/catalog/toggleSave', { userName: seller.userName }, buyer.token);
   show('toggleSave → true', toggled.json?.data?.saved === true);
-  const after = await post('/catalog/isSaved', { pageId: pageId2 }, buyer.token);
+  const after = await post('/catalog/isSaved', { userName: seller.userName }, buyer.token);
   show('isSaved بعد از ذخیره → true', after.json?.data?.saved === true);
 
-  const savers = await post('/catalog/getSavers', { pageId: pageId2 });
+  const savers = await post('/catalog/getSavers', { userName: seller.userName });
   show(
     'getSavers عمومی → شمار و ردیف خریدار',
-    savers.json?.data?.count === 1 && savers.json?.data?.items?.[0]?.userName != null,
+    savers.json?.data?.count === 1 && savers.json?.data?.items?.[0]?.userName === buyer.userName,
   );
+  const saversUnknown = await post('/catalog/getSavers', { userName: 'nobody-xyz-404' });
+  show('getSavers فروشندهٔ ناشناخته → خالی', saversUnknown.json?.data?.count === 0);
 
   const savedList = await post('/catalog/getMySaved', {}, buyer.token);
   const savedRow = savedList.json?.data?.items?.[0];
   show(
-    'getMySaved → دفترچهٔ خریدار (pageId + فروشنده + شمار محصول)',
+    'getMySaved → دفترچهٔ خریدار (فروشنده + شمار محصول)',
     savedList.json?.status === true &&
-      savedRow?.pageId === pageId2 &&
-      !!savedRow?.sellerUserName &&
+      savedRow?.sellerUserName === seller.userName &&
       savedRow?.productCount === 0,
   );
 
-  const pub2 = await post('/catalog/getByPageId', { pageId: pageId2 });
-  show('getByPageId بعد از ذخیره → saversCount:1', pub2.json?.data?.saversCount === 1);
-
-  // ── فیلد catalog در getSeller (کش باید بی‌اعتبار شده باشد) ──
-  const sellerProfile = await post('/products/getSeller', { userName: pub.json.data.userName });
+  // ── getSeller: کش باید بی‌اعتبار شده باشد و کارت سالم بماند ──
+  const sellerProfile = await post('/products/getSeller', { userName: seller.userName });
   show(
-    'getSeller → user.catalog.pageId (کش تازه)',
-    sellerProfile.json?.data?.user?.catalog?.pageId === pageId2,
+    'getSeller بعد از تغییرات → پروفایل سالم (بدون فیلد مردهٔ catalog)',
+    sellerProfile.json?.status === true && sellerProfile.json?.data?.user?.userName === seller.userName,
   );
 
   // ── حذف ذخیره + پاک‌سازی ──
-  const untoggled = await post('/catalog/toggleSave', { pageId: pageId2 }, buyer.token);
+  const untoggled = await post('/catalog/toggleSave', { userName: seller.userName }, buyer.token);
   show('toggleSave دوباره → حذف ذخیره', untoggled.json?.data?.saved === false);
+  const emptyList = await post('/catalog/getMySaved', {}, buyer.token);
+  show('getMySaved بعد از حذف → خالی', emptyList.json?.data?.items?.length === 0);
 
   const removed = await cleanup();
-  show('پاک‌سازی کاربران تستی (cascade کاتالوگ/ذخیره‌ها)', removed >= 2, `users=${removed}`);
-  const gone = await post('/catalog/getByPageId', { pageId: pageId2 });
+  show('پاک‌سازی کاربران تستی (cascade تنظیمات/ذخیره‌ها)', removed >= 2, `users=${removed}`);
+  const gone = await post('/catalog/resolvePublicId', { id: customId });
   show('کاتالوگ پس از حذف کاربر → null', gone.json?.data === null);
 
   console.log(`\n${failed === 0 ? '✅ همه پاس شد' : '❌ خرابی دارد'} — ${passed} passed, ${failed} failed`);

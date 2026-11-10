@@ -133,7 +133,7 @@ model User {
   /// مخاطبین گوشی این کاربر — «ارسال به مخاطبین» (۴-۱۱): یک‌بار از
   /// Contact Picker مرورگر لود می‌شود و در ایمچ می‌ماند
   contacts Contact[] @relation("ContactOwner")
-  /// کاتالوگ محصول این کاربر — صفحهٔ عمومی مستقل /catalog/{pageId} (۱۰-۱۱)
+  /// تنظیمات کاتالوگ این کاربر — شخصی‌سازی صفحهٔ عمومی /c/{catalogId} (۱۰-۱۱)
   catalog UserCatalog? @relation("UserCatalogOwner")
   /// کاتالوگ‌هایی که این کاربر ذخیره کرده — دفترچهٔ پنل خریدار (۱۰-۱۱)
   savedCatalogs SavedCatalog[] @relation("SavedCatalogOwner")
@@ -1284,12 +1284,17 @@ model SupplyOffer {
   @@index([buyerId, categoryId])
 }
 
-// ─── کاتالوگ محصول (خواسته مالک ۱۰-۱۱) ───────────────────────────────
-// صفحهٔ عمومی مستقل فروشنده در /catalog/{pageId} — بدون هدر/فوتر/نوار ایمچ؛
-// فروشنده لینکش را برای مشتری‌های خودش می‌فرستد. محصولات و نظرات از همان
-// دیتای ایمچ می‌آیند (getSeller)؛ این‌جا فقط تنظیمات اختصاصی پیج است.
+// ─── کاتالوگ کاربر (خواسته مالک ۱۰-۱۱ + بازنگری دور ۲/۳) ────────────
+// کاتالوگ فروشنده همان صفحهٔ عمومی اوست (/c/{catalogId}) — صفحهٔ مستقل
+// جداگانه‌ای وجود ندارد و «ساختن کاتالوگ» هم ندارد؛ با ثبت اولین محصول،
+// کاتالوگ خودبه‌خود هست. این‌جا فقط شخصی‌سازی (آیدی لینک، نام برند،
+// رنگ، آیکون) و دفترچهٔ ذخیرهٔ خریداران نگه داشته می‌شود؛ کلید همه‌جا
+// userName فروشنده است. قرارداد کامل و دادهٔ نمونه در استاب سندباکس
+// (megan-web/scripts/stub-backend.mjs) مستند است.
 
-/// تنظیمات کاتالوگ — هر کاربر حداکثر یک کاتالوگ (یک‌به‌یک)
+/// تنظیمات کاتالوگ — هر کاربر حداکثر یک ردیف (یک‌به‌یک)؛ همهٔ فیلدها
+/// اختیاری چون ردیف فقط برای انحراف از پیش‌فرض ساخته می‌شود (و لنگر
+/// ذخیره‌شده‌ها). حل پیش‌فرض در CatalogService.resolvedSettings است.
 model UserCatalog {
   id String @id @default(auto()) @map("_id") @db.ObjectId
 
@@ -1297,20 +1302,25 @@ model UserCatalog {
   user   User   @relation("UserCatalogOwner", fields: [userId], references: [id], onDelete: Cascade)
   userId String @unique @map("user_id") @db.ObjectId
 
-  /// آیدی یکتای پیج — آدرس عمومی /catalog/{pageId}؛ لاتین کوچک/عدد/خط تیره، ۳ تا ۳۰ نویسه
-  pageId String @unique
-  /// رنگ برند (hex) — کل تم صفحهٔ کاتالوگ با آن رنگ می‌شود
-  brandColor String @default("#0f766e") @map("brand_color")
-  /// آیدی اینستاگرام بدون @ (null = دکمهٔ اینستاگرام مخفی است)
-  instagramId String? @map("instagram_id")
-  /// شماره واتساپ 09xxxxxxxxx (null = دکمهٔ واتساپ مخفی است)
-  whatsappNumber String? @map("whatsapp_number")
+  /// آیدی سفارشی لینک عمومی /c/{catalogId} — لاتین کوچک/رقم/خط تیره ۳ تا ۳۰؛
+  /// null = پیش‌فرض (همان userName مالک). یکتایی در سرویس چک می‌شود (در برابر
+  /// آیدی سفارشی دیگران + userName همهٔ کاربران — عین استاب) چون null های
+  /// تکراری با ایندکس یکتای مونگو نمی‌سازند.
+  catalogId String? @map("catalog_id")
+  /// نام برند/فروشگاه — null = نام کامل فروشنده
+  brandName String? @map("brand_name")
+  /// رنگ برند hex (مثل #0e9f6e) — null = رنگ پیش‌فرض ایمچ
+  brandColor String? @map("brand_color")
+  /// کلید آیکون برند از فهرست رسمی فرانت (lib/catalog-brand) — null = 'store'
+  brandIcon String? @map("brand_icon")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime? @map("updated_at")
 
   /// کسانی که این کاتالوگ را ذخیره کرده‌اند
   savedBy SavedCatalog[] @relation("SavedCatalogTarget")
+
+  @@index([catalogId])
 }
 
 /// کاتالوگ ذخیره‌شدهٔ خریدار — «کاتالوگهای ذخیره شده» پنل خرید (دفترچهٔ تلفن)

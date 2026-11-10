@@ -3,15 +3,15 @@ import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { LocationsService } from '../locations/locations.service';
-import type { AuthUser } from '../common/guards';
-import type { CreateCatalogDto, UpdateCatalogDto } from './dto';
+import type { UpdateSettingsDto } from './dto';
 
-/** قاعدهٔ آیدی پیج — قرینهٔ فرانت (lib/catalog.ts) و استاب سندباکس */
-const PAGEID_RE = /^[a-z0-9][a-z0-9-]{2,29}$/;
-const PAGEID_HINT = 'آیدی پیج باید ۳ تا ۳۰ نویسه باشد: حروف لاتین کوچک، عدد و خط تیره.';
-const PAGE_ID_TAKEN = 'این آیدی قبلاً گرفته شده است؛ آیدی دیگری انتخاب کنید.';
+/** قاعدهٔ آیدی سفارشی کاتالوگ — عین استاب سندباکس و فرانت (مودال تنظیمات) */
+const CATALOGID_RE = /^[a-z0-9-]{3,30}$/;
+const CATALOGID_HINT = 'آیدی کاتالوگ باید ۳ تا ۳۰ نویسه باشد؛ فقط حروف کوچک لاتین، رقم و خط تیره (-).';
+const CATALOGID_TAKEN = 'این آیدی قبلاً گرفته شده است؛ یکی دیگر انتخاب کنید.';
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
-const DEFAULT_COLOR = '#0f766e'; // یشمی — متمایز از سرمه‌ای ایمچ
+const BRAND_NAME_MAX = 40;
+const ICON_RE = /^[a-z0-9-]{2,30}$/;
 /** سقف ذخیره‌شده‌ها — هم‌قاعدهٔ علاقه‌مندی‌ها */
 const SAVED_LIMIT = 200;
 /** سقف لیست ذخیره‌کنندگان — فقط شمار دقیق است، لیست همین‌قدر */
@@ -21,40 +21,21 @@ const SAVERS_TAKE = 200;
 const fmtDate = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '';
 
-/** نرمال‌سازی اینستاگرام — @ و آدرس کامل و اسلش آخر می‌کَند (قرینهٔ فرانت) */
-function normalizeInstagram(v: string | null | undefined): string | null {
-  const t = (v ?? '')
-    .trim()
-    .replace(/^@+/, '')
-    .replace(/^(https?:\/\/)?(www\.)?instagram\.com\//i, '')
-    .replace(/\/+$/, '');
-  return t || null;
-}
-
-/** نرمال‌سازی واتساپ — ارقام فارسی/لاتینی؛ ۰۰۹۸/۹۸+/۹… → قالب 09xxxxxxxxx */
-function normalizeWhatsapp(v: string | null | undefined): string | null {
-  let d = (v ?? '')
-    .replace(/[۰-۹]/g, (c) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(c)))
-    .replace(/\D/g, '');
-  if (d.startsWith('0098')) d = d.slice(4);
-  else if (d.startsWith('98') && d.length === 12) d = d.slice(2);
-  if (/^9\d{9}$/.test(d)) d = `0${d}`;
-  return /^09\d{9}$/.test(d) ? d : null;
-}
-
-/** DTO عمومی کاتالوگ — هم‌شکل UserCatalog فرانت (lib/types.ts) */
-export interface UserCatalogDto {
-  pageId: string;
-  brandColor: string;
-  instagramId: string | null;
-  whatsappNumber: string | null;
-  createdAt: string;
-  updatedAt: string | null;
+/** تنظیمات کاتالوگِ حل‌شده — هم‌شکل CatalogSettings فرانت (lib/types.ts) و
+ *  استاب سندباکس؛ مقدار null = پیش‌فرض ایمچ (رنگ/آیکون) */
+export interface CatalogSettingsDto {
+  /** بخش آخر لینک عمومی — پیش‌فرض userName فروشنده */
+  catalogId: string;
+  /** نام برند — پیش‌فرض نام کامل فروشنده */
+  brandName: string | null;
+  /** رنگ برند hex — null = رنگ پیش‌فرض ایمچ */
+  brandColor: string | null;
+  /** کلید آیکون — پیش‌فرض 'store' */
+  brandIcon: string;
 }
 
 /** ردیف «کاتالوگهای ذخیره شده» پنل خریدار — دفترچهٔ تلفن */
 export interface SavedCatalogRowDto {
-  pageId: string;
   sellerUserName: string;
   sellerId: string;
   sellerName: string;
@@ -75,13 +56,30 @@ export interface CatalogSaverRowDto {
   savedAt: string;
 }
 
+/** حداقل دیتای کاربر که حل تنظیمات نیاز دارد */
+interface UserBrief {
+  id: string;
+  userName: string;
+  firstName: string;
+  lastName: string;
+}
+
+/** ردیف UserCatalog — همهٔ فیلدها اختیاری (ردیف = انحراف از پیش‌فرض) */
+interface CatalogRow {
+  catalogId: string | null;
+  brandName: string | null;
+  brandColor: string | null;
+  brandIcon: string | null;
+}
+
 /**
- * ─── کاتالوگ محصول (خواسته مالک ۱۰-۱۱) ──────────────────────────────────────
+ * ─── کاتالوگ کاربر (خواسته مالک ۱۰-۱۱ + بازنگری دور ۲/۳) ──────────────────
  *
- * صفحهٔ عمومی مستقل فروشنده: /catalog/{pageId} — محصولات و نظرات از همان
- * دیتای ایمچ می‌آیند (فرانت getSeller می‌زند)؛ این سرویس فقط تنظیمات پیج
- * (آیدی یکتا، رنگ برند، اینستاگرام/واتساپ) و دفترچهٔ ذخیرهٔ خریداران را
- * نگه می‌دارد. هر کاربر حداکثر یک کاتالوگ دارد (یک‌به‌یک با User).
+ * کاتالوگ فروشنده همان صفحهٔ عمومی اوست (/c/{catalogId}) — صفحهٔ مستقل
+ * جداگانه‌ای وجود ندارد و «ساختن کاتالوگ» هم ندارد؛ با ثبت اولین محصول،
+ * کاتالوگ خودبه‌خود هست. این سرویس فقط شخصی‌سازی (آیدی لینک، نام برند،
+ * رنگ، آیکون) و دفترچهٔ ذخیرهٔ خریداران را نگه می‌دارد؛ کلید همه‌جا
+ * userName فروشنده است.
  *
  * قرارداد کامل و دادهٔ نمونه در استاب سندباکس (megan-web/scripts/stub-backend.mjs)
  * مستند است — پیام‌های خطا عیناً همان‌ها هستند تا UX فرانت یکدست بماند.
@@ -94,108 +92,226 @@ export class CatalogService {
     private readonly locations: LocationsService,
   ) {}
 
-  // ─── آیدی پیج ────────────────────────────────────────────────────────────
+  // ─── شخصی‌سازی (پنل → مودال تنظیمات کاتالوگ) ──────────────────────────
 
-  /** POST /catalog/checkPageId — یکتایی آیدی (عمومی؛ بدون ورود).
-   *  قالب نامعتبر هم available:false می‌دهد تا فرانت همان‌جا راهنمایی کند. */
-  async checkPageId(raw: string): Promise<{ available: boolean }> {
-    const pageId = (raw ?? '').trim().toLowerCase();
-    if (!PAGEID_RE.test(pageId)) return { available: false };
-    const taken = await this.prisma.userCatalog.findUnique({
-      where: { pageId },
+  /** POST /catalog/getMySettings — تنظیمات خودم؛ همیشه پر با پیش‌فرض‌ها
+   *  (ردیف نداشتن = همه‌چیز پیش‌فرض: آیدی userName، برند نام کامل، …). */
+  async getMySettings(userId: string): Promise<{ settings: CatalogSettingsDto }> {
+    const [user, row] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, userName: true, firstName: true, lastName: true },
+      }),
+      this.prisma.userCatalog.findUnique({
+        where: { userId },
+        select: CATALOG_SELECT,
+      }),
+    ]);
+    if (!user) throw AppError.notFound('کاربر یافت نشد.');
+    return { settings: this.resolvedSettings(user, row) };
+  }
+
+  /** POST /catalog/updateSettings — ذخیرهٔ تنظیمات؛ فقط فیلدهای ارسالی
+   *  عوض می‌شوند. خطای ۴۰۰ (قالب) و ۴۰۹ (آیدی تکراری) با پیام فارسی —
+   *  عین استاب؛ فرانت همان پیام را در مودال نشان می‌دهد. */
+  async updateSettings(userId: string, dto: UpdateSettingsDto): Promise<{ settings: CatalogSettingsDto }> {
+    const [user, existing] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, userName: true, firstName: true, lastName: true },
+      }),
+      this.prisma.userCatalog.findUnique({ where: { userId }, select: CATALOG_SELECT }),
+    ]);
+    if (!user) throw AppError.notFound('کاربر یافت نشد.');
+
+    /** تغییرات مرحله‌ای — فقط بعد از عبور همهٔ ولیدیشن‌ها نوشته می‌شود */
+    const patch: Partial<CatalogRow> = {};
+
+    if (dto.catalogId !== undefined) {
+      const id = String(dto.catalogId ?? '').trim().toLowerCase();
+      if (!CATALOGID_RE.test(id)) throw AppError.badRequest(CATALOGID_HINT, 'INVALID_CATALOG_ID');
+      if (id !== user.userName) {
+        const owner = await this.catalogIdOwner(id, user.id);
+        if (owner) throw AppError.conflict(CATALOGID_TAKEN, 'CATALOG_ID_TAKEN');
+        patch.catalogId = id;
+      } else {
+        // آیدیِ برابر userName خودم = پیش‌فرض — ذخیره نمی‌شود
+        patch.catalogId = null;
+      }
+    }
+    if (dto.brandName !== undefined) {
+      const bn = String(dto.brandName ?? '').trim();
+      if (bn.length > BRAND_NAME_MAX) {
+        throw AppError.badRequest('نام برند حداکثر ۴۰ نویسه است.', 'INVALID_BRAND_NAME');
+      }
+      patch.brandName = bn || null;
+    }
+    if (dto.brandColor !== undefined) {
+      const bc = String(dto.brandColor ?? '').trim();
+      if (bc && !HEX_RE.test(bc)) {
+        throw AppError.badRequest('رنگ برند نامعتبر است (مثال: #0e9f6e).', 'INVALID_BRAND_COLOR');
+      }
+      patch.brandColor = bc ? bc.toLowerCase() : null;
+    }
+    if (dto.brandIcon !== undefined) {
+      const bi = String(dto.brandIcon ?? '').trim();
+      if (bi && !ICON_RE.test(bi)) {
+        throw AppError.badRequest('آیکون انتخابی شناخته نشد.', 'INVALID_BRAND_ICON');
+      }
+      patch.brandIcon = bi || null;
+    }
+
+    const row = existing
+      ? await this.prisma.userCatalog.update({
+          where: { userId },
+          data: { ...patch, updatedAt: new Date() },
+          select: CATALOG_SELECT,
+        })
+      : await this.prisma.userCatalog.create({
+          // ردیف اول فقط برای انحراف‌های واقعی ساخته می‌شود — پچ خالی =
+          // همه‌چیز پیش‌فرض است و ردیفی لازم نیست
+          data: Object.keys(patch).length ? { userId, ...patch } : { userId },
+          select: CATALOG_SELECT,
+        });
+
+    await this.invalidateSellerCaches(userId);
+    return { settings: this.resolvedSettings(user, row) };
+  }
+
+  // ─── صفحهٔ عمومی /c/{id} (SSR — بدون ورود) ────────────────────────────
+
+  /** POST /catalog/resolvePublicId — رزولو آیدی عمومی؛ id می‌تواند آیدی
+   *  سفارشی یا userName فروشنده باشد. null = ناشناخته (فرانت ۴۰۴ می‌کند).
+   *  کاربر غیرفعال عملاً کاتالوگ ندارد → null (عین getSeller). */
+  async resolvePublicId(raw: string): Promise<{ userName: string; settings: CatalogSettingsDto } | null> {
+    const id = (raw ?? '').trim().toLowerCase();
+    if (!id) return null;
+
+    // ۱) آیدی سفارشی کسی؟ (کاربر غیرفعال عملاً کاتالوگ ندارد → رد می‌شود)
+    const byCustom = await this.prisma.userCatalog.findFirst({
+      where: { catalogId: id },
+      select: { ...CATALOG_SELECT, user: { select: { ...USER_BRIEF_SELECT, isActive: true } } },
+    });
+    if (byCustom?.user.isActive) {
+      const { user, ...row } = byCustom;
+      return { userName: user.userName, settings: this.resolvedSettings(user, row) };
+    }
+
+    // ۲) خودِ userName فروشنده؟ (تنظیمات احتمالی‌اش هم همراهش می‌آید)
+    const user = await this.prisma.user.findUnique({
+      where: { userName: id },
+      select: { ...USER_BRIEF_SELECT, isActive: true },
+    });
+    if (!user?.isActive) return null;
+    const row = await this.prisma.userCatalog.findUnique({
+      where: { userId: user.id },
+      select: CATALOG_SELECT,
+    });
+    return { userName: user.userName, settings: this.resolvedSettings(user, row) };
+  }
+
+  // ─── دفترچهٔ ذخیرهٔ خریدار ─────────────────────────────────────────────
+
+  /** POST /catalog/isSaved — وضعیت دکمهٔ ذخیره برای بینندهٔ واردشده.
+   *  فروشندهٔ ناشناخته/بدون ردیف → false (بدون خطا — فرانت بی‌صدا تحمل می‌کند). */
+  async isSaved(userId: string, sellerUserName: string): Promise<{ saved: boolean }> {
+    const catalog = await this.sellerCatalogRow(sellerUserName);
+    if (!catalog) return { saved: false };
+    const row = await this.prisma.savedCatalog.findUnique({
+      where: { userId_catalogId: { userId, catalogId: catalog.id } },
       select: { id: true },
     });
-    return { available: !taken };
+    return { saved: row != null };
   }
 
-  // ─── ساخت / ویرایش ───────────────────────────────────────────────────────
+  /** POST /catalog/toggleSave — ذخیره/حذف ذخیرهٔ کاتالوگ (مثل favorites).
+   *  کاتالوگِ فروشنده‌ای که هنوز ردیف تنظیمات ندارد لنگرِ ذخیره‌شده‌ها را
+   *  ندارد → همان‌جا یک ردیف لخت (همه پیش‌فرض) برایش ساخته می‌شود؛ برای
+   *  بیننده هیچ تفاوتی ندارد چون حل تنظیمات همان پیش‌فرض می‌ماند. */
+  async toggleSave(userId: string, sellerUserName: string): Promise<{ saved: boolean }> {
+    const seller = await this.findSeller(sellerUserName);
+    if (!seller) throw AppError.notFound('کاتالوگ یافت نشد.');
+    const catalog =
+      (await this.prisma.userCatalog.findUnique({
+        where: { userId: seller.id },
+        select: { id: true },
+      })) ??
+      (await this.prisma.userCatalog.create({ data: { userId: seller.id }, select: { id: true } }));
 
-  /** POST /catalog/create — ساخت با آیدی یکتا + رنگ برند + تماس‌های اختیاری */
-  async create(user: AuthUser, dto: CreateCatalogDto): Promise<UserCatalogDto> {
-    const pageId = (dto.pageId ?? '').trim().toLowerCase();
-    if (!PAGEID_RE.test(pageId)) throw AppError.badRequest(PAGEID_HINT, 'INVALID_PAGE_ID');
+    const existing = await this.prisma.savedCatalog.findUnique({
+      where: { userId_catalogId: { userId, catalogId: catalog.id } },
+      select: { id: true },
+    });
+    if (existing) {
+      await this.prisma.savedCatalog.delete({ where: { id: existing.id } });
+      return { saved: false };
+    }
 
-    const [mine, taken] = await Promise.all([
-      this.prisma.userCatalog.findUnique({ where: { userId: user.id }, select: { id: true } }),
-      this.prisma.userCatalog.findUnique({ where: { pageId }, select: { id: true } }),
+    const count = await this.prisma.savedCatalog.count({ where: { userId } });
+    if (count >= SAVED_LIMIT) {
+      throw AppError.badRequest(
+        `حداکثر ${SAVED_LIMIT} کاتالوگ قابل ذخیره است — ابتدا برخی را حذف کنید.`,
+        'SAVED_CATALOGS_FULL',
+      );
+    }
+    await this.prisma.savedCatalog.create({ data: { userId, catalogId: catalog.id } });
+    return { saved: true };
+  }
+
+  /** POST /catalog/getMySaved — «کاتالوگهای ذخیره شده» پنل خریدار:
+   *  دفترچهٔ تلفن با مشاهده/تماس/چت — کارت سبک مثل علاقه‌مندی‌های فروشنده. */
+  async getMySaved(userId: string): Promise<{ items: SavedCatalogRowDto[] }> {
+    const rows = await this.prisma.savedCatalog.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: SAVED_LIMIT,
+      include: {
+        catalog: {
+          include: {
+            user: { select: { id: true, userName: true, firstName: true, lastName: true, cityId: true, isActive: true } },
+          },
+        },
+      },
+    });
+
+    // فروشندهٔ غیرفعال = کاتالوگ عملاً مرده — از دفترچه می‌افتد
+    const alive = rows.filter((r) => r.catalog.user.isActive);
+    const sellerIds = [...new Set(alive.map((r) => r.catalog.user.id))];
+
+    const [avatarMap, cityNames, countRows] = await Promise.all([
+      this.avatarMap(sellerIds),
+      this.cityNames(alive.map((r) => r.catalog.user.cityId)),
+      sellerIds.length
+        ? this.prisma.product.groupBy({
+            by: ['userId'],
+            where: { userId: { in: sellerIds }, status: 'confirmed' },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
     ]);
-    if (mine) {
-      throw AppError.conflict('شما قبلاً کاتالوگ ساخته‌اید؛ از همان ویرایش کنید.', 'CATALOG_EXISTS');
-    }
-    if (taken) throw AppError.conflict(PAGE_ID_TAKEN, 'PAGE_ID_TAKEN');
+    const countMap = new Map(countRows.map((c) => [c.userId, c._count._all]));
 
-    const row = await this.prisma.userCatalog.create({
-      data: {
-        userId: user.id,
-        pageId,
-        brandColor: this.saneColor(dto.brandColor),
-        instagramId: normalizeInstagram(dto.instagramId),
-        whatsappNumber: this.saneWhatsapp(dto.whatsappNumber),
-      },
-    });
-    await this.invalidateSellerCaches(user.id);
-    return this.toDto(row);
-  }
-
-  /** POST /catalog/update — ویرایش آیدی/رنگ/تماس‌ها؛ آیدی جدید باید آزاد باشد */
-  async update(user: AuthUser, dto: UpdateCatalogDto): Promise<UserCatalogDto> {
-    const mine = await this.prisma.userCatalog.findUnique({ where: { userId: user.id } });
-    if (!mine) throw AppError.notFound('کاتالوگی برای ویرایش پیدا نشد.');
-
-    const pageId = dto.pageId != null ? dto.pageId.trim().toLowerCase() : mine.pageId;
-    if (!PAGEID_RE.test(pageId)) throw AppError.badRequest(PAGEID_HINT, 'INVALID_PAGE_ID');
-    if (pageId !== mine.pageId) {
-      const taken = await this.prisma.userCatalog.findUnique({ where: { pageId }, select: { id: true } });
-      if (taken) throw AppError.conflict(PAGE_ID_TAKEN, 'PAGE_ID_TAKEN');
-    }
-
-    const row = await this.prisma.userCatalog.update({
-      where: { id: mine.id },
-      data: {
-        // فقط فیلدهای ارسال‌شده عوض می‌شوند — ویرایش جزئی هم مجاز است
-        ...(pageId !== mine.pageId ? { pageId } : {}),
-        ...(dto.brandColor !== undefined ? { brandColor: this.saneColor(dto.brandColor) } : {}),
-        ...(dto.instagramId !== undefined ? { instagramId: normalizeInstagram(dto.instagramId) } : {}),
-        ...(dto.whatsappNumber !== undefined ? { whatsappNumber: this.saneWhatsapp(dto.whatsappNumber) } : {}),
-        updatedAt: new Date(),
-      },
-    });
-    await this.invalidateSellerCaches(user.id);
-    return this.toDto(row);
-  }
-
-  /** POST /catalog/getMine — تنظیمات کاتالوگ خودم (null = هنوز نساخته‌ام) */
-  async getMine(userId: string): Promise<UserCatalogDto | null> {
-    const row = await this.prisma.userCatalog.findUnique({ where: { userId } });
-    return row ? this.toDto(row) : null;
-  }
-
-  // ─── صفحهٔ عمومی ─────────────────────────────────────────────────────────
-
-  /** POST /catalog/getByPageId — SSR صفحهٔ عمومی (بدون ورود).
-   *  null = پیج نیست یا صاحبش غیرفعال است (فرانت 404 می‌کند). */
-  async getByPageId(pageId: string): Promise<{
-    catalog: UserCatalogDto;
-    userName: string;
-    saversCount: number;
-  } | null> {
-    const row = await this.prisma.userCatalog.findUnique({
-      where: { pageId: (pageId ?? '').trim().toLowerCase() },
-      include: { user: { select: { userName: true, isActive: true } } },
-    });
-    if (!row || !row.user.isActive) return null;
-    const saversCount = await this.prisma.savedCatalog.count({ where: { catalogId: row.id } });
-    return { catalog: this.toDto(row), userName: row.user.userName, saversCount };
+    return {
+      items: alive.map((r) => {
+        const s = r.catalog.user;
+        return {
+          sellerUserName: s.userName,
+          sellerId: s.id,
+          sellerName: `${s.firstName} ${s.lastName}`.trim(),
+          avatarUrl: avatarMap.get(s.id) ?? null,
+          cityName: s.cityId != null ? (cityNames.get(s.cityId) ?? null) : null,
+          productCount: countMap.get(s.id) ?? 0,
+          savedAt: fmtDate(r.createdAt),
+        };
+      }),
+    };
   }
 
   /** POST /catalog/getSavers — ذخیره‌کنندگان یک کاتالوگ (عمومی — لیست برای
-   *  همه؛ تماس/چت فقط صاحب پیج، گیتش سمت فرانت است چون نیاز به مقایسهٔ
+   *  همه؛ تماس/چت فقط صاحب کاتالوگ، گیتش سمت فرانت است چون نیاز به مقایسهٔ
    *  «آیا بیننده صاحب کاتالوگ است» دارد). */
-  async getSavers(pageId: string): Promise<{ count: number; items: CatalogSaverRowDto[] }> {
-    const catalog = await this.prisma.userCatalog.findUnique({
-      where: { pageId: (pageId ?? '').trim().toLowerCase() },
-      select: { id: true },
-    });
+  async getSavers(sellerUserName: string): Promise<{ count: number; items: CatalogSaverRowDto[] }> {
+    const catalog = await this.sellerCatalogRow(sellerUserName);
     if (!catalog) return { count: 0, items: [] };
 
     const [count, rows] = await Promise.all([
@@ -228,116 +344,53 @@ export class CatalogService {
     };
   }
 
-  // ─── دفترچهٔ ذخیرهٔ خریدار ────────────────────────────────────────────────
+  // ─── خصوصی‌ها ────────────────────────────────────────────────────────
 
-  /** POST /catalog/isSaved — وضعیت دکمهٔ ذخیره برای بینندهٔ واردشده */
-  async isSaved(userId: string, pageId: string): Promise<{ saved: boolean }> {
-    const catalog = await this.prisma.userCatalog.findUnique({
-      where: { pageId: (pageId ?? '').trim().toLowerCase() },
-      select: { id: true },
-    });
-    if (!catalog) return { saved: false };
-    const row = await this.prisma.savedCatalog.findUnique({
-      where: { userId_catalogId: { userId, catalogId: catalog.id } },
-      select: { id: true },
-    });
-    return { saved: row != null };
-  }
-
-  /** POST /catalog/toggleSave — ذخیره/حذف ذخیرهٔ کاتالوگ (مثل favorites) */
-  async toggleSave(user: AuthUser, pageId: string): Promise<{ saved: boolean }> {
-    const catalog = await this.prisma.userCatalog.findUnique({
-      where: { pageId: (pageId ?? '').trim().toLowerCase() },
-      select: { id: true },
-    });
-    if (!catalog) throw AppError.notFound('کاتالوگ یافت نشد.');
-
-    const existing = await this.prisma.savedCatalog.findUnique({
-      where: { userId_catalogId: { userId: user.id, catalogId: catalog.id } },
-      select: { id: true },
-    });
-    if (existing) {
-      await this.prisma.savedCatalog.delete({ where: { id: existing.id } });
-      return { saved: false };
-    }
-
-    const count = await this.prisma.savedCatalog.count({ where: { userId: user.id } });
-    if (count >= SAVED_LIMIT) {
-      throw AppError.badRequest(
-        `حداکثر ${SAVED_LIMIT} کاتالوگ قابل ذخیره است — ابتدا برخی را حذف کنید.`,
-        'SAVED_CATALOGS_FULL',
-      );
-    }
-    await this.prisma.savedCatalog.create({ data: { userId: user.id, catalogId: catalog.id } });
-    return { saved: true };
-  }
-
-  /** POST /catalog/getMySaved — «کاتالوگهای ذخیره شده» پنل خریدار:
-   *  دفترچهٔ تلفن با مشاهده/تماس/چت — کارت سبک مثل علاقه‌مندی‌های فروشنده. */
-  async getMySaved(userId: string): Promise<{ items: SavedCatalogRowDto[] }> {
-    const rows = await this.prisma.savedCatalog.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: SAVED_LIMIT,
-      include: {
-        catalog: { include: { user: { select: { id: true, userName: true, firstName: true, lastName: true, cityId: true, isActive: true } } } },
-      },
-    });
-
-    // فروشندهٔ غیرفعال = کاتالوگ عملاً مرده — از دفترچه می‌افتد
-    const alive = rows.filter((r) => r.catalog.user.isActive);
-    const sellerIds = [...new Set(alive.map((r) => r.catalog.user.id))];
-
-    const [avatarMap, cityNames, countRows] = await Promise.all([
-      this.avatarMap(sellerIds),
-      this.cityNames(alive.map((r) => r.catalog.user.cityId)),
-      sellerIds.length
-        ? this.prisma.product.groupBy({
-            by: ['userId'],
-            where: { userId: { in: sellerIds }, status: 'confirmed' },
-            _count: { _all: true },
-          })
-        : Promise.resolve([]),
-    ]);
-    const countMap = new Map(countRows.map((c) => [c.userId, c._count._all]));
-
+  /** حل تنظیمات — مقادیر ذخیره‌شده روی پیش‌فرض‌ها می‌نشینند (عین استاب):
+   *  آیدی = userName، برند = نام کامل، رنگ = null (ایمچ)، آیکون = store. */
+  private resolvedSettings(user: UserBrief, row: CatalogRow | null): CatalogSettingsDto {
     return {
-      items: alive.map((r) => {
-        const s = r.catalog.user;
-        return {
-          pageId: r.catalog.pageId,
-          sellerUserName: s.userName,
-          sellerId: s.id,
-          sellerName: `${s.firstName} ${s.lastName}`.trim(),
-          avatarUrl: avatarMap.get(s.id) ?? null,
-          cityName: s.cityId != null ? (cityNames.get(s.cityId) ?? null) : null,
-          productCount: countMap.get(s.id) ?? 0,
-          savedAt: fmtDate(r.createdAt),
-        };
-      }),
+      catalogId: row?.catalogId ?? user.userName,
+      brandName: row?.brandName ?? `${user.firstName} ${user.lastName}`.trim(),
+      brandColor: row?.brandColor ?? null,
+      brandIcon: row?.brandIcon ?? 'store',
     };
   }
 
-  // ─── خصوصی‌ها ────────────────────────────────────────────────────────────
-
-  /** رنگ معتبر hex یا پیش‌فرض — فرانت پالت بسته دارد، این عقب‌گیری است */
-  private saneColor(v: string | null | undefined): string {
-    const t = (v ?? '').trim();
-    return HEX_RE.test(t) ? t.toLowerCase() : DEFAULT_COLOR;
+  /** آیدی عمومی آزاد است؟ — تداخل با آیدی سفارشی دیگران و userName هیچ
+   *  کاربری (جز خودِ مالک) ممنوع. خروجی: null (آزاد) یا id تصاحب‌کننده. */
+  private async catalogIdOwner(id: string, exceptUserId: string): Promise<string | null> {
+    const taken = await this.prisma.userCatalog.findFirst({
+      where: { catalogId: id, userId: { not: exceptUserId } },
+      select: { userId: true },
+    });
+    if (taken) return taken.userId;
+    const user = await this.prisma.user.findUnique({ where: { userName: id }, select: { id: true } });
+    return user && user.id !== exceptUserId ? user.id : null;
   }
 
-  /** واتساپ معتبر یا خطا — برخلاف رنگ، مقدار خراب بی‌صدا نادیده گرفته نمی‌شود */
-  private saneWhatsapp(v: string | null | undefined): string | null {
-    if (v == null || !v.trim()) return null;
-    const d = normalizeWhatsapp(v);
-    if (!d) {
-      throw AppError.badRequest('شماره واتساپ معتبر نیست — قالب درست: 09xxxxxxxxx', 'INVALID_WHATSAPP');
-    }
-    return d;
+  /** فروشندهٔ ناشناخته → null؛ بریدن کلید یکسان با استاب (trim + lower) */
+  private async findSeller(sellerUserName: string): Promise<UserBrief | null> {
+    const key = (sellerUserName ?? '').trim().toLowerCase();
+    if (!key) return null;
+    return this.prisma.user.findUnique({
+      where: { userName: key },
+      select: { id: true, userName: true, firstName: true, lastName: true },
+    });
   }
 
-  /** کشِ پروفایل فروشنده و کارت‌های آگهی بی‌اعتبار می‌شود — هر دو
-   *  فیلد catalog صاحبشان را جواب می‌دهند و باید فوراً به‌روز دیده شوند */
+  /** ردیف کاتالوگ فروشنده (لنگر ذخیره‌شده‌ها) — ناشناخته/ندارد → null */
+  private async sellerCatalogRow(sellerUserName: string): Promise<{ id: string } | null> {
+    const seller = await this.findSeller(sellerUserName);
+    if (!seller) return null;
+    return this.prisma.userCatalog.findUnique({
+      where: { userId: seller.id },
+      select: { id: true },
+    });
+  }
+
+  /** کشِ پروفایل فروشنده و کارت‌های آگهی بی‌اعتبار می‌شود — شخصی‌سازی
+   *  (رنگ/نام برند) در صفحهٔ عمومی دیده می‌شود و باید فوراً به‌روز باشد */
   private async invalidateSellerCaches(userId: string): Promise<void> {
     const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { userName: true } });
     if (u?.userName) this.cache.invalidateTag(`seller:${u.userName.trim()}`);
@@ -366,16 +419,20 @@ export class CatalogService {
     const names = await this.locations.getNames([], ids);
     return names.cities;
   }
-
-  private toDto(row: { pageId: string; brandColor: string; instagramId: string | null; whatsappNumber: string | null; createdAt: Date; updatedAt: Date | null }): UserCatalogDto {
-    return {
-      pageId: row.pageId,
-      brandColor: row.brandColor,
-      instagramId: row.instagramId ?? null,
-      whatsappNumber: row.whatsappNumber ?? null,
-      createdAt: fmtDate(row.createdAt),
-      // null تا اولین ویرایش — عین استاب/فرانت ('' نباشد)
-      updatedAt: row.updatedAt ? fmtDate(row.updatedAt) : null,
-    };
-  }
 }
+
+/** ستون‌های تنظیمات که سرویس می‌خواند */
+const CATALOG_SELECT = {
+  catalogId: true,
+  brandName: true,
+  brandColor: true,
+  brandIcon: true,
+} as const;
+
+/** دیتای کاربر که حل تنظیمات نیاز دارد */
+const USER_BRIEF_SELECT = {
+  id: true,
+  userName: true,
+  firstName: true,
+  lastName: true,
+} as const;

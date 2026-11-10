@@ -41,8 +41,6 @@ interface NameMaps {
   cats: Map<number, string>;
   provs: Map<number, string>;
   cities: Map<number, string>;
-  /** آیدی پیج کاتالوگ هر فروشنده (۱۰-۱۱) — عین products.service */
-  catalogs: Map<string, string>;
 }
 
 const EMPTY_MAPS: NameMaps = {
@@ -50,7 +48,6 @@ const EMPTY_MAPS: NameMaps = {
   cats: new Map(),
   provs: new Map(),
   cities: new Map(),
-  catalogs: new Map(),
 };
 
 @Injectable()
@@ -156,18 +153,13 @@ export class CityMarketService {
     const cityIds = [...new Set(rows.map((r) => r.cityId))];
     const catIds = [...new Set(rows.flatMap((r) => [r.categoryId, r.subCategoryId]))];
 
-    const [userRows, catMap, locNames, catalogRows] = await Promise.all([
+    const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
         select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
       }),
       this.categories.getNameMap(),
       this.locations.getNames(provinceIds, cityIds),
-      // کاتالوگ فروشندگان همین ردیف‌ها (۱۰-۱۱) — عین products.service
-      this.prisma.userCatalog.findMany({
-        where: { userId: { in: userIds } },
-        select: { userId: true, pageId: true },
-      }),
     ]);
 
     const users = new Map(
@@ -178,9 +170,8 @@ export class CityMarketService {
     );
     const cats = new Map<number, string>();
     for (const id of catIds) cats.set(id, catMap.get(id)?.category_name ?? '—');
-    const catalogs = new Map(catalogRows.map((c) => [c.userId, c.pageId]));
 
-    return { users, cats, provs: locNames.provinces, cities: locNames.cities, catalogs };
+    return { users, cats, provs: locNames.provinces, cities: locNames.cities };
   }
 
   /** نگاشت ردیف DB → DTO فرانت (camelCase) — عین toDto در products.service */
@@ -251,8 +242,6 @@ export class CityMarketService {
         lastName: seller?.lastName ?? UNKNOWN,
         activePakageType: 0,
         isVerified: seller?.isVerified ?? false,
-        // کاتالوگ فروشنده (۱۰-۱۱) — عین products.service
-        catalog: names.catalogs.has(p.userId) ? { pageId: names.catalogs.get(p.userId)! } : null,
       },
       isLadder: p.isLadder,
       isElevated: p.isElevated,

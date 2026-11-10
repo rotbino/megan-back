@@ -4,7 +4,7 @@ import { LocationsModule } from '../locations/locations.module';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 
-/** کاتالوگ محصول — صفحهٔ عمومی مستقل فروشنده در /catalog/{pageId} (۱۰-۱۱) */
+/** کاتالوگ کاربر — شخصی‌سازی صفحهٔ عمومی /c/{catalogId} (۱۰-۱۱ + دور ۲/۳) */
 @Module({
   // AuthModule: JwtService را export می‌کند — گارد روش‌به‌روشِ کنترلر به آن
   // نیاز دارد (بدون آن خطای UnknownDependencies)؛ LocationsModule: نام شهرها

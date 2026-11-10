@@ -1,56 +1,49 @@
 import { IsOptional, IsString } from 'class-validator';
 
 /**
- * DTOهای «کاتالوگ محصول» (خواسته مالک ۱۰-۱۱).
+ * DTOهای «کاتالوگ کاربر» (خواسته مالک ۱۰-۱۱ + بازنگری دور ۲/۳).
  *
- * صفحهٔ عمومی مستقل فروشنده در /catalog/{pageId}: فروشنده با یک آیدی پیج
- * یکتا + رنگ برند + راه‌های تماس اختیاری (اینستاگرام/واتساپ) کاتالوگش را
- * می‌سازد و بعداً ویرایش می‌کند. اعتبارسنجی آیدی/رنگ/واتساپ در سرویس است
- * (چون پیام فارسی سراسری بین ساخت/ویرایش مشترک است)؛ این‌جا فقط شکل ورودی.
+ * کاتالوگ فروشنده همان صفحهٔ عمومی اوست (/c/{catalogId}) — ساخت/ویرایش
+ * جداگانه ندارد؛ شخصی‌سازی (آیدی لینک، نام برند، رنگ، آیکون) با
+ * updateSettings ذخیره می‌شود و ذخیره/ذخیره‌کنندگان با کلید userName
+ * فروشنده کار می‌کنند. اعتبارسنجی کامل (قالب آیدی/رنگ/آیکون و یکتایی)
+ * در سرویس است چون پیام فارسی بین اندپوینت‌ها مشترک است؛ این‌جا فقط
+ * شکل ورودی. قرارداد عین استاب سندباکس (megan-web/scripts/stub-backend.mjs)
+ * و لایهٔ فرانت (megan-web/src/lib/mock/api.ts) است.
  */
 
-/** آیدی پیج — هم‌قالب checkPageId / getByPageId / isSaved / toggleSave / getSavers */
-export class PageIdDto {
+/** کلید فروشنده — isSaved / toggleSave / getSavers */
+export class UserNameDto {
   @IsString()
-  pageId!: string;
+  userName!: string;
 }
 
-/** ساخت کاتالوگ — همهٔ تنظیمات در همان لحظهٔ ساخت */
-export class CreateCatalogDto {
+/** آیدی عمومی — resolvePublicId (صفحهٔ /c/{id}) */
+export class ResolveIdDto {
   @IsString()
-  pageId!: string;
-
-  /** hex مثل #0f766e — خالی/نامعتبر = رنگ پیش‌فرض یشمی */
-  @IsOptional()
-  @IsString()
-  brandColor?: string;
-
-  /** آیدی اینستاگرام — @ و آدرس کامل سمت سرور کاندیده می‌شود */
-  @IsOptional()
-  @IsString()
-  instagramId?: string | null;
-
-  /** 09xxxxxxxxx — ارقام فارسی/۰۰/۹۸+ نرمال می‌شود */
-  @IsOptional()
-  @IsString()
-  whatsappNumber?: string | null;
+  id!: string;
 }
 
-/** ویرایش تنظیمات — هر فیلد اختیاری؛ فقط همان‌هایی که آمده‌اند عوض می‌شوند */
-export class UpdateCatalogDto {
+/** ذخیرهٔ تنظیمات — هر فیلد اختیاری؛ فقط همان‌هایی که آمده‌اند عوض
+ *  می‌شوند (ویرایش جزئی). مقادیر null/خالی = «پیش‌فرض» همان فیلد. */
+export class UpdateSettingsDto {
+  /** بخش آخر لینک عمومی — لاتین کوچک/رقم/خط تیره ۳ تا ۳۰ */
   @IsOptional()
   @IsString()
-  pageId?: string;
+  catalogId?: string | null;
 
+  /** نام برند/فروشگاه — حداکثر ۴۰ نویسه */
   @IsOptional()
   @IsString()
-  brandColor?: string;
+  brandName?: string | null;
 
+  /** hex مثل #0e9f6e */
   @IsOptional()
   @IsString()
-  instagramId?: string | null;
+  brandColor?: string | null;
 
+  /** کلید آیکون از فهرست رسمی فرانت (lib/catalog-brand) */
   @IsOptional()
   @IsString()
-  whatsappNumber?: string | null;
+  brandIcon?: string | null;
 }
