@@ -8,6 +8,7 @@ import { SiteSettingsService } from '../site-settings/site-settings.service';
 import { effectivePakageType } from '../packages/packages.service';
 import { PushService } from '../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../chat/io-holder';
+import { BuyerBookService } from '../buyer-book/buyer-book.service';
 import {
   BUYER_BOOK_MAX,
   BUYER_PERIODS,
@@ -84,6 +85,9 @@ export interface BuyerDirectoryEntry {
   activeRecently: boolean;
   /** غایب بیش از ۹۰ روز — در UI کم‌رنگ و انتهای فهرست */
   stale: boolean;
+  /** آیدی عمومی دفتر خرید این خریدار — لینک ظریف فوتر کارت → /b/{bookId}
+   *  (خواستهٔ مالک ۱۰-۱۱ دور ۵)؛ با ensureBookIds همیشه مقدار دارد */
+  bookId?: string | null;
 }
 
 /** شرایط ساختاریافتهٔ تامین — خروجی normalizeTerms (آمادهٔ spread در create) */
@@ -105,6 +109,7 @@ export class BuyersService {
     private readonly categories: CategoriesService,
     private readonly settings: SiteSettingsService,
     private readonly push: PushService,
+    private readonly books: BuyerBookService,
   ) {}
 
   // ─── دفتر خرید من ──────────────────────────────────────────────────────────
@@ -389,8 +394,15 @@ export class BuyersService {
     }
 
     const total = items.length;
+    // آیدی دفتر خریداران همین صفحه — لینک ظریف فوتر کارت (خواستهٔ مالک
+    // ۱۰-۱۱ دور ۵)؛ فقط برای صفحهٔ جاری (سقف ۴۸) تا دایرکتوری سبک بماند؛
+    // دفترِ بدون ردیف همین‌جا با آیدی تصادفی ساخته می‌شود
+    const pageItems = items.slice((page - 1) * perPage, page * perPage);
+    const bookIdByUser = await this.books.ensureBookIds(pageItems.map((i) => i.buyerId));
+    for (const it of pageItems) it.bookId = bookIdByUser.get(it.buyerId) ?? null;
+
     return {
-      items: items.slice((page - 1) * perPage, page * perPage),
+      items: pageItems,
       total,
       page,
       perPage,

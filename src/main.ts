@@ -30,8 +30,12 @@ function genReqId(req: import('fastify').FastifyRequest): string {
 async function bootstrap(): Promise<void> {
   const adapter = new FastifyAdapter({
     trustProxy: true, // پشت reverse proxy — برای rate limit بر پایه IP واقعی
-    // آپلود multipart به فضای بیشتری از MAX_FILE_SIZE نیاز دارد
-    bodyLimit: Math.max(512 * 1024, storage.MAX_FILE_SIZE + 1024 * 1024),
+    // آپلود multipart به فضای بیشتری از MAX_FILE_SIZE نیاز دارد: مدارک احراز
+    // هویت تا ۴ فایل در «یک» درخواست می‌روند (کارت ملی روی/پشت + سلفی + جواز
+    // کسب اختیاری) — رفع ریشهٔ گزارش مالک ۱۰-۱۱ (MULTIPART_TRUNCATED):
+    // چک content-length فستیفای بی‌اعتنا به content-type است و بدنهٔ بزرگ‌تر
+    // از سقف، قبل از رسیدن به پارسِ multipart با 413 رد می‌شد.
+    bodyLimit: Math.max(1024 * 1024, storage.MAX_FILE_SIZE * 4 + 2 * 1024 * 1024),
     // لاگ ساختاریافته pino — JSON در پروداکشن (قابل جمع‌آوری با Loki/ELK)،
     // در توسعه فقط هشدارها تا کنسول شلوغ نشود
     logger: {
@@ -60,9 +64,11 @@ async function bootstrap(): Promise<void> {
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
   await app.register(fastifyMultipart, {
-    // files:2 برای مدارک احراز هویت (کارت ملی + سلفی در یک درخواست)؛
-    // سرویس‌های تک‌فایلی پارت اضافه را خودشان می‌بلعند (readMultipart)
-    limits: { fileSize: storage.MAX_FILE_SIZE, files: 2, fields: 10 },
+    // files:4 برای مدارک احراز هویت — روی کارت + پشت کارت + سلفی + جواز کسب
+    // اختیاری، همه در یک درخواست (رفع باگ ۱۰-۱۱: با files:2 پارت سوم به بعد
+    // باعث خطای پارس و پیام «آپلود ناقص» می‌شد)؛ سرویس‌های تک‌فایلی پارت
+    // اضافه را خودشان می‌بلعند (readMultipart با لیست سفید فیلدها)
+    limits: { fileSize: storage.MAX_FILE_SIZE, files: 4, fields: 20 },
   });
   await app.register(fastifyCompress);
 
