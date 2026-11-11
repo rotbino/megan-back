@@ -31,6 +31,7 @@ import { FavoritesModule } from './favorites/favorites.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { BuyerBookModule } from './buyer-book/buyer-book.module';
+import { TasksModule } from './tasks/tasks.module';
 import { AdminModule } from './admin/admin.module';
 
 /**
@@ -69,6 +70,7 @@ import { AdminModule } from './admin/admin.module';
     ContactsModule, // مخاطبین گوشی — «ارسال به مخاطبین» (۴-۱۱)
     CatalogModule, // کاتالوگ محصول — صفحهٔ عمومی مستقل فروشنده (۱۰-۱۱)
     BuyerBookModule, // دفتر خرید — صفحهٔ عمومی خریدار /b/{bookId} + ذخیرهٔ فروشنده‌ها (۱۰-۱۱ دور ۵)
+    TasksModule, // تسک‌های کاربر — کارهای مهم مانده برای زنگولهٔ اعلان (۱۱-۱۱ دور ۴)
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
   ],
   controllers: [HealthController],
