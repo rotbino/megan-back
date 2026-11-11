@@ -141,6 +141,8 @@ model User {
   buyerBook UserBuyerBook? @relation("UserBuyerBookOwner")
   /// دفاتر خریدی که این کاربر (فروشنده) ذخیره کرده — تب «دفاتر ذخیره شده» (۱۰-۱۱ دور ۵)
   savedBuyerBooks SavedBuyerBook[] @relation("SavedBuyerBookOwner")
+  /// ثبت‌نام‌های این کاربر در سرویس‌های تخصصی ارزش‌افزوده (۱۱-۱۲)
+  serviceSignups ServiceSignup[] @relation("ServiceSignupOwner")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1392,4 +1394,32 @@ model SavedBuyerBook {
 
   @@unique([userId, buyerBookId])
   @@index([buyerBookId, createdAt(sort: Desc)])
+}
+
+/// ثبت‌نام فروشنده در سرویس‌های تخصصی ارزش‌افزوده (خواستهٔ مالک ۱۱-۱۲):
+/// ریتو (سفارش مستقیم خرده‌فروش از تولیدکننده) و همخرید (خرید گروهی به قیمت
+/// تولید). هر کاربر در هر سرویس یک ثبت‌نام — دوباره ثبت‌نام = اصلاح همان رکورد
+/// (upsert با کلید یتا [userId, serviceId]). فرم فعلاً صنف (متن آزاد) و نام
+/// کسب‌وکار می‌گیرد؛ فاز راه‌اندازی هر سرویس فیلدهای تخصصی خودش را اضافه می‌کند.
+model ServiceSignup {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// ثبت‌نام‌کننده
+  user   User   @relation("ServiceSignupOwner", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.ObjectId
+
+  /// شناسهٔ سرویس — ritu | hamkharid (لیست سفید در dto ماژول service-signups)
+  serviceId String @map("service_id")
+
+  /// صنف — متن آزاد (مثلاً لبنیات)
+  guild String
+  /// نام کسب‌وکار
+  businessName String @map("business_name")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, serviceId])
+  /// شمار ثبت‌نام هر سرویس — آمار پنل ادمین
+  @@index([serviceId])
 }
