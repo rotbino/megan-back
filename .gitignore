@@ -23,3 +23,6 @@ logs/
 *.tar.gz
 *.dump
 backups/
+
+# lockfile — ریپو طبق رویهٔ مالک بدون قفل وابستگی‌ها است (نصب از package.json)
+package-lock.json
