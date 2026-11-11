@@ -93,13 +93,10 @@ export class BuyRequestsController {
     return ok(await this.buyRequests.getSuggestedBuyers(user.id));
   }
 
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Post('getSuggestedSellers')
-  @ApiOperation({ summary: 'فروشندگان پیشنهادی — گروه دسته‌ای بر اساس درخواست‌های خرید من' })
-  async getSuggestedSellers(@CurrentUser() user: AuthUser) {
-    return ok(await this.buyRequests.getSuggestedSellers(user.id));
-  }
+  // «فروشندگان پیشنهادی» حذف شد (خواستهٔ مالک ۱۱-۱۱): دکمهٔ هر ردیف
+  // «درخواست‌های خرید من» مستقیم به لیست محصولات همان دسته با سورت تطابق
+  // نیاز می‌رود (products/getProductList با sort=match) — صفحهٔ میانی
+  // /panel/suggested-sellers و این اندپوینت دیگر لازم نیستند.
 
   // بازبینی درخواست حالا فقط از مسیر ادمین انجام می‌شود:
   // POST /admin/buy-requests/reviewBuyRequest (AdminJwtAuthGuard — فاز A4)

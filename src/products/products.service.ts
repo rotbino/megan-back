@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Product } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService, TTL } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
@@ -20,12 +20,22 @@ import type {
   UpdateMyProductDto,
 } from './dto';
 import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages.service';
+import {
+  ELEVATED_BOOST,
+  LADDER_BOOST,
+  locationScore,
+  typeMatchScore,
+  volumeScore,
+} from '../common/matching/match-score';
 
 /** ظرفیت آگهی بسته رایگان — قبلاً ۵؛ حالا ۱۰ (خواسته مالک). بسته فعال = نامحدود. */
 export const PRODUCT_CAPACITY = FREE_PRODUCT_CAPACITY;
 /** capacity=-1 در پاسخ getMyProducts یعنی «نامحدود» (بسته فعال) */
 export const UNLIMITED_CAPACITY = -1;
 const PER_PAGE_DEFAULT = 16;
+/** سقف اسکن سورت «مطابق نیاز من» — رتبه‌بندی در حافظه؛ دادهٔ فعلی بازار
+ *  بسیار کوچک‌تر است، سقف فقط حفاظت مقیاس است (خواستهٔ مالک ۱۱-۱۱) */
+const MATCH_SCAN_CAP = 1000;
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
 const DAY_MS = 86_400_000;
 
@@ -137,11 +147,18 @@ export class ProductsService {
    * POST /products/getProductList — فیلتر دسته (با فرزندان) + استان/شهر + جستجو؛
    * سورت «مرتبط‌ترین» = نردبان اول بعد جدیدترین (عین باسکول)؛ صفحه‌بندی.
    * کش ۳۰ثانیه‌ای با تگ products — هر ثبت/حذف/آپلود عکس بیاتش می‌کند.
+   *
+   * سورت «مطابق نیاز من» (خواستهٔ مالک ۱۱-۱۱): ورود خریدار از «درخواست‌های
+   * خرید من» با زمینهٔ نیاز (نوع + حجم + مکان)؛ امتیاز هر آگهی = تطابق نوع
+   * (۳۰) + تطابق حجم/موجودی (۰تا۲۵) + نزدیکی (۰تا۱۵) + بوست نردبان (۲۵) و
+   * فروشندهٔ ویژه (۱۲) — طبقه‌بندی SQL ممکن نیست (رابطهٔ وزنی واحد‌ها و احتوای
+   * متن)، پس تا سقف MATCH_SCAN_CAP ردیف با ترتیب طبیعی اسکن و در حافظه
+   * رتبه‌بندی می‌شود؛ نتیجه فقط ردیف‌های همان صفحه hydrate می‌شوند.
    */
   async getProductList(dto: GetProductListDto) {
     const page = dto.page ?? 1;
     const pageSize = dto.pageSize ?? PER_PAGE_DEFAULT;
-    const sort = dto.sort === 'newest' ? 'newest' : 'related';
+    const sort = dto.sort === 'newest' ? 'newest' : dto.sort === 'match' ? 'match' : 'related';
 
     return this.cache.wrap(
       `products:list:${JSON.stringify(dto)}`,
@@ -195,15 +212,31 @@ export class ProductsService {
               // فروشندگان ویژه، بعد جدیدترین به‌روزرسانی
               [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }];
 
-        const [total, rows] = await Promise.all([
-          this.prisma.product.count({ where }),
-          this.prisma.product.findMany({
-            where,
-            orderBy,
-            skip: (page - 1) * pageSize,
-            take: pageSize,
-          }),
-        ]);
+        // ── «مطابق نیاز من» — رتبه‌بندی در حافظه روی اسکن سقف‌دار ──
+        let rows;
+        let total: number;
+        if (sort === 'match') {
+          const [cnt, scanned] = await Promise.all([
+            this.prisma.product.count({ where }),
+            this.prisma.product.findMany({
+              where,
+              orderBy, // ترتیب طبیعی — زیربنای tie-break پایدار صفحه‌ها
+              take: MATCH_SCAN_CAP,
+            }),
+          ]);
+          total = cnt;
+          rows = this.rankByNeed(scanned, dto).slice((page - 1) * pageSize, page * pageSize);
+        } else {
+          [total, rows] = await Promise.all([
+            this.prisma.product.count({ where }),
+            this.prisma.product.findMany({
+              where,
+              orderBy,
+              skip: (page - 1) * pageSize,
+              take: pageSize,
+            }),
+          ]);
+        }
 
         const pageCount = Math.max(1, Math.ceil(total / pageSize));
         const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
@@ -216,6 +249,42 @@ export class ProductsService {
         };
       },
     );
+  }
+
+  /**
+   * رتبه‌بندی آگهی‌ها بر اساس نیاز خریدار (فرمول مشترک match-score) — دو سطح:
+   *  ۱. تیغهٔ نوع: اگر نوع کالا در درخواست مشخص است، آگهی‌های همان نوع
+   *     («اول سیب‌زمینی‌های آگریا» — خواستهٔ مالک ۱۱-۱۱) همیشه بالای بقیه.
+   *  ۲. داخل هر تیغه: حجم/موجودی (۰تا۲۵) + نزدیکی (۰تا۱۵) + بوست نردبان (۲۵)
+   *     و فروشندهٔ ویژه (۱۲) — پرداختی‌ها دیده می‌شوند ولی تیغهٔ نوع را رد نمی‌کنند.
+   * tie-break = ترتیب طبیعی ورودی (نردبان ← ویژه ← جدیدترین) تا صفحه‌بندی پایدار
+   * بماند. هیچ آگهی‌ای حذف نمی‌شود — فقط اولویت جابه‌جا می‌شود.
+   */
+  private rankByNeed(rows: Product[], dto: GetProductListDto): Product[] {
+    const wantType = dto.matchType?.trim() ? dto.matchType.trim() : null;
+    return rows
+      .map((r, i) => {
+        const typeScore = typeMatchScore(wantType, r.productName);
+        let score = typeScore;
+        if (dto.matchAmount != null) {
+          score += volumeScore(
+            dto.matchAmount,
+            dto.matchUnit ?? '',
+            r.stock,
+            Math.max(1, r.minSaleAmount),
+            r.unit,
+          );
+        }
+        score += locationScore(dto.nearProvinceId, dto.nearCityId, r.provinceId, r.cityId);
+        // نردبانِ فعال — فیلتر where انقضای نردبان را زنده نگه داشته است
+        if (r.isLadder) score += LADDER_BOOST;
+        if (r.isElevated) score += ELEVATED_BOOST;
+        // تیغهٔ نوع — ۱ = همان نوعِ درخواست (وقتی نوعی مشخص است)
+        const tier = wantType ? (typeScore > 0 ? 1 : 0) : 0;
+        return { r, i, tier, score };
+      })
+      .sort((a, b) => b.tier - a.tier || b.score - a.score || a.i - b.i)
+      .map((x) => x.r);
   }
 
   // ─── جزئیات ────────────────────────────────────────────────────────────────

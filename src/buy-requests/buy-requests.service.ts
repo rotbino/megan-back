@@ -7,6 +7,7 @@ import { LocationsService } from '../locations/locations.service';
 import { CallsService, dailyCallLimit } from '../calls/calls.service';
 import { SecurityService } from '../security/security.service';
 import { effectivePakageType } from '../packages/packages.service';
+import { volumeScore } from '../common/matching/match-score';
 import type { AuthUser } from '../common/guards';
 import {
   CreateBuyRequestDto,
@@ -49,9 +50,15 @@ export interface BuyRequestDto {
 export interface MyBuyRequestDto {
   id: number;
   subcategoryName: string;
+  /** slug دسته — مقصد مستقیم دکمهٔ «فروشندگان پیشنهادی» هر ردیف:
+   *  لیست محصولات همان دسته با تطابق نیاز (خواستهٔ مالک ۱۱-۱۱) */
+  categorySlug: string;
   productType: string;
   requirementAmount: number;
   unit: string;
+  /** مکان خریدار هنگام ثبت — پارامتر نزدیکیِ تطابق (نمایش نیست) */
+  provinceId: number | null;
+  cityId: number | null;
   status: string;
   goal: 'price_and_buy' | 'price_only';
   hasHistory: boolean;
@@ -357,9 +364,12 @@ export class BuyRequestsService {
         (r): MyBuyRequestDto => ({
           id: r.id,
           subcategoryName: catMap.get(r.categoryId)?.category_name ?? '—',
+          categorySlug: catMap.get(r.categoryId)?.slug ?? String(r.categoryId),
           productType: r.name ?? '',
           requirementAmount: r.requirementAmount,
           unit: r.unit,
+          provinceId: r.provinceId,
+          cityId: r.cityId,
           status: r.status,
           goal: (r.goal as MyBuyRequestDto['goal']) ?? 'price_and_buy',
           hasHistory: r.hasHistory,
@@ -566,8 +576,8 @@ export class BuyRequestsService {
     const p = norm(product.productName);
     const typeScore = !t || p.includes(t) || t.includes(p) ? 20 : 0;
 
-    // ── حجم خرید — بازهٔ معاملهٔ ممکن + نزدیکی ──
-    const volScore = this.volumeScore(
+    // ── حجم خرید — بازهٔ معاملهٔ ممکن + نزدیکی (فرمول مشترک match-score) ──
+    const volScore = volumeScore(
       req.requirementAmount,
       req.unit,
       product.stock,
@@ -590,114 +600,6 @@ export class BuyRequestsService {
       : 'near-category';
 
     return { score: catScore + typeScore + volScore + locScore, tier };
-  }
-
-  /**
-   * امتیاز حجم (۰ تا ۲۵) — «حجم خرید نزدیک» (خواستهٔ مالک ۷-۱۱):
-   *  • نیاز خریدار داخل بازهٔ [حداقل سفارش فروشنده، موجودی فروشنده] → معامله
-   *    ممکن؛ هرچه سهم بیشتری از عرضه بردارد به‌صرفه‌تر: ۱۸ + ۷×سهم
-   *  • زیر حداقل سفارش → با نسبت نزدیکی به حداقل کمرنگ می‌شود
-   *  • بالای موجودی → با نسبت پوشش موجودی کمرنگ می‌شود
-   *  • واحد غیرقابل‌مقایسه (مثل عدد در برابر کیلوگرم) → بی‌طرف ۱۰
-   */
-  private volumeScore(
-    buyerAmount: number,
-    buyerUnit: string,
-    sellerStock: number,
-    sellerMin: number,
-    sellerUnit: string,
-  ): number {
-    const FAMILY: Record<string, string> = {
-      'تن': 'weight',
-      'کیلوگرم': 'weight',
-      'گرم': 'weight',
-      'عدد': 'count',
-      'بسته': 'pack',
-      'متر': 'length',
-      'لیتر': 'volume',
-    };
-    const parse = (v: number, unit: string): { v: number; f: string } | null => {
-      const f = FAMILY[unit];
-      if (!f) return null;
-      if (unit === 'تن') return { v: v * 1000, f };
-      if (unit === 'گرم') return { v: v / 1000, f };
-      return { v, f };
-    };
-    const buyer = parse(buyerAmount, buyerUnit);
-    const stock = parse(Math.max(1, sellerStock), sellerUnit);
-    const min = parse(sellerMin, sellerUnit);
-    if (!buyer || !stock || !min || buyer.f !== stock.f) return 10; // غیرقابل‌مقایسه — بی‌طرف
-
-    if (buyer.v >= min.v && buyer.v <= Math.max(min.v, stock.v)) {
-      // داخل بازهٔ معامله — خرید بزرگ‌تر از عرضهٔ فروشنده به‌صرفه‌تر
-      return 18 + 7 * Math.min(1, buyer.v / stock.v);
-    }
-    if (buyer.v < min.v) return 25 * (buyer.v / min.v) * 0.8; // زیر حداقل سفارش فروشنده
-    return 25 * (stock.v / buyer.v) * 0.8; // بیش از موجودی فروشنده
-  }
-
-  /**
-   * POST /buy-requests/getSuggestedSellers — فروشندگان پیشنهادی پنل خریدار:
-   * گروه دسته‌ای بر اساس درخواست‌های خرید confirmed خودم؛ برای هر دسته،
-   * تعداد فروشندگان متمایزی که آگهی confirmed همان دسته (برگ یا پدر) دارند.
-   * کلیک گروه → لیست محصولات همان دسته.
-   */
-  async getSuggestedSellers(userId: string): Promise<
-    Array<{ id: number; categoryName: string; sellerCount: number; href: string }>
-  > {
-    const myRequests = await this.prisma.buyRequest.findMany({
-      where: { userId, status: 'confirmed' },
-      select: { categoryId: true },
-      take: 100,
-    });
-    if (myRequests.length === 0) return [];
-    const catIds = [...new Set(myRequests.map((r) => r.categoryId))];
-
-    const products = await this.prisma.product.findMany({
-      where: {
-        status: 'confirmed',
-        OR: [{ subCategoryId: { in: catIds } }, { categoryId: { in: catIds } }],
-      },
-      select: { userId: true, subCategoryId: true, categoryId: true },
-      take: 3000,
-    });
-    if (products.length === 0) return [];
-
-    // شمار فروشنده متمایز هر دسته درخواستی
-    const sellersByCat = new Map<number, Set<string>>();
-    for (const p of products) {
-      for (const cid of catIds) {
-        if (p.subCategoryId === cid || p.categoryId === cid) {
-          if (!sellersByCat.has(cid)) sellersByCat.set(cid, new Set());
-          sellersByCat.get(cid)!.add(p.userId);
-        }
-      }
-    }
-
-    // نام و slug دسته از درخت کش‌شده
-    const tree = await this.categories.getAllCategories();
-    const catInfo = new Map<number, { name: string; slug: string }>();
-    const walk = (nodes: Array<{ id: number; category_name: string; slug: string; children: unknown[] }>): void => {
-      for (const n of nodes) {
-        catInfo.set(n.id, { name: n.category_name, slug: n.slug });
-        walk(n.children as typeof nodes);
-      }
-    };
-    walk(tree as never);
-
-    const out: Array<{ id: number; categoryName: string; sellerCount: number; href: string }> = [];
-    for (const cid of catIds) {
-      const sellers = sellersByCat.get(cid);
-      if (!sellers || sellers.size === 0) continue;
-      const info = catInfo.get(cid);
-      out.push({
-        id: cid,
-        categoryName: info?.name ?? '—',
-        sellerCount: sellers.size,
-        href: `/product-list/category/${encodeURIComponent(info?.slug ?? String(cid))}`,
-      });
-    }
-    return out.sort((a, b) => b.sellerCount - a.sellerCount).slice(0, 12);
   }
 
   // ─── ادمین ─────────────────────────────────────────────────────────────────

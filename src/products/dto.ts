@@ -34,10 +34,44 @@ export class GetProductListDto {
   @IsInt()
   cityId?: number;
 
-  /** مرتب‌سازی — دقیقاً مثل باسکول: مرتبط‌ترین (نردبان اول) / جدیدترین */
+  /** مرتب‌سازی — دقیقاً مثل باسکول: مرتبط‌ترین (نردبان اول) / جدیدترین؛
+   *  match = «مطابق نیاز من» (خواستهٔ مالک ۱۱-۱۱): نوع ← حجم/موجودی ←
+   *  نزدیکی به شهر خریدار + بوست نردبان/ویژه — فقط با پارامترهای match* معنا دارد */
   @IsOptional()
   @IsString()
-  sort?: 'related' | 'newest';
+  sort?: 'related' | 'newest' | 'match';
+
+  /** زمینهٔ تطابق (sort=match) — نوع کالای درخواستی خریدار (مثل «آگریا») */
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  matchType?: string;
+
+  /** میزان نیازمندی خریدار — مبنای امتیاز حجم/موجودی */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  matchAmount?: number;
+
+  /** واحد نیازمندی — مثل «کیلوگرم» (تبدیل خانوادهٔ وزنی/عددی) */
+  @IsOptional()
+  @IsString()
+  @Length(1, 20)
+  matchUnit?: string;
+
+  /** مکان خریدار (استان/شهر) — امتیاز نزدیکی؛ فیلتر نیست */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  nearProvinceId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  nearCityId?: number;
 
   @IsOptional()
   @Type(() => Number)
