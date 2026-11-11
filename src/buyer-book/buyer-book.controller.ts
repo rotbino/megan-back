@@ -16,7 +16,7 @@ import { BuyerUserNameDto, ResolveBookIdDto, UpdateBookSettingsDto } from './dto
  * BuyerCategory (جریان بازبینی ادمین) می‌آیند.
  *
  * عمومی (بدون ورود): resolvePublicId — پوستهٔ برند SSR؛ getPublic ورود
- * می‌خواهد و محتوا را فقط مالک یا دارندهٔ بستهٔ فعال می‌بیند (NEED_PACKAGE).
+ * می‌خواهد اما محتوا برای همهٔ اعضای واردشده رایگان است (خواستهٔ مالک ۱۱-۱۱).
  */
 @ApiTags('buyerBook')
 /** حد نرخ ریزتر از سراسری — ذخیره/ویرایش مکرر */
@@ -55,7 +55,7 @@ export class BuyerBookController {
   @ApiBearerAuth()
   @Post('getPublic')
   @ApiOperation({
-    summary: 'دیتای کامل دفتر — گیت: مالک یا دارندهٔ بستهٔ فعال (وگرنه 403 NEED_PACKAGE)',
+    summary: 'دیتای کامل دفتر — رایگان برای همهٔ اعضای واردشده (خواستهٔ مالک ۱۱-۱۱)',
   })
   async getPublic(@CurrentUser() user: AuthUser, @Body() dto: ResolveBookIdDto) {
     return ok(await this.books.getPublic(user.id, dto.id));

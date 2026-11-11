@@ -513,6 +513,8 @@ export class ProductsService {
       where: { id: user.id },
       select: { activePakageType: true, packageExpiresAt: true, isVerified: true },
     });
+    // هویت بینندگان/تماس‌گیرندگان/ذخیره‌کنندگان رایگان شد (خواستهٔ مالک ۱۱-۱۱):
+    // دیگر قفل بسته نیست — این فیلد فقط برای ردیف «ارتقا عضویت» فرانت می‌ماند
     const canSeeIdentity = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0;
 
     // بازهٔ مؤثر — ۰ یعنی از ثبت آگهی؛ برش به عمر آگهی در هر حالت
@@ -624,9 +626,10 @@ export class ProductsService {
         })
       : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
-    /** هویت یا null قفل — گیت اشتراک ویژه مالک */
+    /** هویت — رایگان برای همهٔ مالک‌ها (خواستهٔ مالک ۱۱-۱۱: دیدن تماس‌گیرندگان
+     *  و ذخیره‌کنندگان بسته نمی‌خواهد)؛ null فقط وقتی کاربر حذف شده باشد */
     const identity = (id: string | null) => {
-      if (!canSeeIdentity || id == null) return null;
+      if (id == null) return null;
       const u = userMap.get(id);
       return u
         ? {
@@ -671,7 +674,7 @@ export class ProductsService {
         updatedAt: p.updatedAt,
         isLadder: p.isLadder,
       },
-      /** مالک اشتراک ویژه دارد؟ هویت‌ها فقط در این حالت باز می‌شوند */
+      /** مالک بستهٔ فعال دارد؟ — فقط ردیف «ارتقا عضویت» فرانت (هویت‌ها رایگان‌اند) */
       canSeeIdentity,
       /** مالک احراز هویت شده؟ — ردیف «روش‌های افزایش بازدید» */
       ownerIsVerified: me?.isVerified ?? false,

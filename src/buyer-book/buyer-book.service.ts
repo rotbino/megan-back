@@ -3,7 +3,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
 import { LocationsService } from '../locations/locations.service';
-import { effectivePakageType } from '../packages/packages.service';
 import type { UpdateBookSettingsDto } from './dto';
 
 /** قاعدهٔ آیدی سفارشی دفتر — عین استاب سندباکس و فرانت (مودال تنظیمات) */
@@ -120,8 +119,9 @@ interface BookRow {
  *  • آیدی لینک (/b/{bookId}) برخلاف کاتالوگ پیش‌فرضِ «تصادفی» دارد و با
  *    اولین نیاز ساخته می‌شود (خواستهٔ مالک: لینک سند شخصی خریدار است و
  *    userName او نباید از لینک لو برود).
- *  • محتوای دفتر (کالاها/مشخصات خریدار) پشت گیت است: فقط خودِ خریدار یا
- *    دارندهٔ بستهٔ فعال ایمچ (NEED_PACKAGE) — پوستهٔ برند SSR عمومی است.
+ *  • محتوای دفتر (کالاها/مشخصات خریدار) برای همهٔ اعضای واردشده رایگان
+ *    است (خواستهٔ مالک ۱۱-۱۱) — گیت بسته فقط روی دکمه‌های تماس/چت/پیشنهاد
+ *    در فرانت می‌نشیند؛ پوستهٔ برند SSR عمومی است.
  *  • فقط کالاهای confirmed عمومی می‌شوند — ردیف تازه تا بازبینی ادمین
  *    پنهان است (عین دایرکتوری خریداران).
  *
@@ -263,9 +263,10 @@ export class BuyerBookService {
     };
   }
 
-  /** POST /buyerBook/getPublic — دیتای کامل دفتر (گیت: مالک یا دارندهٔ بستهٔ
-   *  فعال — خواستهٔ مالک). null = دفتر ناشناخته؛ ۴۰۳ NEED_PACKAGE = قفل
-   *  و دعوت به خرید بسته در فرانت. */
+  /** POST /buyerBook/getPublic — دیتای کامل دفتر. مشاهده برای همهٔ اعضای
+   *  واردشده رایگان است (خواستهٔ مالک ۱۱-۱۱: «برای مشاهده دفتر خرید نیاز
+   *  به خرید بسته نیست»)؛ گیت بسته فقط در فرانت روی دکمه‌های تماس/چت/
+   *  ارسال پیشنهاد تامین می‌نشیند (مودال ارتقا). null = دفتر ناشناخته. */
   async getPublic(
     viewerId: string,
     raw: string,
@@ -278,20 +279,13 @@ export class BuyerBookService {
     const buyer = await this.findBuyerByPublicId(raw);
     if (!buyer) return null;
 
-    // گیت (خواستهٔ مالک): فقط مالک دفتر یا دارندهٔ بستهٔ فعال
+    // فقط حسابِ فعال (خواستهٔ مالک ۱۱-۱۱: مشاهدهٔ دفتر خرید بسته نمی‌خواهد)
     if (buyer.id !== viewerId) {
       const me = await this.prisma.user.findUnique({
         where: { id: viewerId },
-        select: { activePakageType: true, packageExpiresAt: true, isActive: true },
+        select: { isActive: true },
       });
       if (!me || !me.isActive) throw AppError.forbidden('حساب شما در دسترس نیست.');
-      const active = effectivePakageType(me.activePakageType, me.packageExpiresAt);
-      if (active <= 0) {
-        throw AppError.forbidden(
-          'مشاهدهٔ دفاتر خرید ویژهٔ کاربران دارندهٔ بستهٔ اشتراک فعال ایمچ است.',
-          'NEED_PACKAGE',
-        );
-      }
     }
 
     // کالاهای تاییدشده — ردیف pending/rejected عمومی نیست (عین استاب/دایرکتوری)
