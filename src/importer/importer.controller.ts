@@ -29,9 +29,15 @@ export class ImporterController {
   }
 
   @Get('source-info')
-  @ApiOperation({ summary: 'وضعیت دیتابیس منبع MySQL (ایمپورت لیستی فاز ۲)' })
+  @ApiOperation({ summary: 'وضعیت کالکشن منبع user-buskool (همان دیتابیس ایمچ)' })
   async sourceInfo() {
     return ok(await this.importer.sourceInfo());
+  }
+
+  @Get('next-unimported')
+  @ApiOperation({ summary: 'اولین کاربر منبع که هنوز ایمپورت نشده — پرکردن offset ادامه' })
+  async nextUnimported() {
+    return ok(await this.importer.nextUnimported());
   }
 
   @Post('cleanup')
@@ -47,7 +53,7 @@ export class ImporterController {
   }
 
   @Post('list')
-  @ApiOperation({ summary: 'شروع ایمپورت لیستی از جدول منبع (فاز ۲)' })
+  @ApiOperation({ summary: 'شروع ایمپورت لیستی از کالکشن user-buskool — رد شدن از ایمپورت‌شده‌ها' })
   startList(@Body() dto: ListImportDto) {
     return ok(this.importer.startList(dto));
   }

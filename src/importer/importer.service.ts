@@ -106,6 +106,8 @@ export class ImporterService {
       busy: [...this.jobs.values()].some((j) => j.status === 'running'),
       cookieSet: cookie.length > 0,
       adminPhone: importerAdminPhone(),
+      // درایور ذخیرهٔ عکس‌ها — فرانت نشان می‌دهد تا «چرا عکس‌ها لوکال نیست» همیشه معلوم باشد
+      storageDriver: storage.DRIVER,
     };
   }
 
@@ -125,9 +127,49 @@ export class ImporterService {
   }
 
   /**
-   * دیتابیس منبع (MySQL دامپ باسکول کاربر) — جدول phone/user_name برای
-   * ایمپورت لیستی فاز ۲. mysql2 اختیاری است: اگر نصب نباشد پیام مهربان.
+   * دیتابیس منبع — کالکشن user-buskool در «همان دیتابیس» ایمچ (خواستهٔ مالک
+   * ۱۳-۱۱: جدول را خودش با دامپ کاربران باسکول ساخته؛ دیگر دیتابیس جانبی
+   * لازم نیست). خواندن با $runCommandRaw تا شکل سندهای دامپ (فیلدهای اضافی)
+   * مهم نباشد و فقط user_name/phone خوانده شود.
    */
+  private sourceTable() {
+    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
+  }
+
+  /** فیلدهای یوزرنیم/تلفن کالکشن منبع — مطابق دامپ باسکول */
+  private sourceFields() {
+    return {
+      userName: process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || 'user_name',
+      phone: process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || 'phone',
+    };
+  }
+
+  /** خواندن دسته‌ای از کالکشن منبع، مرتب بر اساس یوزرنیم */
+  private async sourceRead(offset: number, limit: number): Promise<{ userName: string; phone: string | null }[]> {
+    const { userName: uf, phone: pf } = this.sourceFields();
+    const res = (await this.prisma.$runCommandRaw({
+      find: this.sourceTable(),
+      sort: { [uf]: 1 },
+      skip: offset,
+      limit,
+      batchSize: limit,
+      projection: { [uf]: 1, [pf]: 1 },
+    })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+    return (res?.cursor?.firstBatch ?? [])
+      .map((d) => {
+        const userName = String(d[uf] ?? '').trim();
+        const rawPhone = d[pf] == null ? '' : String(d[pf]).replace(/[^0-9]/g, '');
+        return { userName, phone: /^09\d{9}$/.test(rawPhone) ? rawPhone : null };
+      })
+      .filter((r) => r.userName.length > 0);
+  }
+
+  /** تعداد کل ردیف‌های کالکشن منبع */
+  private async sourceCount(): Promise<number> {
+    const res = (await this.prisma.$runCommandRaw({ count: this.sourceTable() })) as unknown as { n?: number };
+    return Number(res?.n ?? 0);
+  }
+
   async sourceInfo(): Promise<{
     connected: boolean;
     reason?: string;
@@ -135,63 +177,115 @@ export class ImporterService {
     phoneColumn?: string;
     userNameColumn?: string;
     total?: number;
+    imported?: number;
+    failed?: number;
     sample?: { phone: string; userName: string }[];
   }> {
-    const url = process.env.IMPORT_SOURCE_DB_URL?.trim();
-    const table = process.env.IMPORT_SOURCE_TABLE?.trim() || 'User-buskool';
-    const phoneColumn = process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || 'phone';
-    const userNameColumn = process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || 'user_name';
-    if (!url) return { connected: false, reason: 'بدون IMPORT_SOURCE_DB_URL — ایمپورت لیستی غیرفعال است' };
-
+    const table = this.sourceTable();
     try {
-      const mysql = await import('mysql2/promise' as string).catch(() => null);
-      if (!mysql) {
-        return { connected: false, reason: 'ماژول mysql2 نصب نیست — برای ایمپورت لیستی: bun add mysql2' };
+      const total = await this.sourceCount();
+      if (total === 0) {
+        return { connected: false, table, reason: `کالکشن ${table} در دیتابیس فعلی خالی است یا وجود ندارد` };
       }
-      const conn = await (mysql as any).createConnection(url);
-      try {
-        const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM \`${table}\``);
-        const total = Number((rows as any)[0]?.n ?? 0);
-        const [sampleRows] = await conn.query(
-          `SELECT \`${phoneColumn}\` AS phone, \`${userNameColumn}\` AS userName FROM \`${table}\` LIMIT 5`,
-        );
-        return {
-          connected: true,
-          table,
-          phoneColumn,
-          userNameColumn,
-          total,
-          sample: (sampleRows as any[]).map((r) => ({ phone: String(r.phone ?? ''), userName: String(r.userName ?? '') })),
-        };
-      } finally {
-        await conn.end();
-      }
+      const [sample, imported, failed] = await Promise.all([
+        this.sourceRead(0, 5),
+        this.prisma.user.count({ where: { bUserName: { not: null } } }),
+        this.prisma.user.count({ where: { failedImport: true } }),
+      ]);
+      return {
+        connected: true,
+        table,
+        phoneColumn: this.sourceFields().phone,
+        userNameColumn: this.sourceFields().userName,
+        total,
+        imported,
+        failed,
+        sample: sample.map((r) => ({ userName: r.userName, phone: r.phone ?? '' })),
+      };
     } catch (err) {
-      return { connected: false, reason: `اتصال به دیتابیس منبع ناموفق: ${(err as Error).message}` };
+      return { connected: false, table, reason: `خواندن کالکشن ${table} ناموفق: ${(err as Error).message}` };
     }
   }
 
-  /** شماره‌های تلفن از جدول منبع — برای پرکردن خودکار شمارهٔ ایمپورت تک‌کاربره */
-  async sourcePhoneFor(userName: string): Promise<string | null> {
-    const url = process.env.IMPORT_SOURCE_DB_URL?.trim();
-    if (!url) return null;
-    try {
-      const mysql = (await import('mysql2/promise' as string).catch(() => null)) as any;
-      if (!mysql) return null;
-      const table = process.env.IMPORT_SOURCE_TABLE?.trim() || 'User-buskool';
-      const phoneColumn = process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || 'phone';
-      const userNameColumn = process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || 'user_name';
-      const conn = await mysql.createConnection(url);
-      try {
-        const [rows] = await conn.query(
-          `SELECT \`${phoneColumn}\` AS phone FROM \`${table}\` WHERE \`${userNameColumn}\` = ? LIMIT 1`,
-          [userName],
-        );
-        const phone = (rows as any[])[0]?.phone;
-        return typeof phone === 'string' && /^09\d{9}$/.test(phone) ? phone : null;
-      } finally {
-        await conn.end();
+  /**
+   * اولین کاربر منبع که هنوز ایمپورت نشده + آمار ادامه — پرکردن خودکار
+   * «از ردیف» فرانت (خواستهٔ مالک: ادامه از همان‌جا که مانده).
+   */
+  async nextUnimported(): Promise<{
+    found: boolean;
+    offset: number;
+    userName?: string;
+    total: number;
+    importedCount: number;
+    remaining: number;
+    reason?: string;
+  }> {
+    const total = await this.sourceCount();
+    if (total === 0) {
+      return {
+        found: false,
+        offset: 0,
+        total: 0,
+        importedCount: 0,
+        remaining: 0,
+        reason: `کالکشن ${this.sourceTable()} خالی است یا وجود ندارد`,
+      };
+    }
+
+    const importedRows = await this.prisma.user.findMany({
+      where: { bUserName: { not: null } },
+      select: { bUserName: true },
+    });
+    const imported = new Set(importedRows.map((u) => u.bUserName as string));
+
+    let first: { offset: number; userName: string } | null = null;
+    let remaining = 0;
+    let scanned = 0;
+    while (scanned < total) {
+      const rows = await this.sourceRead(scanned, 5000);
+      if (!rows.length) break;
+      for (const [i, r] of rows.entries()) {
+        if (imported.has(r.userName)) continue;
+        remaining++;
+        if (!first) first = { offset: scanned + i, userName: r.userName };
       }
+      scanned += rows.length;
+    }
+
+    if (!first) {
+      return {
+        found: false,
+        offset: total,
+        total,
+        importedCount: imported.size,
+        remaining: 0,
+        reason: 'همهٔ کاربران منبع ایمپورت شده‌اند',
+      };
+    }
+    return {
+      found: true,
+      offset: first.offset,
+      userName: first.userName,
+      total,
+      importedCount: imported.size,
+      remaining,
+    };
+  }
+
+  /** شمارهٔ تلفن از کالکشن منبع — پرکردن خودکار شمارهٔ تستر تک‌کاربره */
+  private async sourcePhoneFor(userName: string): Promise<string | null> {
+    try {
+      const { userName: uf, phone: pf } = this.sourceFields();
+      const res = (await this.prisma.$runCommandRaw({
+        find: this.sourceTable(),
+        filter: { [uf]: userName },
+        limit: 1,
+        batchSize: 1,
+        projection: { [pf]: 1 },
+      })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+      const raw = res?.cursor?.firstBatch?.[0]?.[pf];
+      const phone = raw == null ? '' : String(raw).replace(/[^0-9]/g, '');
+      return /^09\d{9}$/.test(phone) ? phone : null;
     } catch {
       return null;
     }
@@ -317,49 +411,62 @@ export class ImporterService {
     job: JobInternal,
     input: { offset?: number; limit?: number; maxProductsPerUser?: number },
   ) {
-    // خواندن لیست از MySQL منبع
-    const mysql = (await import('mysql2/promise' as string).catch(() => null)) as any;
-    const url = process.env.IMPORT_SOURCE_DB_URL?.trim();
-    if (!mysql || !url) throw new Error('دیتابیس منبع در دسترس نیست — IMPORT_SOURCE_DB_URL و mysql2 لازم است');
-    const table = process.env.IMPORT_SOURCE_TABLE?.trim() || 'User-buskool';
-    const phoneColumn = process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || 'phone';
-    const userNameColumn = process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || 'user_name';
+    // خواندن لیست از کالکشن user-buskool — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 5;
-
-    const conn = await mysql.createConnection(url);
-    let rows: { userName: string; phone: string | null }[];
-    try {
-      const [r] = await conn.query(
-        `SELECT \`${userNameColumn}\` AS userName, \`${phoneColumn}\` AS phone FROM \`${table}\` ORDER BY \`${userNameColumn}\` LIMIT ? OFFSET ?`,
-        [limit, offset],
-      );
-      rows = (r as any[]).map((x) => ({ userName: String(x.userName ?? ''), phone: x.phone ? String(x.phone) : null }));
-    } finally {
-      await conn.end();
+    const rows = await this.sourceRead(offset, limit);
+    if (!rows.length) {
+      throw new Error(`ردیفی در کالکشن ${this.sourceTable()} از offset=${offset} نبود — شاید به انتهای لیست رسیده‌اید`);
     }
 
     job.totalUsers = rows.length;
     job.usersDone = 0;
     job.usersFailed = 0;
-    this.log(job, 'info', `${rows.length} کاربر از ردیف ${offset} خوانده شد`);
+    this.log(job, 'info', `${rows.length} کاربر از ردیف ${offset} کالکشن ${this.sourceTable()} خوانده شد`);
 
     const bk = new BuskoolClient(() => job.stopRequested);
+    let consecutiveFails = 0;
     for (const [i, row] of rows.entries()) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
       job.currentUserIndex = i + 1;
       job.currentUser = row.userName;
       // هر کاربر جاب نمایشی خودش را دارد ولی steps مشترک ریست می‌شود
       job.steps.forEach((s) => (s.status = 'pending'));
+
+      // ── ضدتکرار (خواستهٔ مالک): کاربر ایمپورت‌شده — موفق یا ناقص — رد می‌شود ──
+      const existing = await this.prisma.user.findFirst({
+        where: { bUserName: row.userName },
+        select: { failedImport: true },
+      });
+      if (existing) {
+        this.bump(job, 'usersSkipped');
+        this.log(
+          job,
+          'warn',
+          `↷ ${row.userName} رد شد — ${existing.failedImport ? 'ایمپورت ناقص قبلی (failedImport)' : 'قبلاً ایمپورت شده'}`,
+        );
+        continue;
+      }
+
       try {
         await this.importOneUser(job, bk, row.userName, row.phone ?? undefined, input.maxProductsPerUser ?? 0);
         job.usersDone = (job.usersDone ?? 0) + 1;
+        consecutiveFails = 0;
         job.buskoolRequests = bk.requests;
         this.log(job, 'success', `✔ ${row.userName} (${i + 1}/${rows.length})`);
       } catch (err) {
         if ((err as Error).message === 'JOB_STOPPED') throw err;
         job.usersFailed = (job.usersFailed ?? 0) + 1;
         this.log(job, 'error', `✖ ${row.userName}: ${(err as Error).message}`);
+        // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
+        await this.markFailedImport(row.userName).catch(() => undefined);
+        consecutiveFails++;
+        // ۳ شکست پیاپی = مشکل سیستمی (قطعی/بلاک) — ادامه بی‌فایده و خطرناک است
+        if (consecutiveFails >= 3) {
+          throw new Error(
+            `${consecutiveFails} شکست پیاپی — احتمالاً قطعی اینترنت یا بلاک شدن باسکول؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
+          );
+        }
       }
     }
     this.finishJob(job);
@@ -431,6 +538,9 @@ export class ImporterService {
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        // ضدتکرار ایمپورت لیستی (خواستهٔ مالک ۱۳-۱۱) — موفقیت پرچم شکست را برمی‌دارد
+        bUserName: userName,
+        failedImport: false,
       },
       create: {
         phone,
@@ -446,6 +556,7 @@ export class ImporterService {
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        bUserName: userName,
         createdAt: this.bkDate(ui.created_at) ?? new Date(),
       },
     });
@@ -769,6 +880,52 @@ export class ImporterService {
     });
     this.bump(job, 'stubUsers');
     return user;
+  }
+
+  /**
+   * نشانه‌گذاری شکست ایمپورت (خواستهٔ مالک ۱۳-۱۱) — کاربر (حتی ناقص) با پرچم
+   * failedImport می‌ماند تا بعداً رسیدگی شود؛ ایمپورت‌های بعدی هم از او رد
+   * می‌شوند تا دادهٔ تکراری نسازد.
+   */
+  private async markFailedImport(userName: string) {
+    const existing = await this.prisma.user.findFirst({
+      where: { OR: [{ bUserName: userName }, { userName }] },
+      select: { id: true },
+    });
+    if (existing) {
+      await this.prisma.user.update({
+        where: { id: existing.id },
+        data: { failedImport: true, bUserName: userName },
+      });
+      return;
+    }
+    // پروفایل باسکول اصلاً نیامده — stub حداقلی با شمارهٔ ساختگی یکتا
+    for (let i = 0; i < 3; i++) {
+      const suffix = i === 0 ? '' : `-${Math.random().toString(36).slice(2, 6)}`;
+      const stubName = `bk-f-${userName}`.slice(0, 56) + suffix;
+      try {
+        const phone = await this.uniqueFakePhone(0, stubName);
+        await this.prisma.user.create({
+          data: {
+            phone,
+            userName: stubName,
+            role: 'USER',
+            isSeller: false,
+            isBuyer: false,
+            bUserName: userName,
+            failedImport: true,
+            profile: {
+              bStub: true,
+              importedFrom: 'buskool-failed',
+              importedAt: new Date().toISOString(),
+            } as object,
+          },
+        });
+        return;
+      } catch {
+        /* userName تکراری — پسوند تصادفی بعدی */
+      }
+    }
   }
 
   /** شمارهٔ ساختگی یکتا — «09» + ۹ رقم از id عددی باسکول (الگوی seed) */
