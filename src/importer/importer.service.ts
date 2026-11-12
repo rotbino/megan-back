@@ -17,6 +17,11 @@
  *     ابری) ساخته نمی‌شود — انگار که آگهی توسط خود کاربر ایجاد شده.
  *   • نویسنده‌های کامنت «کاربر کمکی» (stub) می‌شوند — با ایمپورت واقعی بعدی
  *     همان bUserId ادغام می‌شوند.
+ *   • پروفایل کسب‌وکار (خواستهٔ مالک ۱۳-۱۱): توضیحات به ستون businessDesc
+ *     می‌رود (همان فرم ویرایش/کاتالوگ عمومی) و address/isCompany/companyName
+ *     با همان کلیدهای استاندارد profile embedded ذخیره می‌شوند؛ متن خودکار
+ *     باسکول (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک خودش
+ *     (lib/seller-text فرانت) را نشان می‌دهد، نه کپی باسکول را.
  *   • همهٔ درخواست‌های باسکول از صف BuskoolClient با فاصلهٔ BUSKOOL_DELAY_MS.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
@@ -515,14 +520,28 @@ export class ImporterService {
         })
       : null;
 
+    // «درباره کسب‌وکار» (خواستهٔ مالک ۱۳-۱۱): متنِ خودِ کاربر به ستون
+    // businessDesc می‌رود — همان جایی که فرم ویرایش پروفایل آیمچ می‌نویسد
+    // (users/updateProfile) و کاتالوگ عمومی می‌خواند (getSeller)؛ متن
+    // خودکار باسکول (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن پارامتریک
+    // آیمچ را نشان دهد (lib/seller-text در فرانت).
+    const businessDesc = isBuskoolAutoDesc(pf?.description)
+      ? null
+      : (pf?.description ?? '').trim() || null;
+
+    // فیلدهای نمایشی پروفایل با «همان کلیدهای استاندارد» فرم ویرایش پروفایل
+    // آیمچ (profile embedded: address/isCompany/companyName/activityDomain)
+    // ذخیره می‌شوند تا کاتالوگ عمومی، دفتر خرید و فرم ویرایش، دادهٔ باسکول
+    // را «در جای خودش» ببینند؛ پیشوند b فقط برای فیلدهای مختص باسکول
+    // (شناسه‌ها/اعتبار) می‌ماند (خواستهٔ مالک ۱۳-۱۱).
     const profileJson = {
       bUserId: ui.id,
       bProfileId: pf?.id ?? null,
-      bAddress: pf?.address ?? null,
-      bCompanyName: pf?.company_name ?? '',
-      bDescription: pf?.description ?? null,
+      address: pf?.address ?? null,
+      isCompany: pf?.is_company === 1 || Boolean((pf?.company_name ?? '').trim()),
+      companyName: (pf?.company_name ?? '').trim(),
+      activityDomain: pf?.activity_domain ?? null,
       bConfirmed: pf?.confirmed === 1,
-      bActivityDomain: pf?.activity_domain ?? null,
       bRelateds: (profile.relateds ?? []).map((r) => r?.name ?? '').filter(Boolean),
       bResponseRate: st?.response_rate ?? null,
       bReputationScore: st?.reputation_score ?? null,
@@ -544,6 +563,9 @@ export class ImporterService {
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        // دربارهٔ کسب‌وکار در جای خودش (خواستهٔ مالک ۱۳-۱۱) — همان ستونی که
+        // کاتالوگ عمومی و فرم ویرایش می‌خوانند
+        businessDesc,
         // ضدتکرار ایمپورت لیستی (خواستهٔ مالک ۱۳-۱۱) — موفقیت پرچم شکست را برمی‌دارد
         bUserName: userName,
         failedImport: false,
@@ -562,11 +584,19 @@ export class ImporterService {
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        businessDesc,
         bUserName: userName,
         createdAt: this.bkDate(ui.created_at) ?? new Date(),
       },
     });
     this.step(job, 'profile', 'done');
+    this.log(
+      job,
+      'info',
+      businessDesc
+        ? 'دربارهٔ کسب‌وکار در جای خودش (توضیحات کسب و کار) ثبت شد'
+        : 'متن «درباره کسب‌وکار» خالی/خودکارِ باسکول بود — ثبت نشد (صفحه متن پیش‌فرض آیمچ را نشان می‌دهد)',
+    );
     this.log(
       job,
       'success',
@@ -1132,9 +1162,11 @@ export class ImporterService {
       },
       profile: user.profile
         ? {
-            address: (pj.bAddress as string) ?? null,
-            companyName: (pj.bCompanyName as string) ?? '',
-            description: (pj.bDescription as string) ?? null,
+            // کلیدهای استاندارد آیمچ (جدید) + fallback به رکوردهای قدیمی
+            // تستر که با پیشوند b_* ذخیره شده بودند
+            address: (pj.address as string) ?? (pj.bAddress as string) ?? null,
+            companyName: (pj.companyName as string) ?? (pj.bCompanyName as string) ?? '',
+            description: user.businessDesc ?? ((pj.bDescription as string) ?? null),
             confirmed: (pj.bConfirmed as boolean) ?? false,
             bRelateds: (pj.bRelateds as string[]) ?? [],
           }
@@ -1182,6 +1214,28 @@ export class ImporterService {
 }
 
 // ─── تصویر: دانلود امن + نرمال‌سازی فرمت (پردازش/ذخیره عین سرویس uploads) ────
+
+/**
+ * تشخیص متن خودکار «دربارهٔ کسب‌وکار» باسکول — برای کاربرانی که چیزی
+ * ننوشته‌اند باسکول این جمله را می‌سازد (نمونهٔ مالک ۱۳-۱۱):
+ * «بشیر قربانی هستم از شهر مریوان در حال خرید و فروش عمده در بازار بزرگ
+ * باسکول. برای ارتباط با من روی دکمه ی ارسال پیام بزنید. خوشحال می شوم
+ * پروفایل من را با همکارانتان به اشتراک بگذارید.»
+ * این متن محصول خودِ کاربر نیست → ایمپورت نمی‌شود تا صفحهٔ آیمچ متن
+ * پارامتریک خودش را نشان دهد (lib/seller-text در فرانت؛ خواستهٔ مالک).
+ */
+function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
+  if (!desc) return false;
+  const t = desc
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (
+    t.includes('در حال خرید و فروش عمده در بازار بزرگ باسکول') &&
+    t.includes('برای ارتباط با من روی دکمه')
+  );
+}
 
 async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
   try {
