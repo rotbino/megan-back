@@ -808,16 +808,23 @@ export class ImporterService {
     const admin = await this.prisma.user.findUnique({ where: { phone: adminPhone } });
 
     // داده‌های وابسته (هر چیزی که به User غیرادمین اشاره دارد یا دادهٔ بازار است)
+    // ⚠️ ترتیب حیاتی است: Prisma روی MongoDB روابط را شبیه‌سازی می‌کند و رابطهٔ
+    //    الزامیِ بدون Cascade (LadderOrder→Product، ChatThread→User،
+    //    CallLog→User، SellerReview→User و…) والد را تا وقتی فرزند دارد حذف
+    //    نمی‌کند (خطای P2014). پس همهٔ فرزندان قبل از والد پاک می‌شوند:
+    //    ۱) فرزندان Product → ۲) خود Product → ۳) فرزندان User → ۴) خود User.
+    await wipe('ladderOrders', () => this.prisma.ladderOrder.deleteMany({})); // → Product (الزامی)
+    await wipe('chatMessages', () => this.prisma.chatMessage.deleteMany({})); // → ChatThread
+    await wipe('chats', () => this.prisma.chatThread.deleteMany({})); // → Product/User
+    await wipe('callLogs', () => this.prisma.callLog.deleteMany({})); // → Product/User
+    await wipe('reviews', () => this.prisma.sellerReview.deleteMany({})); // → User
     await wipe('products', () => this.prisma.product.deleteMany({}));
     await wipe('files', () => this.prisma.file.deleteMany({}));
-    await wipe('reviews', () => this.prisma.sellerReview.deleteMany({}));
     await wipe('buyRequests', () => this.prisma.buyRequest.deleteMany({}));
-    await wipe('chats', () => this.prisma.chatThread.deleteMany({}));
-    await wipe('chatMessages', () => this.prisma.chatMessage.deleteMany({}));
     await wipe('contacts', () => this.prisma.contact.deleteMany({}));
+    await wipe('followNotes', () => this.prisma.followNote.deleteMany({})); // → FollowItem
+    await wipe('followItems', () => this.prisma.followItem.deleteMany({})); // → FollowFolder
     await wipe('followFolders', () => this.prisma.followFolder.deleteMany({}));
-    await wipe('followItems', () => this.prisma.followItem.deleteMany({}));
-    await wipe('followNotes', () => this.prisma.followNote.deleteMany({}));
     await wipe('favorites', () => this.prisma.favoriteProduct.deleteMany({}));
     await wipe('favoriteSellers', () => this.prisma.favoriteSeller.deleteMany({}));
     await wipe('productViews', () => this.prisma.productView.deleteMany({}));
@@ -825,16 +832,18 @@ export class ImporterService {
     await wipe('supplyOffers', () => this.prisma.supplyOffer.deleteMany({}));
     await wipe('serviceSignups', () => this.prisma.serviceSignup.deleteMany({}));
     await wipe('buyerCategories', () => this.prisma.buyerCategory.deleteMany({}));
+    await wipe('savedCatalogs', () => this.prisma.savedCatalog.deleteMany({})); // → UserCatalog
+    await wipe('userCatalogs', () => this.prisma.userCatalog.deleteMany({}));
+    await wipe('savedBuyerBooks', () => this.prisma.savedBuyerBook.deleteMany({})); // → UserBuyerBook
+    await wipe('userBuyerBooks', () => this.prisma.userBuyerBook.deleteMany({}));
     await wipe('verificationOrders', () => this.prisma.verificationOrder.deleteMany({}));
     await wipe('chargeOrders', () => this.prisma.chargeOrder.deleteMany({}));
     await wipe('packageOrders', () => this.prisma.packageOrder.deleteMany({}));
-    await wipe('ladderOrders', () => this.prisma.ladderOrder.deleteMany({}));
     await wipe('walletAdjustments', () => this.prisma.walletAdjustment.deleteMany({}));
+    await wipe('feedbackUpvotes', () => this.prisma.feedbackUpvote.deleteMany({})); // → FeedbackItem
     await wipe('feedbackItems', () => this.prisma.feedbackItem.deleteMany({}));
-    await wipe('feedbackUpvotes', () => this.prisma.feedbackUpvote.deleteMany({}));
     await wipe('adminMessages', () => this.prisma.adminMessage.deleteMany({}));
     await wipe('supportMessages', () => this.prisma.supportMessage.deleteMany({}));
-    await wipe('callLogs', () => this.prisma.callLog.deleteMany({}));
     await wipe('pushSubscriptions', () => this.prisma.pushSubscription.deleteMany({}));
     await wipe('activityLogs', () => this.prisma.activityLog.deleteMany({}));
     await wipe('otpCodes', () => this.prisma.otpCode.deleteMany({}));
