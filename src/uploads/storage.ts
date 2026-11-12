@@ -13,8 +13,14 @@
  * را سرگردان نکند — کلیدهای پروایدر قبلی همچنان حذف می‌شوند.
  */
 
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { mkdir, writeFile, unlink, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { env, storage } from '../common/config/env';
 
@@ -23,6 +29,11 @@ export interface StorageDriver {
   put(key: string, body: Buffer, contentType: string): Promise<string>;
   /** حذف بهترین‌حال — خطای ذخیره‌سازی هرگز جریان اصلی را نمی‌شکند. */
   delete(key: string): Promise<void>;
+  /** اگر URL مال همین درایور باشد کلید ذخیره‌سازی‌اش را بده — برای پاک‌سازی
+   *  ردیف‌های قدیمی که storageKey ندارند (ایمپورت‌های پیشینی). */
+  urlToKey(url: string): string | null;
+  /** حذف همهٔ اشیا زیر یک پیشوند (پوشهٔ قدیمی buskool/ و…) — تعداد حذف‌شده‌ها. */
+  deletePrefix(prefix: string): Promise<number>;
 }
 
 // ─── Arvan (سازگار S3) ───────────────────────────────────────────────────────
@@ -92,6 +103,33 @@ class ArvanStorage implements StorageDriver {
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
+
+  urlToKey(url: string): string | null {
+    const base = `${this.publicBase}/`;
+    return url.startsWith(base) ? url.slice(base.length) : null;
+  }
+
+  async deletePrefix(prefix: string): Promise<number> {
+    let deleted = 0;
+    let token: string | undefined;
+    do {
+      const listed = await this.client.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }),
+      );
+      const objects = (listed.Contents ?? [])
+        .map((o) => ({ Key: o.Key }))
+        .filter((o): o is { Key: string } => typeof o.Key === 'string');
+      if (objects.length > 0) {
+        // حذف دسته‌ای — تا ۱۰۰۰ آبجکت در هر فراخوانی (سقف S3)
+        await this.client.send(
+          new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: objects } }),
+        );
+        deleted += objects.length;
+      }
+      token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (token);
+    return deleted;
+  }
 }
 
 // ─── دیسک local ──────────────────────────────────────────────────────────────
@@ -125,6 +163,25 @@ class LocalStorage implements StorageDriver {
     } catch {
       /* قبلاً رفته — مشکلی نیست */
     }
+  }
+
+  urlToKey(url: string): string | null {
+    const base = `${this.base}/`;
+    return url.startsWith(base) ? url.slice(base.length) : null;
+  }
+
+  async deletePrefix(prefix: string): Promise<number> {
+    const dir = this.path(prefix.replace(/\/+$/, ''));
+    let removed = 0;
+    const walk = async (d: string): Promise<void> => {
+      for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+        if (e.isDirectory()) await walk(join(d, e.name));
+        else removed++;
+      }
+    };
+    await walk(dir);
+    await rm(dir, { recursive: true, force: true });
+    return removed;
   }
 }
 

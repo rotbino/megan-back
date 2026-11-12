@@ -581,6 +581,85 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     return this.toDto(row);
   }
 
+  /**
+   * ورود مستقیم بایت‌های تصویر از یک منبع بیرونی (ایمپورتر باسکول) با «همان»
+   * مسیر و پردازش آپلود عادی کاربر (خواستهٔ مالک ۱۳-۱۱): همان keyFor
+   * (users/{ownerId}/products/{productId}/gallery/… · users/{ownerId}/avatars/avatar/…)،
+   * همان پاین‌لاین sharp + واترمارک آگهی و همان ردیف File با storageKey کامل —
+   * «انگار که آگهی توسط خود کاربر ایجاد شده». هیچ فولدر جداگانهٔ باسکولی
+   * ساخته نمی‌شود؛ فایل‌ها زیر پوشهٔ خودِ کاربر با id او می‌نشینند.
+   *
+   * تفاوت با upload(): بدون multipart و AuthUser — فراخوانندهٔ داخلی (ایمپورتر)
+   * مالکیت رکوردها را خودش تضمین می‌کند؛ خروجی به‌جای استثنا، نتیجهٔ صریح است.
+   */
+  async ingestExternal(input: {
+    ownerId: string;
+    model: RelatedModel;
+    modelId: string | null;
+    fieldKey: string;
+    buffer: Buffer;
+    mimetype: string;
+    filename: string;
+    replace?: boolean;
+    metadata?: Record<string, unknown>;
+  }): Promise<
+    | { ok: true; file: FileDto }
+    | { ok: false; reason: 'FILE_TOO_LARGE' | 'FILE_TOO_SMALL' | 'FILE_TYPE_NOT_ALLOWED' | 'IMAGE_TOO_SMALL' }
+  > {
+    if (input.buffer.length > storage.MAX_FILE_SIZE) return { ok: false, reason: 'FILE_TOO_LARGE' };
+    if (input.buffer.length < MIN_IMAGE_BYTES) return { ok: false, reason: 'FILE_TOO_SMALL' };
+    if (!(ALLOWED_MIME as readonly string[]).includes(input.mimetype)) {
+      return { ok: false, reason: 'FILE_TYPE_NOT_ALLOWED' };
+    }
+
+    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — عین upload()
+    const processed = await this.processFile(input.buffer, input.mimetype, input.model === 'Product');
+    if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
+      return { ok: false, reason: 'IMAGE_TOO_SMALL' };
+    }
+
+    const key = this.keyFor(input.ownerId, input.model, input.modelId, input.fieldKey, processed.mainExt);
+    const url = await this.driver.put(key, processed.main, processed.mainMime);
+
+    let thumbUrl: string | null = null;
+    let thumbKey: string | null = null;
+    if (processed.thumb) {
+      thumbKey = `${key}.thumb.jpg`; // همیشه jpeg — تامبنیل کاشی‌های <img>
+      thumbUrl = await this.driver.put(thumbKey, processed.thumb, 'image/jpeg').catch(() => null);
+      if (!thumbUrl) thumbKey = null;
+    }
+
+    const row = await this.prisma.file.create({
+      data: {
+        ownerId: input.ownerId,
+        relatedModel: input.model,
+        relatedId: input.modelId,
+        fieldKey: input.fieldKey,
+        name: input.filename.slice(0, 200),
+        mimeType: processed.mainMime,
+        size: processed.main.length,
+        url,
+        thumbUrl,
+        storageKey: key,
+        thumbStorageKey: thumbKey,
+        metadata: {
+          originalSize: input.buffer.length,
+          width: processed.width,
+          height: processed.height,
+          ...(processed.watermarked ? { watermarked: true } : {}),
+          ...(input.metadata ?? {}),
+        } as unknown as object,
+      },
+    });
+
+    // اسلات‌های تک‌فایلی (avatar) فقط آخرین ردیف را نگه می‌دارند — عین upload()
+    if (input.replace !== false && input.modelId) {
+      await this.removeSiblings(input.model, input.modelId, input.fieldKey, row.id);
+    }
+    await this.bustCaches(input.model, input.modelId);
+    return { ok: true, file: this.toDto(row) };
+  }
+
   /** حذف همه فایل‌های دیگرِ همان اسلات (ذخیره‌سازی بهترین‌حال). */
   private async removeSiblings(model: RelatedModel, modelId: string, fieldKey: string, keepId: string): Promise<void> {
     const stale = await this.prisma.file.findMany({

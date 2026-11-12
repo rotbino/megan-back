@@ -10,8 +10,11 @@
  *   • جاب‌های درون‌حافظه‌ای با steps/log/counters + توقف ترکیبی — با refresh
  *     صفحه از بین نمی‌روند (سرور زنده است).
  *   • id آگهی همان id عددی باسکول (الگوی seed)؛ Counter روی max+1000.
- *   • عکس‌ها دانلود → پاین‌لاین sharp (۱۶۰۰/۴۰۰) → StorageDriver اپ
- *     (local: دیسک uploads، arvan: باکت CDN) → ردیف File با fieldKey=gallery.
+ *   • عکس‌ها (خواستهٔ مالک ۱۳-۱۱): دانلود امن → UploadsService.ingestExternal —
+ *     «دقیقاً همان مسیر/پردازش/واترمارک آپلود عادی کاربر»: کلید
+ *     users/{userId}/products/{pid}/gallery/… و users/{userId}/avatars/avatar/…،
+ *     ردیف File با storageKey کامل. هیچ فولدر جداگانهٔ باسکولی (لوکال یا
+ *     ابری) ساخته نمی‌شود — انگار که آگهی توسط خود کاربر ایجاد شده.
  *   • نویسنده‌های کامنت «کاربر کمکی» (stub) می‌شوند — با ایمپورت واقعی بعدی
  *     همان bUserId ادغام می‌شوند.
  *   • همهٔ درخواست‌های باسکول از صف BuskoolClient با فاصلهٔ BUSKOOL_DELAY_MS.
@@ -19,9 +22,8 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { buildStorage } from '../uploads/storage';
+import { UploadsService } from '../uploads/uploads.service';
 import sharp from 'sharp';
-import { mkdir, rm, readdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { storage } from '../common/config/env';
 import {
   BuskoolClient,
@@ -94,7 +96,10 @@ export class ImporterService {
   private readonly logger = new Logger(ImporterService.name);
   private readonly jobs = new Map<string, JobInternal>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploads: UploadsService,
+  ) {}
 
   // ═══════════════════════════ وضعیت ‌و آمار ═══════════════════════════
 
@@ -106,7 +111,8 @@ export class ImporterService {
       busy: [...this.jobs.values()].some((j) => j.status === 'running'),
       cookieSet: cookie.length > 0,
       adminPhone: importerAdminPhone(),
-      // درایور ذخیرهٔ عکس‌ها — فرانت نشان می‌دهد تا «چرا عکس‌ها لوکال نیست» همیشه معلوم باشد
+      // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های باسکول دقیقاً
+      // در همان جا (users/{userId}/…) می‌نشینند. فرانت نشان می‌دهد.
       storageDriver: storage.DRIVER,
     };
   }
@@ -579,16 +585,29 @@ export class ImporterService {
             null);
       if (avUrl) {
         const img = await fetchImage(avUrl);
-        if (img) {
-          const processed = await processImage(img.buf);
-          if (processed) {
-            const key = `buskool/avatars/${userName}.${processed.ext}`;
-            const url = await this.store.put(key, processed.main, processed.mime);
-            await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: url } });
-            this.log(job, 'success', 'آواتار دانلود و ذخیره شد');
+        const norm = img ? await normalizeImage(img.buf, img.mime) : null;
+        if (norm) {
+          // همان مسیر/پردازش آپلود عادی پروفایل: users/{userId}/avatars/avatar/…
+          // (خواستهٔ مالک ۱۳-۱۱) — انگار که کاربر خودش عکس پروفایل را گذاشته
+          const res = await this.uploads.ingestExternal({
+            ownerId: user.id,
+            model: 'User',
+            modelId: user.id,
+            fieldKey: 'avatar',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: avUrl.split('/').pop() || `buskool-avatar-${userName}`,
+            replace: true, // اسلات تک‌فایلی — عین پنل کاربر
+            metadata: { importedFrom: 'buskool', originalUrl: avUrl },
+          });
+          if (res.ok) {
+            await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: res.file.url } });
+            this.log(job, 'success', 'آواتار دانلود و در پوشهٔ خود کاربر ذخیره شد');
+          } else {
+            this.log(job, 'warn', `آواتار رد شد (${res.reason})`);
           }
         } else {
-          this.log(job, 'warn', 'دانلود آواتار ناموفق بود — رد شد');
+          this.log(job, 'warn', 'دانلود/پردازش آواتار ناموفق بود — رد شد');
         }
       } else {
         this.step(job, 'avatar', 'skipped');
@@ -687,38 +706,32 @@ export class ImporterService {
       for (const [i, url] of photos.entries()) {
         if (job.stopRequested) throw new Error('JOB_STOPPED');
         const img = await fetchImage(url);
-        if (!img) {
-          this.bump(job, 'imagesFailed');
-          continue;
-        }
-        const processed = await processImage(img.buf);
-        if (!processed) {
+        const norm = img ? await normalizeImage(img.buf, img.mime) : null;
+        if (!norm) {
           this.bump(job, 'imagesFailed');
           continue;
         }
         try {
-          const stamp = Date.now().toString(36);
-          const key = `buskool/products/${pid}/gallery/${stamp}-${i}.${processed.ext}`;
-          const mainUrl = await this.store.put(key, processed.main, processed.mime);
-          const thumbKey = `${key}.thumb.jpg`;
-          const thumbUrl = await this.store.put(thumbKey, processed.thumb, 'image/jpeg');
-          await this.prisma.file.create({
-            data: {
-              ownerId: user.id,
-              relatedModel: 'Product',
-              relatedId: String(pid),
-              fieldKey: 'gallery',
-              name: url.split('/').pop() ?? `buskool-${pid}-${i}`,
-              mimeType: processed.mime,
-              size: processed.main.length,
-              url: mainUrl,
-              thumbUrl,
-              storageKey: null,
-              thumbStorageKey: null,
-              metadata: { importedFrom: 'buskool', originalUrl: url, originalSize: img.buf.length },
-            },
+          // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
+          // users/{userId}/products/{pid}/gallery/… با واترمارک و تامبنیل —
+          // «انگار که آگهی توسط کاربر ایجاد شده»؛ ردیف File با storageKey کامل.
+          const res = await this.uploads.ingestExternal({
+            ownerId: user.id,
+            model: 'Product',
+            modelId: String(pid),
+            fieldKey: 'gallery',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: url.split('/').pop() || `buskool-${pid}-${i}`,
+            replace: false, // گالری چندفایلی
+            metadata: { importedFrom: 'buskool', originalUrl: url },
           });
-          this.bump(job, 'imagesDownloaded');
+          if (res.ok) {
+            this.bump(job, 'imagesDownloaded');
+          } else {
+            this.bump(job, 'imagesFailed');
+            this.log(job, 'warn', `عکس ${pid}/${i} رد شد (${res.reason})`);
+          }
         } catch (err) {
           this.bump(job, 'imagesFailed');
           this.log(job, 'warn', `عکس ${pid}/${i} ناموفق: ${(err as Error).message}`);
@@ -945,7 +958,8 @@ export class ImporterService {
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  // ─── درایور ذخیره‌سازی (یک‌بار per-job ساخته نمی‌شود — اشتراکی) ───────────
+  // ─── درایور ذخیره‌سازی — فقط برای پاک‌سازی بایت‌ها (delete/urlToKey/deletePrefix)؛
+  // ذخیرهٔ عکس‌های ایمپورت از طریق UploadsService (همان درایور آپلود عادی) می‌گذرد
 
   private storeInstance?: Awaited<ReturnType<typeof buildStorage>>;
   private get store() {
@@ -1012,13 +1026,38 @@ export class ImporterService {
       ? (await this.prisma.user.deleteMany({ where: { id: { not: admin.id } } })).count
       : (await this.prisma.user.deleteMany({})).count;
 
-    // فایل‌های لوکال ایمپورتر — پاک‌سازی پوشهٔ buskool زیر uploads
+    // ── بایت‌های ذخیره‌سازی (آروان/لوکال) — عکس‌های ایمپورت اکنون در همان
+    // مسیر آپلود عادی (users/{id}/…) می‌نشینند؛ پاک‌سازی کامل باید بایت‌هایشان
+    // را هم بهترین‌حال بردارد تا آبجکت یتیم نماند. ردیف‌های قدیمی ایمپورتر که
+    // storageKey=null دارند، کلیدشان از url استخراج می‌شود (urlToKey).
+    // الگوی removeAllForModel: حذف غیرمسدودکننده — ردیف‌ها همین‌جا می‌روند و
+    // آبجکت‌ها در پس‌زمینه پاک می‌شوند تا درخواست ادمین روی شبکهٔ لرزان معلق نماند.
     try {
-      const buskoolDir = resolve(storage.UPLOAD_PATH, 'buskool');
-      await rm(buskoolDir, { recursive: true, force: true });
-      await mkdir(resolve(storage.UPLOAD_PATH), { recursive: true });
+      const fileRows = await this.prisma.file.findMany({
+        select: { storageKey: true, thumbStorageKey: true, url: true },
+      });
+      const keys = new Set<string>();
+      for (const f of fileRows) {
+        if (f.storageKey) keys.add(f.storageKey);
+        if (f.thumbStorageKey) keys.add(f.thumbStorageKey);
+        const derived = this.store.urlToKey(f.url);
+        if (derived) {
+          keys.add(derived);
+          keys.add(`${derived}.thumb.jpg`);
+        }
+      }
+      for (const k of keys) void this.store.delete(k).catch(() => undefined);
+      counts.storageObjectsQueued = keys.size;
     } catch {
-      /* بهترین‌حال */
+      /* بهترین‌حال — حذف ردیف‌های DB منبع حقیقت است */
+    }
+
+    // پوشهٔ قدیمی buskool/ (ایمپورت‌های پیش از ۱۳-۱۱) — دیگر استفاده نمی‌شود؛
+    // آبجکت‌های جامانده در آروان/دیسک یک‌جا جمع می‌شوند.
+    try {
+      counts.legacyBuskoolObjects = await this.store.deletePrefix('buskool/');
+    } catch (err) {
+      counts.legacyBuskoolObjects = `خطا: ${(err as Error).message}`;
     }
     counts.adminPhone = adminPhone;
     return counts;
@@ -1142,9 +1181,9 @@ export class ImporterService {
   }
 }
 
-// ─── تصویر: دانلود امن + پاین‌لاین (عین seed/سرویس uploads) ────────────────
+// ─── تصویر: دانلود امن + نرمال‌سازی فرمت (پردازش/ذخیره عین سرویس uploads) ────
 
-async function fetchImage(rawUrl: string): Promise<{ buf: Buffer } | null> {
+async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
   try {
     const u = new URL(rawUrl);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
@@ -1162,37 +1201,27 @@ async function fetchImage(rawUrl: string): Promise<{ buf: Buffer } | null> {
     }
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0 || buf.length > 8 * 1024 * 1024) return null;
-    // امضای واقعی تصویر؟ (CDN باسکول گاهی octet-stream می‌فرستد)
-    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
-    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e;
-    const isWebp = buf.slice(8, 12).toString('ascii') === 'WEBP';
-    const isGif = buf.slice(0, 3).toString('ascii') === 'GIF';
-    if (!isJpeg && !isPng && !isWebp && !isGif) return null;
-    return { buf };
+    // امضای واقعی تصویر؟ (CDN باسکول گاهی octet-stream می‌فرستد) — mime از
+    // بایت‌ها، نه از هدر؛ UploadsService همان پردازش آپلود عادی را اجرا می‌کند.
+    if (buf[0] === 0xff && buf[1] === 0xd8) return { buf, mime: 'image/jpeg' };
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e) return { buf, mime: 'image/png' };
+    if (buf.slice(8, 12).toString('ascii') === 'WEBP') return { buf, mime: 'image/webp' };
+    if (buf.slice(0, 3).toString('ascii') === 'GIF') return { buf, mime: 'image/gif' };
+    return null;
   } catch {
     return null;
   }
 }
 
-async function processImage(buf: Buffer): Promise<{
-  main: Buffer;
-  thumb: Buffer;
-  mime: string;
-  ext: string;
-} | null> {
+/**
+ * نرمال‌سازی برای فیلتر ALLOWED_MIME آپلود عادی — فقط GIF پیش‌تبدیل می‌شود
+ * (فریم اول → PNG)؛ jpeg/png/webp عیناً پاس می‌شوند تا «همان» پردازش کاربر
+ * (پاین‌لاین ۱۲۰۰px/سقف ۵۰۰KB + واترمارک آگهی) رویشان اجرا شود.
+ */
+async function normalizeImage(buf: Buffer, mime: string): Promise<{ buf: Buffer; mime: string } | null> {
+  if (mime !== 'image/gif') return { buf, mime };
   try {
-    const hasAlpha = !!(await sharp(buf).metadata()).hasAlpha;
-    const main = await sharp(buf)
-      .rotate()
-      .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-      .toFormat(hasAlpha ? 'png' : 'jpeg', hasAlpha ? { compressionLevel: 9 } : { quality: 82, mozjpeg: true })
-      .toBuffer();
-    const thumb = await sharp(buf)
-      .rotate()
-      .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
-      .toFormat('jpeg', { quality: 78, mozjpeg: true })
-      .toBuffer();
-    return { main, thumb, mime: hasAlpha ? 'image/png' : 'image/jpeg', ext: hasAlpha ? 'png' : 'jpg' };
+    return { buf: await sharp(buf).png().toBuffer(), mime: 'image/png' };
   } catch {
     return null; // تصویر خراب — رد می‌شود
   }
