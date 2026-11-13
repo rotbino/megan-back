@@ -23,7 +23,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { mkdir, writeFile, unlink, readdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { env, storage } from '../common/config/env';
 
 export interface StorageDriver {
@@ -159,7 +159,12 @@ class LocalStorage implements StorageDriver {
 
   async put(key: string, body: Buffer, _contentType: string): Promise<string> {
     const file = this.path(key);
-    await mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
+    // dirname آگاه از سکو (سکو=OS) است. محاسبهٔ دستی قبلی «تا آخرین /» روی
+    // ویندوز که جداکنندهٔ مسیر \ است lastIndexOf('/') = ‎-۱ می‌داد و
+    // slice(0, -1) یعنی «کل مسیر منهای یک کاراکتر آخر» → برای هر فایل یک
+    // پوشهٔ خالی هم‌نامِ فایلِ منهای حرف آخر (X.jpg → پوشهٔ X.jp) ساخته می‌شد.
+    // (باگ دیده‌شده روی ماشین مالک؛ پاک‌سازی: mirror-cleanup-empty-dirs.mjs)
+    await mkdir(dirname(file), { recursive: true });
     await writeFile(file, body);
     return `${this.base}/${key}`;
   }
