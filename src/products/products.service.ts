@@ -1221,7 +1221,7 @@ export class ProductsService {
       })
     ).map((t) => t.id);
 
-    const [gallery, names, avatarFile, userGallery, userCertificates, locNames, reviewAgg, chatStats] = await Promise.all([
+    const [gallery, names, avatarFile, userGallery, userCertificates, locNames, reviewAgg, bCommentAgg, chatStats] = await Promise.all([
       this.uploads.galleryMap(rows.map((r) => r.id)),
       this.hydrateNames(rows),
       this.prisma.file.findFirst({
@@ -1248,9 +1248,16 @@ export class ProductsService {
       ),
       // میانگین امتیاز سرصفحه پروفایل — فقط از نظرهای تأییدشدهٔ ادمین
       // (قانون انتشار مالک ۲-۱۱؛ pending/rejected در امتیاز عمومی حساب نمی‌شوند)
+      // + کامنت‌های باسکولی (b_comment) هم در مجموع حساب می‌شوند (خاستهٔ مالک
+      // ۱۳-۱۱ — نویسندگان ساختگی user_for_b_comment؛ همان ترکیب صفحهٔ نظرات)
       this.prisma.sellerReview.aggregate({
         where: { sellerId: seller.id, status: 'approved' },
-        _avg: { rating: true },
+        _sum: { rating: true },
+        _count: { _all: true },
+      }),
+      this.prisma.bComment.aggregate({
+        where: { sellerId: seller.id },
+        _sum: { rating: true },
         _count: { _all: true },
       }),
       sellerThreadIds.length
@@ -1306,10 +1313,11 @@ export class ProductsService {
         lastSeenAt: seller.lastSeenAt,
         provinceName: seller.provinceId != null ? locNames.provinces.get(seller.provinceId) ?? null : null,
         cityName: seller.cityId != null ? locNames.cities.get(seller.cityId) ?? null : null,
-        reviewSummary: {
-          avg: reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : 0,
-          count: reviewAgg._count._all,
-        },
+        reviewSummary: (() => {
+          const cnt = reviewAgg._count._all + bCommentAgg._count._all;
+          const sum = (reviewAgg._sum.rating ?? 0) + (bCommentAgg._sum.rating ?? 0);
+          return { avg: cnt > 0 ? Math.round((sum / cnt) * 10) / 10 : 0, count: cnt };
+        })(),
         responseRate,
         productCount: rows.length,
         totalStock,

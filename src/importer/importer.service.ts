@@ -132,18 +132,19 @@ export class ImporterService {
   }
 
   async stats() {
-    const [users, products, photos, reviews, buyRequests, chats, savedUsers, serviceInterests] =
+    const [users, products, photos, reviews, bComments, buyRequests, chats, savedUsers, serviceInterests] =
       await Promise.all([
         this.prisma.user.count(),
         this.prisma.product.count(),
         this.prisma.file.count(),
         this.prisma.sellerReview.count(),
+        this.prisma.bComment.count(),
         this.prisma.buyRequest.count(),
         this.prisma.chatThread.count(),
         this.prisma.followItem.count(),
         this.prisma.serviceSignup.count(),
       ]);
-    return { users, products, photos, reviews, buyRequests, chats, savedUsers, serviceInterests };
+    return { users, products, photos, reviews: reviews + bComments, bComments, buyRequests, chats, savedUsers, serviceInterests };
   }
 
   /**
@@ -859,6 +860,12 @@ export class ImporterService {
     this.step(job, 'images', 'done');
 
     // ── ۵. کامنت‌ها ──
+    // (خواستهٔ مالک ۱۳-۱۱) نویسندگان کامنت‌های باسکول کاربر واقعی ایمچ نیستند —
+    // دیگر برایشان User با شمارهٔ موبایل ساختگی ساخته نمی‌شود (اشغال شمارهٔ
+    // واقعی + پر شدن جدول کاربران از کاربران الکی). نام/شهرشان در جدول
+    // user_for_b_comment و خود کامنت در b_comment می‌نشیند؛ نمایش در
+    // getSellerReviews: اول کامنت‌های واقعی، بعد این‌ها. پاک‌سازی ۲-۳ سال
+    // بعد = deleteMany همین دو جدول، بدون دست‌زدن به جدول کاربران.
     this.step(job, 'reviews', 'active');
     const comments: BkCommentsResp = await bk
       .call<BkCommentsResp>('/profile/get-user-comments', { user_id: ui.id })
@@ -867,22 +874,20 @@ export class ImporterService {
     for (const c of list) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
       if (!c.rating_score && !c.text) continue;
-      // نویسندهٔ کمکی (stub) — با ایمپورت واقعی همان bUserId ادغام می‌شود
-      const reviewer = await this.ensureStubReviewer(job, c);
-      await this.prisma.sellerReview.upsert({
+      // نویسندهٔ ساختگی — findThenCreate با bUserId (fallback bCommentId)
+      const reviewer = await this.ensureBCommentAuthor(job, c);
+      await this.prisma.bComment.upsert({
         where: { authorId_sellerId: { authorId: reviewer.id, sellerId: user.id } },
         update: {
           rating: c.rating_score ?? 5,
           text: (c.text ?? '').slice(0, 1000),
-          status: 'approved',
           createdAt: this.bkDate(c.created_at) ?? new Date(),
         },
         create: {
-          authorId: reviewer.id,
           sellerId: user.id,
+          authorId: reviewer.id,
           rating: c.rating_score ?? 5,
           text: (c.text ?? '').slice(0, 1000),
-          status: 'approved',
           createdAt: this.bkDate(c.created_at) ?? new Date(),
         },
       });
@@ -895,7 +900,7 @@ export class ImporterService {
         this.log(job, 'warn', `${empty} کامنت بدون متن است — با BUSKOOL_COOKIE متن کامل گرفته می‌شود`);
       }
     }
-    this.log(job, 'success', `${list.length} کامنت ثبت شد`);
+    this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (بدون ساخت کاربر)`);
 
     return user;
   }
@@ -977,40 +982,27 @@ export class ImporterService {
     catById.set(id, { parentId });
   }
 
-  /** کاربر کمکی برای نویسندهٔ کامنت باسکول — userName یکتا بر اساس c_id */
-  private async ensureStubReviewer(job: JobInternal, c: BkCommentsResp['comments'][number]) {
-    let userName = `bk-c${c.c_id}`;
-    // اگر قبلاً کاربری با همین bUserId ایمپورت شده، همان را بردار
-    const existing = await this.prisma.user.findFirst({
-      where: { userName },
+  /** نویسندهٔ ساختگی کامنت باسکول — ردیف user_for_b_comment (نه User!).
+   *  ضدتکرار با bUserId (fallback bCommentId)؛ تک‌جاب بودن ایمپورتر تضمین
+   *  می‌کند دو فراخوانی هم‌زمان روی یک نویسنده نباشد. */
+  private async ensureBCommentAuthor(job: JobInternal, c: BkCommentsResp['comments'][number]) {
+    const existing = await this.prisma.userForBComment.findFirst({
+      where: c.user_id ? { bUserId: c.user_id } : { bCommentId: c.c_id },
     });
     if (existing) return existing;
 
-    const phone = await this.uniqueFakePhone(c.user_id, userName);
-    const cityLoc = c.city
-      ? await this.prisma.location.findFirst({ where: { type: 'city', name: c.city } })
-      : null;
-    const user = await this.prisma.user.create({
+    const created = await this.prisma.userForBComment.create({
       data: {
-        phone,
-        userName,
+        bUserId: c.user_id ?? null,
+        bCommentId: c.c_id ?? null,
         firstName: c.first_name ?? '',
         lastName: c.last_name ?? '',
-        role: 'USER',
-        isSeller: false,
-        isBuyer: true,
-        cityId: cityLoc?.buskolId ?? null,
-        profile: {
-          bUserId: c.user_id,
-          bStub: true,
-          bCommentId: c.c_id,
-          importedFrom: 'buskool-comment',
-          importedAt: new Date().toISOString(),
-        } as object,
+        // شهر نویسنده از خود باسکول — زیر کامنت نمایش داده می‌شود
+        city: (c.city ?? '').trim() || null,
       },
     });
-    this.bump(job, 'stubUsers');
-    return user;
+    this.bump(job, 'bCommentAuthors');
+    return created;
   }
 
   /**
@@ -1059,14 +1051,17 @@ export class ImporterService {
     }
   }
 
-  /** شمارهٔ ساختگی یکتا — «09» + ۹ رقم از id عددی باسکول (الگوی seed) */
+  /** شمارهٔ ساختگی یکتا — پیشوند «08» + رقم (خواستهٔ مالک ۱۳-۱۱): هیچ شمارهٔ
+   *  موبایل واقعی ایرانی (۰۹…) را اشغال نمی‌کند. فقط برای stub های
+   *  failedImport (نشانگر «ایمپورت شکست‌خورده») استفاده می‌شود — نویسندگان
+   *  کامنت باسکول دیگر اصلاً User نمی‌شوند (جدول user_for_b_comment). */
   private async uniqueFakePhone(bkId: number, userName: string): Promise<string> {
     for (let i = 0; i < 50; i++) {
-      const candidate = `09${String(100000000 + ((bkId + i * 7919) % 900000000)).slice(-9)}`;
+      const candidate = `08${String(100000000 + ((bkId + i * 7919) % 900000000)).slice(-9)}`;
       const owner = await this.prisma.user.findUnique({ where: { phone: candidate }, select: { userName: true } });
       if (!owner || owner.userName === userName) return candidate;
     }
-    return `09${String(Date.now()).slice(-9)}`;
+    return `08${String(Date.now()).slice(-9)}`;
   }
 
   /** تاریخ باسکول «2026-09-27 14:29:20» → Date (UTC) */
@@ -1107,6 +1102,8 @@ export class ImporterService {
     await wipe('chats', () => this.prisma.chatThread.deleteMany({})); // → Product/User
     await wipe('callLogs', () => this.prisma.callLog.deleteMany({})); // → Product/User
     await wipe('reviews', () => this.prisma.sellerReview.deleteMany({})); // → User
+    await wipe('bComments', () => this.prisma.bComment.deleteMany({})); // → User/UserForBComment
+    await wipe('bCommentAuthors', () => this.prisma.userForBComment.deleteMany({}));
     await wipe('products', () => this.prisma.product.deleteMany({}));
     await wipe('files', () => this.prisma.file.deleteMany({}));
     await wipe('buyRequests', () => this.prisma.buyRequest.deleteMany({}));
@@ -1188,7 +1185,7 @@ export class ImporterService {
     const user = await this.prisma.user.findUnique({ where: { userName } });
     if (!user) throw new ForbiddenException(`کاربر @${userName} در دیتابیس ایمچ نیست — اول ایمپورت کنید`);
 
-    const [products, reviews, buyRequests, photoRows] = await Promise.all([
+    const [products, reviews, bComments, bCommentsTotal, buyRequests, photoRows] = await Promise.all([
       this.prisma.product.findMany({
         where: { userId: user.id },
         orderBy: { createdAt: 'desc' },
@@ -1200,6 +1197,14 @@ export class ImporterService {
         take: 10,
         include: { author: true },
       }),
+      // کامنت‌های باسکولی همین فروشنده — نویسندهٔ ساختگی user_for_b_comment
+      this.prisma.bComment.findMany({
+        where: { sellerId: user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        include: { author: true },
+      }),
+      this.prisma.bComment.count({ where: { sellerId: user.id } }),
       this.prisma.buyRequest.count({ where: { userId: user.id } }),
       this.prisma.file.findMany({
         where: { relatedModel: 'Product', fieldKey: 'gallery' },
@@ -1271,7 +1276,7 @@ export class ImporterService {
       counts: {
         products: await this.prisma.product.count({ where: { userId: user.id } }),
         photos: photoRows.filter((f) => productIds.has(f.relatedId ?? '')).length,
-        reviews: await this.prisma.sellerReview.count({ where: { sellerId: user.id } }),
+        reviews: (await this.prisma.sellerReview.count({ where: { sellerId: user.id } })) + bCommentsTotal,
         buyRequests,
       },
       products: products.map((p) => ({
@@ -1290,18 +1295,33 @@ export class ImporterService {
           localUrl: url.startsWith('http') ? null : url,
         })),
       })),
-      reviews: reviews.map((r) => ({
-        id: r.id,
-        rating: r.rating,
-        comment: r.text,
-        createdAt: r.createdAt.toISOString(),
-        reviewer: {
-          firstName: r.author.firstName,
-          lastName: r.author.lastName,
-          city: null,
-          isStub: !!((r.author.profile ?? {}) as Record<string, unknown>)?.bStub,
-        },
-      })),
+      // کامنت‌های واقعی اول، بعد کامنت‌های باسکولی — همان ترتیب صفحهٔ عمومی
+      reviews: [
+        ...reviews.map((r) => ({
+          id: r.id,
+          rating: r.rating,
+          comment: r.text,
+          createdAt: r.createdAt.toISOString(),
+          reviewer: {
+            firstName: r.author.firstName,
+            lastName: r.author.lastName,
+            city: null,
+            isStub: !!((r.author.profile ?? {}) as Record<string, unknown>)?.bStub,
+          },
+        })),
+        ...bComments.map((r) => ({
+          id: r.id,
+          rating: r.rating,
+          comment: r.text,
+          createdAt: r.createdAt.toISOString(),
+          reviewer: {
+            firstName: r.author.firstName,
+            lastName: r.author.lastName,
+            city: r.author.city,
+            isStub: true, // نویسندهٔ باسکولی — کاربر ایمچ نیست
+          },
+        })),
+      ],
     };
   }
 }

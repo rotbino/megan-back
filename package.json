@@ -22,7 +22,8 @@
     "test:b9": "node scripts/test-b9.mjs",
     "backup": "node scripts/backup.mjs",
     "test:priority": "node scripts/test-follow-priority.mjs",
-    "seed:feedback": "node scripts/seed-feedback.mjs"
+    "seed:feedback": "node scripts/seed-feedback.mjs",
+    "migrate:b-comments": "node scripts/migrate-b-comments.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1138.0",

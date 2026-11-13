@@ -453,7 +453,7 @@ export class ImportedUsersService {
     });
     if (!user) throw new NotFoundException('کاربر پیدا نشد');
 
-    const [products, productsCount, reviewsReceived, reviewsWritten, buyRequests, photos, supplyOffers] =
+    const [products, productsCount, reviewsReceived, bCommentsReceived, reviewsWritten, buyRequests, photos, supplyOffers] =
       await Promise.all([
         this.prisma.product.findMany({
           where: { userId: id },
@@ -473,6 +473,8 @@ export class ImportedUsersService {
         }),
         this.prisma.product.count({ where: { userId: id } }),
         this.prisma.sellerReview.count({ where: { sellerId: id } }),
+        // کامنت‌های باسکولی درباره این فروشنده — جدول b_comment (خاستهٔ مالک ۱۳-۱۱)
+        this.prisma.bComment.count({ where: { sellerId: id } }),
         this.prisma.sellerReview.count({ where: { authorId: id } }),
         this.prisma.buyRequest.count({ where: { userId: id } }),
         this.prisma.file.count({ where: { ownerId: id } }),
@@ -529,7 +531,9 @@ export class ImportedUsersService {
       },
       counts: {
         products: productsCount,
-        reviewsReceived,
+        // مجموع نظرات واقعی + کامنت‌های باسکولی — همان چیزی که بازدیدکننده می‌بیند
+        reviewsReceived: reviewsReceived + bCommentsReceived,
+        bCommentsReceived,
         reviewsWritten,
         buyRequests,
         photos,

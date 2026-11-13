@@ -10,7 +10,16 @@ export interface ReviewRowDto {
   rating: number;
   text: string;
   status: ReviewStatus;
-  author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null };
+  /** userName فقط برای نویسندگان واقعی — نویسندهٔ کامنت باسکولی کاربر ایمچ
+   *  نیست (جدول user_for_b_comment) و شناسه‌ای ندارد (خواستهٔ مالک ۱۳-۱۱) */
+  author: {
+    userName: string | null;
+    firstName: string;
+    lastName: string;
+    avatarUrl: string | null;
+    /** شهر نویسنده — زیر کامنت نمایش داده می‌شود (خواستهٔ مالک ۱۳-۱۱) */
+    city: string | null;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,7 +57,13 @@ export class ReviewsService {
     private readonly cache: CacheService,
   ) {}
 
-  /** POST /reviews/getSellerReviews — عمومی؛ خلاصه + صفحه‌بندی + نظر من */
+  /** POST /reviews/getSellerReviews — عمومی؛ خلاصه + صفحه‌بندی + نظر من
+   *
+   * ادغام دو منبع (خواستهٔ مالک ۱۳-۱۱): کامنت‌های واقعی کاربران ایمچ
+   * (SellerReview تأییدشده) «قبل از» کامنت‌های باسکولی (BComment — نویسندگان
+   * ساختگی user_for_b_comment) می‌آیند؛ خلاصه امتیاز/توزیع روی مجموع هر دو
+   * حساب می‌شود. صفحه‌بندی پیوسته: صفحه‌های اول را نظرهای واقعی پر می‌کنند و
+   * بعد از آن‌ها کامنت‌های باسکولی ادامه می‌یابند. */
   async getSellerReviews(viewerId: string | null, dto: { userName: string; page?: number; perPage?: number }): Promise<SellerReviewsPage> {
     const seller = await this.prisma.user.findUnique({
       where: { userName: dto.userName },
@@ -60,49 +75,94 @@ export class ReviewsService {
     const perPage = Math.min(30, Math.max(1, dto.perPage ?? 10));
     // فقط نظرهای تأییدشده عمومی‌اند — خلاصه امتیاز و توزیع هم از همین مجموعه
     const publicWhere = { sellerId: seller.id, status: 'approved' };
+    const bWhere = { sellerId: seller.id };
 
-    const [total, agg, dist, rows, myRow] = await Promise.all([
+    const [realTotal, bTotal, realAgg, bAgg, realDist, bDist, myRow] = await Promise.all([
       this.prisma.sellerReview.count({ where: publicWhere }),
-      this.prisma.sellerReview.aggregate({
-        where: publicWhere,
-        _avg: { rating: true },
-      }),
+      this.prisma.bComment.count({ where: bWhere }),
+      this.prisma.sellerReview.aggregate({ where: publicWhere, _sum: { rating: true } }),
+      this.prisma.bComment.aggregate({ where: bWhere, _sum: { rating: true } }),
       this.prisma.sellerReview.groupBy({
         by: ['rating'],
         _count: { _all: true },
         where: publicWhere,
       }),
-      this.prisma.sellerReview.findMany({
-        where: publicWhere,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * perPage,
-        take: perPage,
-        include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
+      this.prisma.bComment.groupBy({
+        by: ['rating'],
+        _count: { _all: true },
+        where: bWhere,
       }),
       // نظر خودم با هر وضعیتی برمی‌گردد — نویسنده باید بتواند پیش‌نویس/ردشده‌اش را ببیند
       viewerId
         ? this.prisma.sellerReview.findUnique({
             where: { authorId_sellerId: { authorId: viewerId, sellerId: seller.id } },
-            include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
+            include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true, cityId: true } } },
           })
         : null,
     ]);
+    const total = realTotal + bTotal;
 
+    // ── صفحه‌بندی پیوسته: اول واقعی‌ها، بعد باسکولی‌ها ──
+    const skip = (page - 1) * perPage;
+    const realTake = Math.max(0, Math.min(perPage, realTotal - skip));
+    const [realRows, bRows] = await Promise.all([
+      realTake > 0
+        ? this.prisma.sellerReview.findMany({
+            where: publicWhere,
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: realTake,
+            include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true, cityId: true } } },
+          })
+        : [],
+      (async () => {
+        const bTake = perPage - realTake;
+        if (bTake <= 0) return [];
+        const bSkip = Math.max(0, skip - realTotal);
+        return this.prisma.bComment.findMany({
+          where: bWhere,
+          orderBy: { createdAt: 'desc' },
+          skip: bSkip,
+          take: bTake,
+          include: { author: true },
+        });
+      })(),
+    ]);
+
+    // نام شهر نویسندگان واقعی (cityId عددی باسکول → نام فارسی)
+    const cityIds = [...new Set([...realRows, ...(myRow ? [myRow] : [])]
+      .map((r) => r.author.cityId)
+      .filter((x): x is number => x != null))];
+    const cityNames = new Map<string, string>();
+    if (cityIds.length) {
+      const locs = await this.prisma.location.findMany({
+        where: { type: 'city', buskolId: { in: cityIds } },
+        select: { buskolId: true, name: true },
+      });
+      for (const l of locs) cityNames.set(String(l.buskolId), l.name);
+    }
+
+    const sumRating = (realAgg._sum.rating ?? 0) + (bAgg._sum.rating ?? 0);
     return {
       summary: {
-        avg: agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : 0,
+        avg: total > 0 ? Math.round((sumRating / total) * 10) / 10 : 0,
         count: total,
         distribution: [5, 4, 3, 2, 1].map((r) => ({
           rating: r,
-          count: dist.find((d) => d.rating === r)?._count._all ?? 0,
+          count:
+            (realDist.find((d) => d.rating === r)?._count._all ?? 0) +
+            (bDist.find((d) => d.rating === r)?._count._all ?? 0),
         })),
       },
-      items: rows.map((r) => this.toDto(r)),
+      items: [
+        ...realRows.map((r) => this.toDto(r, cityNames.get(String(r.author.cityId)) ?? null)),
+        ...bRows.map((b) => this.toDtoB(b)),
+      ],
       total,
       page,
       perPage,
       pageCount: Math.max(1, Math.ceil(total / perPage)),
-      myReview: myRow ? this.toDto(myRow) : null,
+      myReview: myRow ? this.toDto(myRow, cityNames.get(String(myRow.author.cityId)) ?? null) : null,
     };
   }
 
@@ -149,22 +209,32 @@ export class ReviewsService {
       where: { authorId_sellerId: { authorId, sellerId: seller.id } },
       create: { sellerId: seller.id, authorId, rating: dto.rating, text, status: 'pending' },
       update: { rating: dto.rating, text, status: 'pending' },
-      include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true } } },
+      include: { author: { select: { userName: true, firstName: true, lastName: true, avatarUrl: true, cityId: true } } },
     });
-    // خلاصه امتیاز سرصفحه پروفایل از getSeller کش شده — همان لحظه تازه شود
+    // خلاصه امتیاز سرصفحهٔ پروفایل از getSeller کش شده — همان لحظه تازه شود
     this.cache.invalidateTag(`seller:${dto.userName.trim()}`);
-    return this.toDto(row);
+    const cityName = row.author.cityId
+      ? ((await this.prisma.location.findFirst({
+          where: { type: 'city', buskolId: row.author.cityId },
+          select: { name: true },
+        }))?.name ?? null)
+      : null;
+    return this.toDto(row, cityName);
   }
 
-  private toDto(r: {
-    id: string;
-    rating: number;
-    text: string;
-    status: string;
-    createdAt: Date;
-    updatedAt: Date;
-    author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null };
-  }): ReviewRowDto {
+  /** ردیف واقعی (SellerReview) → DTO — شهر نویسنده از cityId (id عددی باسکول) */
+  private toDto(
+    r: {
+      id: string;
+      rating: number;
+      text: string;
+      status: string;
+      createdAt: Date;
+      updatedAt: Date;
+      author: { userName: string; firstName: string; lastName: string; avatarUrl: string | null; cityId?: number | null };
+    },
+    city: string | null,
+  ): ReviewRowDto {
     return {
       id: r.id,
       rating: r.rating,
@@ -172,9 +242,43 @@ export class ReviewsService {
       status: (['pending', 'approved', 'rejected'] as const).includes(r.status as ReviewStatus)
         ? (r.status as ReviewStatus)
         : 'pending',
-      author: r.author,
+      author: {
+        userName: r.author.userName,
+        firstName: r.author.firstName,
+        lastName: r.author.lastName,
+        avatarUrl: r.author.avatarUrl,
+        city,
+      },
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
+    };
+  }
+
+  /** ردیف کامنت باسکولی (BComment + نویسندهٔ user_for_b_comment) → DTO —
+   *  نویسندهٔ ساختگی ایمند شناسه/آواتار دارد؛ شهر به‌صورت متن آماده است */
+  private toDtoB(
+    b: {
+      id: string;
+      rating: number;
+      text: string;
+      createdAt: Date;
+      author: { firstName: string; lastName: string; city: string | null };
+    },
+  ): ReviewRowDto {
+    return {
+      id: b.id,
+      rating: b.rating,
+      text: b.text,
+      status: 'approved', // کامنت باسکولی با متن تأییدشدهٔ خود باسکول آمده — صف بررسی ندارد
+      author: {
+        userName: null,
+        firstName: b.author.firstName,
+        lastName: b.author.lastName,
+        avatarUrl: null,
+        city: b.author.city,
+      },
+      createdAt: b.createdAt,
+      updatedAt: b.createdAt,
     };
   }
 }

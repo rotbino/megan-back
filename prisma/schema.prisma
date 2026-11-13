@@ -145,6 +145,9 @@ model User {
   reviewsReceived SellerReview[] @relation("ReviewSeller")
   /// نظراتی که این کاربر درباره فروشندگان نوشته
   reviewsWritten SellerReview[] @relation("ReviewAuthor")
+  /// کامنت‌های باسکولی که درباره این فروشنده (ایمپورت‌شده) است — نویسنده‌ها در
+  /// جدول جدا user_for_b_comment اند، نه در جدول کاربران (خواستهٔ مالک ۱۳-۱۱)
+  bComments       BComment[]      @relation("BCommentSeller")
   /// سفارش‌های خرید بسته اشتراک این کاربر (کارت‌به‌کارت + فیش)
   packageOrders  PackageOrder[] @relation("PackageOrderOwner")
   /// بازخورد و نیازهای این کاربر در نظرسنجی (چندتایی — /panel/survey)
@@ -1080,6 +1083,69 @@ model SellerReview {
   @@unique([authorId, sellerId])
   @@index([sellerId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+}
+
+// ─── کامنت‌های باسکول (خواستهٔ مالک ۱۳-۱۱) ────────────────────────────────
+
+/// کاربر ساختگیِ نویسندهٔ کامنت باسکول — جدول user_for_b_comment.
+/// نویسنده‌های کامنت‌های ایمپورت‌شده از باسکول کاربر واقعی ایمچ نیستند؛ قبلاً
+/// برایشان User با شمارهٔ موبایل ساختگی ساخته می‌شد که هم جدول کاربران را
+/// از کاربران الکی پر می‌کرد و هم ممکن بود شمارهٔ واقعی یک نفر را «اشغال»
+/// کند. حالا فقط نام/نام خانوادگی/شهرشان اینجا می‌نشیند؛ جدول کاربران فقط
+/// کاربران واقعی را دارد (خودشان ثبت‌نام کرده‌اند یا فروشندهٔ آگهی‌دارند).
+/// وقتی بعد از ۲-۳ سال کامنت‌های واقعی جمع شد، این جدول به همراه BComment
+/// پاک می‌شود (هدف این‌ها فقط پر بودن و معتبر دیده‌شدن سایت در شروع است).
+/// ⚠️ bUserId/bCommentId عمداً بدون @unique — ایندکس یونیک مونگو سندهای بدون
+/// فیلد را null می‌شمارد و تداخل می‌سازد؛ یکتایی در جریان ایمپورت تضمین
+/// می‌شود (تک‌جاب + findThenCreate).
+model UserForBComment {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// شناسهٔ عددی کاربر باسکول — ضدتکرار نویسندهٔ کامنت
+  bUserId Int? @map("b_user_id")
+  /// شناسهٔ کامنت باسکول — ضدتکرار وقتی user_id در پاسخ نیست
+  bCommentId Int? @map("b_comment_id")
+
+  firstName String @default("") @map("first_name")
+  lastName  String  @default("") @map("last_name")
+  /// نام شهر نویسنده از باسکول — زیر کامنت نمایش داده می‌شود (خواستهٔ مالک ۱۳-۱۱)
+  city      String?
+
+  /// کامنت‌هایی که این نویسنده نوشته
+  comments BComment[] @relation("BCommentAuthor")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([bUserId])
+  @@index([bCommentId])
+}
+
+/// کامنت باسکول دربارهٔ یک فروشندهٔ ایمپورت‌شده — جدول جدا از SellerReview
+/// (کامنت‌های واقعی کاربران خودی). در getSellerReviews ابتدا کامنت‌های واقعیِ
+/// تأییدشده و بعد این‌ها نمایش داده می‌شوند (خواستهٔ مالک ۱۳-۱۱). immutable —
+/// صف بررسی ادمین ندارد (با متن تأییدشدهٔ خود باسکول آمده)؛ پاک‌سازی ۲-۳ سال
+/// بعد: deleteMany هر دو جدول، بدون هیچ وابستگی به جدول کاربران.
+model BComment {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// فروشندهٔ ایمچ که کامنت درباره‌اش است
+  sellerId String @map("seller_id") @db.ObjectId
+  seller   User   @relation("BCommentSeller", fields: [sellerId], references: [id])
+
+  /// نویسندهٔ ساختگی — جدول user_for_b_comment
+  authorId String @map("author_id") @db.ObjectId
+  author   UserForBComment @relation("BCommentAuthor", fields: [authorId], references: [id])
+
+  /// ۱ تا ۵ ستاره — همان امتیاز باسکول
+  rating Int
+  /// متن کامنت — ممکن است خالی باشد (نظر فقط-امتیازی در باسکول)
+  text   String @default("")
+
+  /// تاریخ ثبت در باسکول
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([authorId, sellerId])
+  @@index([sellerId, createdAt(sort: Desc)])
 }
 
 /// بازخورد/نیاز کاربر در نظرسنجی ایمچ — «تحقیقات بازار»:
