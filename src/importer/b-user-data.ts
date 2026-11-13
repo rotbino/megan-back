@@ -73,9 +73,9 @@ export interface BUserData {
   relateds: string[];
   /** URL اصلی عکس پروفایل در باسکول (پیش از rehost در آیمچ) */
   profilePhotoUrl: string | null;
-  /** متن خام description باسکول — حتی اگر خودکار باشد (سند تاریخی) */
+  /** متن خام description باسکول — فقط برای متن «خودِ کاربر»؛ متن خودکار آرشیو نمی‌شود */
   descriptionRaw: string | null;
-  /** آیا متن باسکولِ خودکار (قالب «… هستم از شهر …») بود؟ → در businessDesc ننشست */
+  /** آیا متن خودکار باسکول/اینکوباک بود (دو قالب «… در بازار بزرگ …» / «… در سامانه ی … هستم»)؟ → در businessDesc ننشست */
   descriptionIsAuto: boolean;
 
   // ── آمار باسکول (get_user_statistics) ──

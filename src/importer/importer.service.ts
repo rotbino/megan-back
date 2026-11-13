@@ -20,8 +20,12 @@
  *   • پروفایل کسب‌وکار (خواستهٔ مالک ۱۳-۱۱): توضیحات به ستون businessDesc
  *     می‌رود (همان فرم ویرایش/کاتالوگ عمومی) و address/isCompany/companyName
  *     با همان کلیدهای استاندارد profile embedded ذخیره می‌شوند؛ متن خودکار
- *     باسکول (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک خودش
- *     (lib/seller-text فرانت) را نشان می‌دهد، نه کپی باسکول را.
+ *     باسکول/اینکوباک (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک
+ *     خودش (lib/seller-text فرانت) را نشان می‌دهد، نه کپی باسکول را.
+ *   • برندگذاری قدیمی (خواستهٔ مالک ۱۳-۱۱): نام قدیمی سایت «اینکوباک» بوده و
+ *     متن‌های خودکار با آن ساخته می‌شده‌اند؛ در متن‌های «خودِ کاربر» هر
+ *     اشاره‌ای به باسکول/اینکوباک با «آیمچ» جایگزین می‌شود (توضیحات کسب‌وکار،
+ *     توضیحات آگهی و متن کامنت‌ها) — aimchifyBrandMentions.
  *   • سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱): همهٔ فیلدهای ارزشمند باسکول
  *     (ویژه بودن + نوع بسته، آمار، دامنهٔ فعالیت، کیف پول، coming_from و…)
  *     در فیلد JSON «b» ذخیره می‌شود — b-user-data.ts. ⚠️ ویژه بودن باسکول
@@ -629,10 +633,12 @@ export class ImporterService {
     // «درباره کسب‌وکار» (خواستهٔ مالک ۱۳-۱۱): متنِ خودِ کاربر به ستون
     // businessDesc می‌رود — همان جایی که فرم ویرایش پروفایل آیمچ می‌نویسد
     // (users/updateProfile) و کاتالوگ عمومی می‌خواند (getSeller)؛ متن
-    // خودکار باسکول (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن پارامتریک
-    // آیمچ را نشان دهد (lib/seller-text در فرانت).
+    // خودکار باسکول/اینکوباک (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن
+    // پارامتریک آیمچ را نشان دهد (lib/seller-text در فرانت). در متن خودِ
+    // کاربر هم نام باسکول/اینکوباک با آیمچ جایگزین می‌شود (خواستهٔ مالک).
     const descAuto = isBuskoolAutoDesc(pf?.description);
-    const businessDesc = descAuto ? null : (pf?.description ?? '').trim() || null;
+    const descClean = aimchifyBrandMentions((pf?.description ?? '').trim());
+    const businessDesc = descAuto ? null : descClean || null;
 
     // ── سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱) ──
     // ویژه بودن باسکول فقط اینجا ثبت می‌شود — هرگز به activePakageType
@@ -683,7 +689,9 @@ export class ImporterService {
       confirmed: pf?.confirmed === 1,
       relateds: relatedUrls,
       profilePhotoUrl: (pf?.profile_photo ?? '') || null,
-      descriptionRaw: (pf?.description ?? '') || null,
+      // متن خودکار ارزش آرشیوی ندارد و برای هر کاربر جدا ذخیره نمی‌شود
+      // (خواستهٔ مالک ۱۳-۱۱) — فقط فلگ descriptionIsAuto می‌ماند.
+      descriptionRaw: descAuto ? null : (pf?.description ?? '').trim() || null,
       descriptionIsAuto: descAuto,
       responseRate: st?.response_rate ?? null,
       reputationScore: st?.reputation_score ?? null,
@@ -761,7 +769,9 @@ export class ImporterService {
       job,
       'info',
       businessDesc
-        ? 'دربارهٔ کسب‌وکار در جای خودش (توضیحات کسب و کار) ثبت شد'
+        ? `دربارهٔ کسب‌وکار در جای خودش (توضیحات کسب و کار) ثبت شد${
+            descClean !== (pf?.description ?? '').trim() ? ' — اشاره به باسکول/اینکوباک با «آیمچ» جایگزین شد' : ''
+          }`
         : 'متن «درباره کسب‌وکار» خالی/خودکارِ باسکول بود — ثبت نشد (صفحه متن پیش‌فرض آیمچ را نشان می‌دهد)',
     );
     this.log(
@@ -976,14 +986,14 @@ export class ImporterService {
         where: { authorId_sellerId: { authorId: reviewer.id, sellerId: user.id } },
         update: {
           rating: c.rating_score ?? 5,
-          text: (c.text ?? '').slice(0, 1000),
+          text: aimchifyBrandMentions((c.text ?? '').slice(0, 1000)),
           createdAt: this.bkDate(c.created_at) ?? new Date(),
         },
         create: {
           sellerId: user.id,
           authorId: reviewer.id,
           rating: c.rating_score ?? 5,
-          text: (c.text ?? '').slice(0, 1000),
+          text: aimchifyBrandMentions((c.text ?? '').slice(0, 1000)),
           createdAt: this.bkDate(c.created_at) ?? new Date(),
         },
       });
@@ -1026,7 +1036,7 @@ export class ImporterService {
       where: { id: m.id },
       update: {
         productName: name,
-        description: (m.description ?? '').trim(),
+        description: aimchifyBrandMentions((m.description ?? '').trim()),
         categoryId,
         subCategoryId: m.sub_category_id,
         unit: m.unit || 'کیلوگرم',
@@ -1044,7 +1054,7 @@ export class ImporterService {
         id: m.id,
         productName: name,
         slug: `فروش-عمده-${name}-${m.id}`,
-        description: (m.description ?? '').trim(),
+        description: aimchifyBrandMentions((m.description ?? '').trim()),
         categoryId,
         subCategoryId: m.sub_category_id,
         unit: m.unit || 'کیلوگرم',
@@ -1424,26 +1434,56 @@ export class ImporterService {
 
 // ─── تصویر: دانلود امن + نرمال‌سازی فرمت (پردازش/ذخیره عین سرویس uploads) ────
 
-/**
- * تشخیص متن خودکار «دربارهٔ کسب‌وکار» باسکول — برای کاربرانی که چیزی
- * ننوشته‌اند باسکول این جمله را می‌سازد (نمونهٔ مالک ۱۳-۱۱):
- * «بشیر قربانی هستم از شهر مریوان در حال خرید و فروش عمده در بازار بزرگ
- * باسکول. برای ارتباط با من روی دکمه ی ارسال پیام بزنید. خوشحال می شوم
- * پروفایل من را با همکارانتان به اشتراک بگذارید.»
- * این متن محصول خودِ کاربر نیست → ایمپورت نمی‌شود تا صفحهٔ آیمچ متن
- * پارامتریک خودش را نشان دهد (lib/seller-text در فرانت؛ خواستهٔ مالک).
- */
-function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
-  if (!desc) return false;
-  const t = desc
+/** نرمال‌سازی فارسی برای مقایسهٔ متن — نیم‌فاصله → فاصله، ی/ک عربی → فارسی، فاصله‌های تکراری یکی */
+function normalizeFa(text: string | null | undefined): string {
+  return String(text ?? '')
+    .replace(/\u200c/g, ' ')
     .replace(/[يى]/g, 'ی')
     .replace(/ك/g, 'ک')
     .replace(/\s+/g, ' ')
     .trim();
-  return (
-    t.includes('در حال خرید و فروش عمده در بازار بزرگ باسکول') &&
-    t.includes('برای ارتباط با من روی دکمه')
-  );
+}
+
+/**
+ * تشخیص متن خودکار «دربارهٔ کسب‌وکار» باسکول — دو نسل قالب دارد:
+ *
+ * نسل اینکوباک (نام قدیمی سایت — گزارش مالک ۱۳-۱۱؛ ۳ مورد از ۴ مورد در
+ * دیتای فعلی همین شکل است):
+ * «من فروشنده محصولات کشاورزی در سامانه ی اینکوباک هستم. برای ارتباط با
+ *  من رو دکمه ی ارسال پیام کلیک کنید. خوشحال می شوم اگر پروفایل من را
+ *  با دوستان خود به اشتراک بگذارید.»
+ *
+ * نسل باسکول (نمونهٔ مالک ۱۳-۱۱):
+ * «بشیر قربانی هستم از شهر مریوان در حال خرید و فروش عمده در بازار بزرگ
+ *  باسکول. برای ارتباط با من روی دکمه ی ارسال پیام بزنید. خوشحال می شوم
+ *  پروفایل من را با همکارانتان به اشتراک بگذارید.»
+ *
+ * اسکلت مشترک: جملهٔ «برای ارتباط با من رو[ی] دکمه …» + «… به اشتراک
+ * بگذارید.» + اشاره به برند (باسکول/اینکوباک، با ی/ک عربی هم). این متن
+ * محصول خودِ کاربر نیست → در businessDesc نمی‌نشیند تا صفحهٔ آیمچ متن
+ * پارامتریک خودش (lib/seller-text فرانت) را نشان دهد (خواستهٔ مالک).
+ */
+function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
+  if (!desc) return false;
+  const t = normalizeFa(desc);
+  const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');
+  const brand =
+    /در حال خرید و فروش عمده در بازار بزرگ (باسکول|اینکوباک)/.test(t) ||
+    /در سامانه ?ی? ?(باسکول|اینکوباک) هستم/.test(t) ||
+    /در (وب ?سایت|سایت) (باسکول|اینکوباک)/.test(t);
+  return contact && brand;
+}
+
+/**
+ * جایگزینی نام برندهای قدیمی با «آیمچ» در متن‌های «خودِ کاربر» (خواستهٔ
+ * مالک ۱۳-۱۱: «کلا اگر در توضیحات کلمه باسکول دیدی با آیمچ جایگزین کن»):
+ * «باسکول» و نام قدیمی‌اش «اینکوباک». ک/ك عربی هم پوشیده داده می‌شود.
+ * فقط همین دو واژه — بقیهٔ متن دست نمی‌خورد.
+ */
+function aimchifyBrandMentions(text: string | null | undefined): string {
+  return String(text ?? '')
+    .replace(/باس[كک]ول/g, 'آیمچ')
+    .replace(/این[كک]وبا[كک]/g, 'آیمچ');
 }
 
 async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
