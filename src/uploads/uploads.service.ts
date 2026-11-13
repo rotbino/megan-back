@@ -54,6 +54,19 @@ const MIN_IMAGE_BYTES = 4 * 1024;
 /** حداقل عرض معنادار پس از پردازش — عکس‌های ریز/آیکون‌وار رد می‌شوند */
 const MIN_IMAGE_WIDTH = 200;
 
+/**
+ * اسلات آواتار (User/avatar) قاعدهٔ ملایم‌تری دارد (خواستهٔ مالک ۱۳-۱۱):
+ * کف‌های بالا برای «گالری آگهی» طراحی شده‌اند (آیکون‌های زباله در لیست‌ها)،
+ * اما باسکول خودش عکس پروفایل را کوچک ذخیره می‌کند — نمونه‌های واقعی:
+ * ۱۹۶×۲۰۰، ۱۱۳×۱۵۰ و حتی ۱۵۰×۷۳ با ۳.۶KB — همهٔ این‌ها آواتار سالم‌اند چون
+ * آواتار در ≤۱۲۰px نمایش داده می‌شود؛ رد کردنشان یعنی ایمپورت بدون عکس.
+ * کف آواتار فقط ضد زبالهٔ بی‌معناست (۱×۱ و امثال آن).
+ */
+const AVATAR_MIN_IMAGE_BYTES = 1024;
+const AVATAR_MIN_IMAGE_WIDTH = 32;
+const isAvatarSlot = (model: RelatedModel, fieldKey: string) =>
+  model === 'User' && fieldKey === 'avatar';
+
 /** نام پوشه‌های درست — «users» نه «user» (جمع ساده‌انگارانه) */
 const MODEL_FOLDER: Record<RelatedModel, string> = {
   User: 'users',
@@ -516,7 +529,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         'FILE_TOO_LARGE',
       );
     }
-    if (file.buffer.length < MIN_IMAGE_BYTES) {
+    const avatarSlot = isAvatarSlot(input.model, input.fieldKey);
+    if (file.buffer.length < (avatarSlot ? AVATAR_MIN_IMAGE_BYTES : MIN_IMAGE_BYTES)) {
       throw AppError.badRequest('حجم تصویر بسیار کم است.', 'FILE_TOO_SMALL');
     }
     if (!(ALLOWED_MIME as readonly string[]).includes(file.mimetype)) {
@@ -530,9 +544,10 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     const processed = await this.processFile(file.buffer, file.mimetype, input.model === 'Product');
     // ابعاد واقعی (پس از decode با sharp) — عکس‌های ریز/زباله رد می‌شوند؛
     // width=0 یعنی sharp نتوانست decode کند → همان مسیر قدیمی ادامه می‌دهد.
-    if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
+    const minWidth = avatarSlot ? AVATAR_MIN_IMAGE_WIDTH : MIN_IMAGE_WIDTH;
+    if (processed.width > 0 && processed.width < minWidth) {
       throw AppError.badRequest(
-        `عرض تصویر باید حداقل ${MIN_IMAGE_WIDTH} پیکسل باشد.`,
+        `عرض تصویر باید حداقل ${minWidth} پیکسل باشد.`,
         'IMAGE_TOO_SMALL',
       );
     }
@@ -607,14 +622,20 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     | { ok: false; reason: 'FILE_TOO_LARGE' | 'FILE_TOO_SMALL' | 'FILE_TYPE_NOT_ALLOWED' | 'IMAGE_TOO_SMALL' }
   > {
     if (input.buffer.length > storage.MAX_FILE_SIZE) return { ok: false, reason: 'FILE_TOO_LARGE' };
-    if (input.buffer.length < MIN_IMAGE_BYTES) return { ok: false, reason: 'FILE_TOO_SMALL' };
+    // آواتار باسکول گاهی <۴KB و <۲۰۰px است (۱۵۰×۷۳/۳.۶KB دیده شده) — کف
+    // ملایم اسلات آواتار عین upload() همین‌جا هم اعمال می‌شود
+    const avatarSlot = isAvatarSlot(input.model, input.fieldKey);
+    if (input.buffer.length < (avatarSlot ? AVATAR_MIN_IMAGE_BYTES : MIN_IMAGE_BYTES)) {
+      return { ok: false, reason: 'FILE_TOO_SMALL' };
+    }
     if (!(ALLOWED_MIME as readonly string[]).includes(input.mimetype)) {
       return { ok: false, reason: 'FILE_TYPE_NOT_ALLOWED' };
     }
 
     // واترمارک دائمی فقط برای تصاویر آگهی (Product) — عین upload()
     const processed = await this.processFile(input.buffer, input.mimetype, input.model === 'Product');
-    if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
+    const minWidth = avatarSlot ? AVATAR_MIN_IMAGE_WIDTH : MIN_IMAGE_WIDTH;
+    if (processed.width > 0 && processed.width < minWidth) {
       return { ok: false, reason: 'IMAGE_TOO_SMALL' };
     }
 
