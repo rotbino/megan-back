@@ -809,6 +809,155 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     return rows.length;
   }
 
+  // ─── تعویض درجا (دیتا ایمپورت → تصاویر آگهی‌ها) ─────────────────────────────
+
+  /**
+   * تعویض بایت‌های یک تصویر آگهی «در همان کلید ذخیره‌سازی» (خواستهٔ مالک ۱۳-۱۱):
+   * پاک‌کردن واترمارک باسکول از تصاویر ایمپورت‌شده. گردش‌کار مالک: فایل اصلی را
+   * ذخیره می‌کند → در Paint واترمارک باسکول را پاک می‌کند → با دکمهٔ «ویرایش
+   * عکس» همین‌جا آپلود می‌کند؛ نتیجه باید «همان فایل» باشد: همان نام، همان مسیر،
+   * همان URL و همان ردیف File — فقط بایت‌ها عوض شوند و تامبنیل از روی تصویر
+   * تازه در همان کلید تامبنیل بازساخته شود.
+   *
+   * نکته‌ها:
+   *   • واترمارک آیمچ دوباره اعمال نمی‌شود — فایل ورودی همان خروجی قبلی خودمان
+   *     است که واترمارک آیمچ را در پیکسل‌ها دارد؛ دوباره زدن یعنی واترمارک دوبل.
+   *   • فرمت خروجی به پسوند کلید موجود قفل می‌شود تا نام/مسیر صادق بماند؛
+   *     PNG شفاف روی کلید jpg با پس‌زمینهٔ سفید flatten می‌شود.
+   *   • هدر کش جایگزین «immutable یک‌ساله» نیست (۳۶۰۰ ثانیه) — بایت‌های این
+   *     کلید عوض شده‌اند و کلاینت‌های تازه باید نسخهٔ جدید را بگیرند.
+   */
+  async replaceInPlace(
+    fileId: string,
+    file: { buffer: Buffer; mimetype: string; filename: string },
+    replacedBy: string,
+  ): Promise<FileDto & { replacedAt: string; productId: string | null }> {
+    oidOr404(fileId);
+    const row = await this.prisma.file.findUnique({ where: { id: fileId } });
+    if (!row) throw AppError.notFound('فایل یافت نشد.');
+    if (row.relatedModel !== 'Product' || row.fieldKey !== 'gallery') {
+      throw AppError.badRequest('تعویض درجا فقط برای تصاویر گالری آگهی تعریف شده است.', 'NOT_GALLERY');
+    }
+    if (!row.storageKey) {
+      throw AppError.badRequest('این فایل کلید ذخیره‌سازی ندارد و قابل تعویض درجا نیست.', 'NO_STORAGE_KEY');
+    }
+    if (file.buffer.length > storage.MAX_FILE_SIZE) {
+      throw AppError.badRequest(
+        `حجم فایل نباید از ${Math.floor(storage.MAX_FILE_SIZE / 1024 / 1024)} مگابایت بیشتر باشد.`,
+        'FILE_TOO_LARGE',
+      );
+    }
+    if (file.buffer.length < MIN_IMAGE_BYTES) {
+      throw AppError.badRequest('حجم تصویر بسیار کم است.', 'FILE_TOO_SMALL');
+    }
+    if (!(ALLOWED_MIME as readonly string[]).includes(file.mimetype)) {
+      throw AppError.badRequest('این نوع فایل پشتیبانی نمی‌شود.', 'FILE_TYPE_NOT_ALLOWED');
+    }
+
+    // فرمت خروجی = پسوند کلید موجود (نام/مسیر دست‌نخورده می‌ماند)
+    const keyExt = row.storageKey.split('.').pop()?.toLowerCase();
+    const format: 'jpeg' | 'png' | 'webp' = keyExt === 'png' ? 'png' : keyExt === 'webp' ? 'webp' : 'jpeg';
+    const processed = await this.processReplacement(file.buffer, format);
+    if (processed.width > 0 && processed.width < MIN_IMAGE_WIDTH) {
+      throw AppError.badRequest(`عرض تصویر باید حداقل ${MIN_IMAGE_WIDTH} پیکسل باشد.`, 'IMAGE_TOO_SMALL');
+    }
+
+    const replacedCache = 'public, max-age=3600';
+    await this.driver.put(row.storageKey, processed.main, processed.mimeType, replacedCache);
+
+    // تامبنیل از روی تصویر تازه، در همان کلید تامبنیل — اگر کلید تامبنیل نبود،
+    // ساخته می‌شود (بهبود خالص؛ URL اصلی دست نمی‌خورد)
+    let thumbUrl: string | null = row.thumbUrl;
+    let thumbKey: string | null = row.thumbStorageKey;
+    if (processed.thumb) {
+      const targetKey = row.thumbStorageKey ?? `${row.storageKey}.thumb.jpg`;
+      const putUrl = await this.driver.put(targetKey, processed.thumb, 'image/jpeg', replacedCache).catch(() => null);
+      if (putUrl) {
+        thumbKey = targetKey;
+        thumbUrl = putUrl;
+      }
+    }
+
+    const now = new Date();
+    const metadata = {
+      ...((row.metadata as Record<string, unknown> | null) ?? {}),
+      originalSize: file.buffer.length,
+      width: processed.width,
+      height: processed.height,
+      replacedAt: now.toISOString(),
+      replacedBy,
+    };
+    const updated = await this.prisma.file.update({
+      where: { id: row.id },
+      data: {
+        size: processed.main.length,
+        mimeType: processed.mimeType,
+        thumbUrl,
+        thumbStorageKey: thumbKey,
+        metadata: metadata as unknown as object,
+      },
+    });
+    await this.bustCaches('Product', row.relatedId);
+    return { ...this.toDto(updated), replacedAt: now.toISOString(), productId: row.relatedId };
+  }
+
+  /**
+   * پایپ‌لاین تعویض درجا — عین processFile ولی بدون لایهٔ واترمارک (فایل ورودی
+   * خروجی قبلی خودمان است و واترمارک آیمچ را در پیکسل‌ها دارد) و با فرمت
+   * قفل‌شده به پسوند کلید. تصویر نامفهوم اینجا «رد» می‌شود — نوشتن بایت خراب
+   * روی کلید یک فایل سالم قابل قبول نیست (برخلاف آپلود اولیه که fallback دارد).
+   */
+  private async processReplacement(
+    buffer: Buffer,
+    format: 'jpeg' | 'png' | 'webp',
+  ): Promise<{ main: Buffer; thumb: Buffer; width: number; height: number; mimeType: string }> {
+    const sharp = (await import('sharp')).default;
+    const meta = await sharp(buffer).metadata().catch(() => null);
+    if (!meta?.width || !meta?.height) {
+      throw AppError.badRequest('تصویر قابل پردازش نیست.', 'BAD_IMAGE');
+    }
+    const flatten = format === 'jpeg' && !!meta.hasAlpha;
+    const buildMain = (quality?: number) => {
+      let p = sharp(buffer)
+        .rotate()
+        .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
+      if (flatten) p = p.flatten({ background: '#ffffff' });
+      return p.toFormat(
+        format,
+        format === 'png'
+          ? { compressionLevel: 9 }
+          : format === 'webp'
+            ? { quality: quality ?? 84 }
+            : { quality: quality ?? 84, mozjpeg: true },
+      );
+    };
+
+    let main = await buildMain().toBuffer();
+    // پله‌ای فشرده‌تر تا زیر سقف (فقط jpeg/webp؛ png شفاف دست نمی‌خورد)
+    if (format !== 'png' && main.length > UploadsService.MAIN_MAX_BYTES) {
+      for (const quality of [78, 72, 66, 60, 54, 48]) {
+        main = await buildMain(quality).toBuffer();
+        if (main.length <= UploadsService.MAIN_MAX_BYTES) break;
+      }
+    }
+
+    // تامبنیل همیشه jpeg (عین پایپ‌لاین اصلی)
+    let thumbPipeline = sharp(buffer)
+      .rotate()
+      .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
+    if (flatten) thumbPipeline = thumbPipeline.flatten({ background: '#ffffff' });
+    const thumb = await thumbPipeline.toFormat('jpeg', { quality: 78, mozjpeg: true }).toBuffer();
+
+    const out = await sharp(main).metadata();
+    return {
+      main,
+      thumb,
+      width: out.width ?? 0,
+      height: out.height ?? 0,
+      mimeType: format === 'jpeg' ? 'image/jpeg' : format === 'png' ? 'image/png' : 'image/webp',
+    };
+  }
+
   // ─── انسجام کش ──────────────────────────────────────────────────────────────
 
   /** عوض‌شدن گالری باید فوراً لیست‌های کش‌شده را تازه کند. */

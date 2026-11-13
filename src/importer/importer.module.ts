@@ -5,6 +5,8 @@ import { ImporterController } from './importer.controller';
 import { ImporterService } from './importer.service';
 import { ImportedUsersController } from './imported-users.controller';
 import { ImportedUsersService } from './imported-users.service';
+import { ImportedProductsController } from './imported-products.controller';
+import { ImportedProductsService } from './imported-products.service';
 
 /**
  * ایمپورتر باسکول — ابزار داخلی ادمین (بازسازی ۱۳-۱۱).
@@ -13,13 +15,15 @@ import { ImportedUsersService } from './imported-users.service';
  * (users/{userId}/… — خواستهٔ مالک ۱۳-۱۱)؛ درایور پاک‌سازی درون سرویس
  * از buildStorage ساخته می‌شود.
  *
- * ImportedUsersController (صفحهٔ «دیتا ایمپورت → مدیریت کاربران») پشت
- * AdminJwtAuthGuard است — AdminAuthModule راز/گارد توکن ادمین را می‌دهد.
+ * ImportedUsersController (صفحهٔ «دیتا ایمپورت → مدیریت کاربران») و
+ * ImportedProductsController («آگهی‌ها» + «تصاویر آگهی‌ها») پشت
+ * AdminJwtAuthGuard هستند — AdminAuthModule راز/گارد توکن ادمین را می‌دهد.
  */
 @Module({
   imports: [UploadsModule, AdminAuthModule],
-  controllers: [ImporterController, ImportedUsersController],
-  providers: [ImporterService, ImportedUsersService],
-  exports: [ImporterService, ImportedUsersService],
+  controllers: [ImporterController, ImportedUsersController, ImportedProductsController],
+  providers: [ImporterService, ImportedUsersService, ImportedProductsService],
+  exports: [ImporterService, ImportedUsersService, ImportedProductsService],
 })
 export class ImporterModule {}
+

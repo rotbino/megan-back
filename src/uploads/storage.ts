@@ -25,8 +25,13 @@ import { join } from 'node:path';
 import { env, storage } from '../common/config/env';
 
 export interface StorageDriver {
-  /** ذخیره بایت‌ها؛ URL عمومی مستقیم را برمی‌گرداند. */
-  put(key: string, body: Buffer, contentType: string): Promise<string>;
+  /**
+   * ذخیره بایت‌ها؛ URL عمومی مستقیم را برمی‌گرداند.
+   * cacheControl اختیاری — پیش‌فرض «immutable یک‌ساله» است چون کلیدها یکتا و
+   * تغییرناپذیرند؛ فقط «تعویض درجا» (replace-in-place همان کلید) هدر تازه‌تری
+   * می‌فرستد تا کلاینت‌های تازه نسخهٔ جدید را بگیرند.
+   */
+  put(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<string>;
   /** حذف بهترین‌حال — خطای ذخیره‌سازی هرگز جریان اصلی را نمی‌شکند. */
   delete(key: string): Promise<void>;
   /** اگر URL مال همین درایور باشد کلید ذخیره‌سازی‌اش را بده — برای پاک‌سازی
@@ -85,7 +90,7 @@ class ArvanStorage implements StorageDriver {
     });
   }
 
-  async put(key: string, body: Buffer, contentType: string): Promise<string> {
+  async put(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<string> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -93,8 +98,8 @@ class ArvanStorage implements StorageDriver {
         Body: body,
         ContentType: contentType,
         ACL: 'public-read',
-        // کلیدها یکتا و تغییرناپذیرند → کش یک‌ساله بدون invalidation
-        CacheControl: 'public, max-age=31536000, immutable',
+        // کلیدهای یکتا immutable کش می‌شوند؛ تعویض درجا هدر کوتاه‌تری می‌فرستد
+        CacheControl: cacheControl ?? 'public, max-age=31536000, immutable',
       }),
     );
     return `${this.publicBase}/${key}`;
