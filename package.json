@@ -23,7 +23,9 @@
     "backup": "node scripts/backup.mjs",
     "test:priority": "node scripts/test-follow-priority.mjs",
     "seed:feedback": "node scripts/seed-feedback.mjs",
-    "migrate:b-comments": "node scripts/migrate-b-comments.mjs"
+    "migrate:b-comments": "node scripts/migrate-b-comments.mjs",
+    "test:mirror": "bun scripts/test-storage-mirror.ts",
+    "mirror:backfill": "node scripts/mirror-backfill.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1138.0",

@@ -104,6 +104,12 @@ export interface ProcessedImage {
 // فقط تصاویر «Product» واترمارک می‌گیرند (آواتار/مدارک نه).
 // Asset: assets/watermark-tile.png — رندر یک‌بار با scripts/make-watermark-asset.mjs
 // (فونت قفل‌شده؛ در زمان اجرا هیچ SVG/فونتی پردازش نمی‌شود).
+//
+// ⚠️ موقتاً خاموش (خواستهٔ مالک ۱۳-۱۱): «فعلاً واترمارک رو کدش رو غیرفعال کن،
+// پاک نکن، فقط با یه فلگ فالزش کن.» — کلید WATERMARK_ENABLED در env پیش‌فرض
+// false است؛ کل این بلوک (کاشی، لایه، زاویه) دست‌نخورده مانده و با گذاشتن
+// WATERMARK_ENABLED=true در .env دوباره همان‌گونه فعال می‌شود. تا وقتی خاموش
+// است هیچ فایلی — نه روی آروان نه روی آینهٔ لوکال — واترمارک نمی‌گیرد.
 
 /** ابعاد PNG نشان — برای حفظ نسبت در resize */
 const WM_TILE_W = 354;
@@ -268,10 +274,13 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
 
       // لایهٔ واترمارک (خواسته مالک ۸-۱۱ دور ۲۷) — قبل از انکود، داخل همان
       // پایپ‌لاین؛ ابعاد پس از rotate/resize از پیش حساب می‌شود.
+      // ⚠️ موقتاً خاموش (خواستهٔ مالک ۱۳-۱۱): فلگ WATERMARK_ENABLED (پیش‌فرض
+      // false) کل مسیر را بی‌اثر می‌کند — کد واترمارک حذف نشده، فقط گیت شده.
+      const applyWatermark = watermark && storage.WATERMARK_ENABLED;
       const mainFit = UploadsService.fittedSize(meta, UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH);
-      const wmMain = watermark ? await this.watermarkLayer(mainFit.w, mainFit.h) : null;
+      const wmMain = applyWatermark ? await this.watermarkLayer(mainFit.w, mainFit.h) : null;
       const thumbFit = UploadsService.fittedSize(meta, UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH);
-      const wmThumb = watermark ? await this.watermarkLayer(thumbFit.w, thumbFit.h) : null;
+      const wmThumb = applyWatermark ? await this.watermarkLayer(thumbFit.w, thumbFit.h) : null;
 
       // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
       let mainPipeline = sharp(buffer).rotate().resize(
@@ -541,6 +550,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     await this.resolveTarget(user, input.model, modelId);
 
     // واترمارک دائمی فقط برای تصاویر آگهی (Product) — آواتار/مدارک/فیش نه
+    // (موقتاً با WATERMARK_ENABLED=false خاموش — خواستهٔ مالک ۱۳-۱۱)
     const processed = await this.processFile(file.buffer, file.mimetype, input.model === 'Product');
     // ابعاد واقعی (پس از decode با sharp) — عکس‌های ریز/زباله رد می‌شوند؛
     // width=0 یعنی sharp نتوانست decode کند → همان مسیر قدیمی ادامه می‌دهد.
@@ -600,9 +610,11 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
    * ورود مستقیم بایت‌های تصویر از یک منبع بیرونی (ایمپورتر باسکول) با «همان»
    * مسیر و پردازش آپلود عادی کاربر (خواستهٔ مالک ۱۳-۱۱): همان keyFor
    * (users/{ownerId}/products/{productId}/gallery/… · users/{ownerId}/avatars/avatar/…)،
-   * همان پاین‌لاین sharp + واترمارک آگهی و همان ردیف File با storageKey کامل —
+   * همان پاین‌لاین sharp و همان ردیف File با storageKey کامل —
    * «انگار که آگهی توسط خود کاربر ایجاد شده». هیچ فولدر جداگانهٔ باسکولی
-   * ساخته نمی‌شود؛ فایل‌ها زیر پوشهٔ خودِ کاربر با id او می‌نشینند.
+   * ساخته نمی‌شود؛ فایل‌ها زیر پوشهٔ خودِ کاربر با id او می‌نشینند و (از
+   * ۱۳-۱۱) همان لحظه روی دیسکِ بک‌اند (فولدر uploads، همان مسیر/نام)
+   * هم آینه می‌شوند — MirroredStorage در storage.ts.
    *
    * تفاوت با upload(): بدون multipart و AuthUser — فراخوانندهٔ داخلی (ایمپورتر)
    * مالکیت رکوردها را خودش تضمین می‌کند؛ خروجی به‌جای استثنا، نتیجهٔ صریح است.
@@ -633,6 +645,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     }
 
     // واترمارک دائمی فقط برای تصاویر آگهی (Product) — عین upload()
+    // (موقتاً با WATERMARK_ENABLED=false خاموش — خواستهٔ مالک ۱۳-۱۱)
     const processed = await this.processFile(input.buffer, input.mimetype, input.model === 'Product');
     const minWidth = avatarSlot ? AVATAR_MIN_IMAGE_WIDTH : MIN_IMAGE_WIDTH;
     if (processed.width > 0 && processed.width < minWidth) {
