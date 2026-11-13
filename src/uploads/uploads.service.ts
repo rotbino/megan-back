@@ -92,6 +92,11 @@ export interface ProcessedImage {
   height: number;
   /** واترمارک ایمچ داخل پیکسل‌های فایل ذخیره شد؟ (خواسته مالک ۸-۱۱ دور ۲۷) */
   watermarked: boolean;
+  /** معادلِ بدون واترمارک برای آینهٔ لوکال (سیاست ۱۴-۱۱) — وقتی واترمارک
+   *  فعال است با main فرق دارد؛ وگرنه همان بایت‌های main است. */
+  mainClean: Buffer;
+  /** معادلِ بدون واترمارک تامبنیل — همیشه هم‌نالیابیِ thumb. */
+  thumbClean: Buffer | null;
 }
 
 // ─── واترمارک دائمی تصاویر آگهی (خواسته مالک ۸-۱۱ دور ۲۷؛ اصلاح دور ۲۸) ────
@@ -105,11 +110,11 @@ export interface ProcessedImage {
 // Asset: assets/watermark-tile.png — رندر یک‌بار با scripts/make-watermark-asset.mjs
 // (فونت قفل‌شده؛ در زمان اجرا هیچ SVG/فونتی پردازش نمی‌شود).
 //
-// ⚠️ موقتاً خاموش (خواستهٔ مالک ۱۳-۱۱): «فعلاً واترمارک رو کدش رو غیرفعال کن،
-// پاک نکن، فقط با یه فلگ فالزش کن.» — کلید WATERMARK_ENABLED در env پیش‌فرض
-// false است؛ کل این بلوک (کاشی، لایه، زاویه) دست‌نخورده مانده و با گذاشتن
-// WATERMARK_ENABLED=true در .env دوباره همان‌گونه فعال می‌شود. تا وقتی خاموش
-// است هیچ فایلی — نه روی آروان نه روی آینهٔ لوکال — واترمارک نمی‌گیرد.
+// از ۱۴-۱۱ (خواستهٔ مالک): واترمارک فقط روی نسخهٔ «ابری» می‌نشیند؛ نسخهٔ
+// معادل در آینهٔ لوکال (mainClean/thumbClean) بدون واترمارک نوشته می‌شود تا
+// مالک همیشه «سورس تمیز» در دیسک داشته باشد — اگر روزی واترمارک عوض شود،
+// عکس اصلی موجود است و نسخهٔ ابری از نو ساخته می‌شود. WATERMARK_ENABLED در
+// env پیش‌فرض true است؛ با false کل مسیر (ابر و آینه) بدون واترمارک می‌شود.
 
 /** ابعاد PNG نشان — برای حفظ نسبت در resize */
 const WM_TILE_W = 354;
@@ -273,50 +278,61 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       const isWebp = mime === 'image/webp';
 
       // لایهٔ واترمارک (خواسته مالک ۸-۱۱ دور ۲۷) — قبل از انکود، داخل همان
-      // پایپ‌لاین؛ ابعاد پس از rotate/resize از پیش حساب می‌شود.
-      // ⚠️ موقتاً خاموش (خواستهٔ مالک ۱۳-۱۱): فلگ WATERMARK_ENABLED (پیش‌فرض
-      // false) کل مسیر را بی‌اثر می‌کند — کد واترمارک حذف نشده، فقط گیت شده.
+      // پایپ‌لاین؛ ابعاد پس از rotate/resize از پیش حساب می‌شود. سیاست ۱۴-۱۱:
+      // لایه فقط روی نسخهٔ ابری می‌نشیند؛ نسخهٔ آینهٔ لوکال از همان پایپ‌لاین
+      // «بدون» لایه ساخته می‌شود (سورس تمیز مالک برای تعویض واترمارک آینده).
       const applyWatermark = watermark && storage.WATERMARK_ENABLED;
       const mainFit = UploadsService.fittedSize(meta, UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH);
       const wmMain = applyWatermark ? await this.watermarkLayer(mainFit.w, mainFit.h) : null;
       const thumbFit = UploadsService.fittedSize(meta, UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH);
       const wmThumb = applyWatermark ? await this.watermarkLayer(thumbFit.w, thumbFit.h) : null;
 
-      // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
-      let mainPipeline = sharp(buffer).rotate().resize(
-        UploadsService.MAIN_MAX_WIDTH,
-        UploadsService.MAIN_MAX_WIDTH,
-        { fit: 'inside', withoutEnlargement: true },
-      );
-      if (wmMain) mainPipeline = mainPipeline.composite([{ input: wmMain, left: 0, top: 0 }]);
-      let main = await mainPipeline
-        .toFormat(isWebp ? 'webp' : hasAlpha ? 'png' : 'jpeg', isWebp ? { quality: 84 } : hasAlpha ? { compressionLevel: 9 } : { quality: 84, mozjpeg: true })
-        .toBuffer();
+      // انکودر اصلی — پارامتری به لایهٔ واترمارک؛ با wm=null عین پایپ‌لاین
+      // قدیمیِ بدون واترمارک است (پلهٔ فشرده‌سازی هم عیناً همان).
+      const encodeMain = async (wm: Buffer | null): Promise<Buffer> => {
+        const format = isWebp ? 'webp' : hasAlpha ? 'png' : 'jpeg';
+        const options = isWebp ? { quality: 84 } : hasAlpha ? { compressionLevel: 9 } : { quality: 84, mozjpeg: true };
+        let pipeline = sharp(buffer).rotate().resize(
+          UploadsService.MAIN_MAX_WIDTH,
+          UploadsService.MAIN_MAX_WIDTH,
+          { fit: 'inside', withoutEnlargement: true },
+        );
+        if (wm) pipeline = pipeline.composite([{ input: wm, left: 0, top: 0 }]);
+        let out = await pipeline.toFormat(format, options).toBuffer();
 
-      // پله‌ای فشرده‌تر — تا زیر ۵۰۰KB بیاید (فقط jpeg/webp؛ png شفاف را دست نمی‌زنیم)
-      if (!hasAlpha && main.length > UploadsService.MAIN_MAX_BYTES) {
-        for (const quality of [78, 72, 66, 60, 54, 48]) {
-          let rePipeline = sharp(buffer)
-            .rotate()
-            .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, {
-              fit: 'inside',
-              withoutEnlargement: true,
-            });
-          if (wmMain) rePipeline = rePipeline.composite([{ input: wmMain, left: 0, top: 0 }]);
-          main = await rePipeline
-            .toFormat(isWebp ? 'webp' : 'jpeg', isWebp ? { quality } : { quality, mozjpeg: true })
-            .toBuffer();
-          if (main.length <= UploadsService.MAIN_MAX_BYTES) break;
+        // پله‌ای فشرده‌تر — تا زیر ۵۰۰KB بیاید (فقط jpeg/webp؛ png شفاف را دست نمی‌زنیم)
+        if (!hasAlpha && out.length > UploadsService.MAIN_MAX_BYTES) {
+          for (const quality of [78, 72, 66, 60, 54, 48]) {
+            let rePipeline = sharp(buffer).rotate().resize(
+              UploadsService.MAIN_MAX_WIDTH,
+              UploadsService.MAIN_MAX_WIDTH,
+              { fit: 'inside', withoutEnlargement: true },
+            );
+            if (wm) rePipeline = rePipeline.composite([{ input: wm, left: 0, top: 0 }]);
+            out = await rePipeline
+              .toFormat(isWebp ? 'webp' : 'jpeg', isWebp ? { quality } : { quality, mozjpeg: true })
+              .toBuffer();
+            if (out.length <= UploadsService.MAIN_MAX_BYTES) break;
+          }
         }
-      }
+        return out;
+      };
 
-      let thumbPipeline = sharp(buffer)
-        .rotate()
-        .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
-      if (wmThumb) thumbPipeline = thumbPipeline.composite([{ input: wmThumb, left: 0, top: 0 }]);
-      const thumb = await thumbPipeline
-        .toFormat('jpeg', { quality: 78, mozjpeg: true }) // تامبنیل همیشه jpeg
-        .toBuffer();
+      // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
+      const main = await encodeMain(wmMain); // نسخهٔ ابری — واترمارک‌دار
+      const mainClean = wmMain ? await encodeMain(null) : main; // آینهٔ لوکال — تمیز
+
+      const encodeThumb = async (wm: Buffer | null): Promise<Buffer> => {
+        let pipeline = sharp(buffer)
+          .rotate()
+          .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
+        if (wm) pipeline = pipeline.composite([{ input: wm, left: 0, top: 0 }]);
+        return pipeline
+          .toFormat('jpeg', { quality: 78, mozjpeg: true }) // تامبنیل همیشه jpeg
+          .toBuffer();
+      };
+      const thumb = await encodeThumb(wmThumb); // نسخهٔ ابری — واترمارک‌دار
+      const thumbClean = wmThumb ? await encodeThumb(null) : thumb; // آینهٔ لوکال — تمیز
 
       const outMeta = await sharp(main).metadata();
       const mainMime = isWebp ? 'image/webp' : hasAlpha ? 'image/png' : 'image/jpeg';
@@ -329,10 +345,22 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         width: outMeta.width ?? 0,
         height: outMeta.height ?? 0,
         watermarked: !!wmMain,
+        mainClean,
+        thumbClean,
       };
     } catch {
       // تصویر خراب/فرمت پشتیبانی‌نشده — بایت‌های اصلی را نگه دار، رد نکن
-      return { main: buffer, mainMime: mime, mainExt: MIME_EXT[mime] ?? 'bin', thumb: null, width: 0, height: 0, watermarked: false };
+      return {
+        main: buffer,
+        mainMime: mime,
+        mainExt: MIME_EXT[mime] ?? 'bin',
+        thumb: null,
+        width: 0,
+        height: 0,
+        watermarked: false,
+        mainClean: buffer,
+        thumbClean: null,
+      };
     }
   }
 
@@ -549,8 +577,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     const modelId = input.modelId || null;
     await this.resolveTarget(user, input.model, modelId);
 
-    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — آواتار/مدارک/فیش نه
-    // (موقتاً با WATERMARK_ENABLED=false خاموش — خواستهٔ مالک ۱۳-۱۱)
+    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — آواتار/مدارک/فیش نه.
+    // سیاست ۱۴-۱۱: نسخهٔ ابری واترمارک‌دار، آینهٔ لوکال تمیز (سورس مالک).
     const processed = await this.processFile(file.buffer, file.mimetype, input.model === 'Product');
     // ابعاد واقعی (پس از decode با sharp) — عکس‌های ریز/زباله رد می‌شوند؛
     // width=0 یعنی sharp نتوانست decode کند → همان مسیر قدیمی ادامه می‌دهد.
@@ -562,13 +590,16 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     const key = this.keyFor(user.id, input.model, modelId, input.fieldKey, processed.mainExt);
-    const url = await this.driver.put(key, processed.main, processed.mainMime);
+    // ابر = main (واترمارک‌دار) · آینهٔ لوکال = mainClean (بدون واترمارک) — ۱۴-۱۱
+    const url = await this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean);
 
     let thumbUrl: string | null = null;
     let thumbKey: string | null = null;
     if (processed.thumb) {
       thumbKey = `${key}.thumb.jpg`; // همیشه jpeg — تامبنیل کاشی‌های <img>
-      thumbUrl = await this.driver.put(thumbKey, processed.thumb, 'image/jpeg').catch(() => null);
+      thumbUrl = await this.driver
+        .put(thumbKey, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
+        .catch(() => null);
       if (!thumbUrl) thumbKey = null;
     }
 
@@ -644,8 +675,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       return { ok: false, reason: 'FILE_TYPE_NOT_ALLOWED' };
     }
 
-    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — عین upload()
-    // (موقتاً با WATERMARK_ENABLED=false خاموش — خواستهٔ مالک ۱۳-۱۱)
+    // واترمارک دائمی فقط برای تصاویر آگهی (Product) — عین upload().
+    // سیاست ۱۴-۱۱: نسخهٔ ابری واترمارک‌دار، آینهٔ لوکال تمیز (سورس مالک).
     const processed = await this.processFile(input.buffer, input.mimetype, input.model === 'Product');
     const minWidth = avatarSlot ? AVATAR_MIN_IMAGE_WIDTH : MIN_IMAGE_WIDTH;
     if (processed.width > 0 && processed.width < minWidth) {
@@ -653,13 +684,16 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     }
 
     const key = this.keyFor(input.ownerId, input.model, input.modelId, input.fieldKey, processed.mainExt);
-    const url = await this.driver.put(key, processed.main, processed.mainMime);
+    // ابر = main (واترمارک‌دار) · آینهٔ لوکال = mainClean (بدون واترمارک) — ۱۴-۱۱
+    const url = await this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean);
 
     let thumbUrl: string | null = null;
     let thumbKey: string | null = null;
     if (processed.thumb) {
       thumbKey = `${key}.thumb.jpg`; // همیشه jpeg — تامبنیل کاشی‌های <img>
-      thumbUrl = await this.driver.put(thumbKey, processed.thumb, 'image/jpeg').catch(() => null);
+      thumbUrl = await this.driver
+        .put(thumbKey, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
+        .catch(() => null);
       if (!thumbUrl) thumbKey = null;
     }
 
@@ -833,8 +867,10 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
    * تازه در همان کلید تامبنیل بازساخته شود.
    *
    * نکته‌ها:
-   *   • واترمارک آیمچ دوباره اعمال نمی‌شود — فایل ورودی همان خروجی قبلی خودمان
-   *     است که واترمارک آیمچ را در پیکسل‌ها دارد؛ دوباره زدن یعنی واترمارک دوبل.
+   *   • سیاست ۱۴-۱۱: نسخهٔ ابری واترمارک آیمچ می‌گیرد و آینهٔ لوکال نسخهٔ
+   *     تمیزِ ورودی را نگه می‌دارد — پس ورودی این مسیر باید «نسخهٔ تمیز» باشد
+   *     (فایل آینهٔ لوکال را ویرایش کنید، نه خروجی واترمارک‌دار ابر را؛
+   *     آپلود دوبارهٔ نسخهٔ واترمارک‌دار یعنی واترمارک دوبل).
    *   • فرمت خروجی به پسوند کلید موجود قفل می‌شود تا نام/مسیر صادق بماند؛
    *     PNG شفاف روی کلید jpg با پس‌زمینهٔ سفید flatten می‌شود.
    *   • هدر کش جایگزین «immutable یک‌ساله» نیست (۳۶۰۰ ثانیه) — بایت‌های این
@@ -876,7 +912,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     }
 
     const replacedCache = 'public, max-age=3600';
-    await this.driver.put(row.storageKey, processed.main, processed.mimeType, replacedCache);
+    // ابر = واترمارک‌دار · آینهٔ لوکال = تمیز (سیاست ۱۴-۱۱) — عین upload()
+    await this.driver.put(row.storageKey, processed.main, processed.mimeType, replacedCache, processed.mainClean);
 
     // تامبنیل از روی تصویر تازه، در همان کلید تامبنیل — اگر کلید تامبنیل نبود،
     // ساخته می‌شود (بهبود خالص؛ URL اصلی دست نمی‌خورد)
@@ -884,7 +921,9 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     let thumbKey: string | null = row.thumbStorageKey;
     if (processed.thumb) {
       const targetKey = row.thumbStorageKey ?? `${row.storageKey}.thumb.jpg`;
-      const putUrl = await this.driver.put(targetKey, processed.thumb, 'image/jpeg', replacedCache).catch(() => null);
+      const putUrl = await this.driver
+        .put(targetKey, processed.thumb, 'image/jpeg', replacedCache, processed.thumbClean)
+        .catch(() => null);
       if (putUrl) {
         thumbKey = targetKey;
         thumbUrl = putUrl;
@@ -899,6 +938,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       height: processed.height,
       replacedAt: now.toISOString(),
       replacedBy,
+      // نسخهٔ ابری واترمارک دارد؟ (سیاست ۱۴-۱۱ — آینهٔ لوکال همیشه تمیز است)
+      watermarked: processed.watermarked,
     };
     const updated = await this.prisma.file.update({
       where: { id: row.id },
@@ -915,26 +956,45 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * پایپ‌لاین تعویض درجا — عین processFile ولی بدون لایهٔ واترمارک (فایل ورودی
-   * خروجی قبلی خودمان است و واترمارک آیمچ را در پیکسل‌ها دارد) و با فرمت
-   * قفل‌شده به پسوند کلید. تصویر نامفهوم اینجا «رد» می‌شود — نوشتن بایت خراب
-   * روی کلید یک فایل سالم قابل قبول نیست (برخلاف آپلود اولیه که fallback دارد).
+   * پایپ‌لاین تعویض درجا — عین processFile ولی با فرمت قفل‌شده به پسوند کلید.
+   * سیاست ۱۴-۱۱: نسخهٔ ابری لایهٔ واترمارک می‌گیرد و نسخهٔ معادلِ تمیز برای
+   * آینهٔ لوکال برمی‌گردد (mainClean/thumbClean) — ورودی باید نسخهٔ تمیز باشد.
+   * تصویر نامفهوم اینجا «رد» می‌شود — نوشتن بایت خراب روی کلید یک فایل سالم
+   * قابل قبول نیست (برخلاف آپلود اولیه که fallback دارد).
    */
   private async processReplacement(
     buffer: Buffer,
     format: 'jpeg' | 'png' | 'webp',
-  ): Promise<{ main: Buffer; thumb: Buffer; width: number; height: number; mimeType: string }> {
+  ): Promise<{
+    main: Buffer;
+    mainClean: Buffer;
+    thumb: Buffer;
+    thumbClean: Buffer;
+    width: number;
+    height: number;
+    mimeType: string;
+    watermarked: boolean;
+  }> {
     const sharp = (await import('sharp')).default;
     const meta = await sharp(buffer).metadata().catch(() => null);
     if (!meta?.width || !meta?.height) {
       throw AppError.badRequest('تصویر قابل پردازش نیست.', 'BAD_IMAGE');
     }
     const flatten = format === 'jpeg' && !!meta.hasAlpha;
-    const buildMain = (quality?: number) => {
+
+    // لایهٔ واترمارک — فقط برای نسخهٔ ابری (سیاست ۱۴-۱۱)؛ این متد فقط برای
+    // گالری آگهی‌ها صدا زده می‌شود، پس شرط «Product» اینجا ذاتی است.
+    const mainFit = UploadsService.fittedSize(meta, UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH);
+    const wmMain = storage.WATERMARK_ENABLED ? await this.watermarkLayer(mainFit.w, mainFit.h) : null;
+    const thumbFit = UploadsService.fittedSize(meta, UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH);
+    const wmThumb = storage.WATERMARK_ENABLED ? await this.watermarkLayer(thumbFit.w, thumbFit.h) : null;
+
+    const buildMain = (quality: number | undefined, wm: Buffer | null) => {
       let p = sharp(buffer)
         .rotate()
         .resize(UploadsService.MAIN_MAX_WIDTH, UploadsService.MAIN_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
       if (flatten) p = p.flatten({ background: '#ffffff' });
+      if (wm) p = p.composite([{ input: wm, left: 0, top: 0 }]);
       return p.toFormat(
         format,
         format === 'png'
@@ -945,29 +1005,42 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       );
     };
 
-    let main = await buildMain().toBuffer();
-    // پله‌ای فشرده‌تر تا زیر سقف (فقط jpeg/webp؛ png شفاف دست نمی‌خورد)
-    if (format !== 'png' && main.length > UploadsService.MAIN_MAX_BYTES) {
-      for (const quality of [78, 72, 66, 60, 54, 48]) {
-        main = await buildMain(quality).toBuffer();
-        if (main.length <= UploadsService.MAIN_MAX_BYTES) break;
+    // پلهٔ فشرده‌سازی عین processFile — برای هر دو نسخه جداگانه اجرا می‌شود
+    const encodeMain = async (wm: Buffer | null): Promise<Buffer> => {
+      let out = await buildMain(undefined, wm).toBuffer();
+      // پله‌ای فشرده‌تر تا زیر سقف (فقط jpeg/webp؛ png شفاف دست نمی‌خورد)
+      if (format !== 'png' && out.length > UploadsService.MAIN_MAX_BYTES) {
+        for (const quality of [78, 72, 66, 60, 54, 48]) {
+          out = await buildMain(quality, wm).toBuffer();
+          if (out.length <= UploadsService.MAIN_MAX_BYTES) break;
+        }
       }
-    }
+      return out;
+    };
+    const main = await encodeMain(wmMain); // نسخهٔ ابری — واترمارک‌دار
+    const mainClean = wmMain ? await encodeMain(null) : main; // آینهٔ لوکال — تمیز
 
-    // تامبنیل همیشه jpeg (عین پایپ‌لاین اصلی)
-    let thumbPipeline = sharp(buffer)
-      .rotate()
-      .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
-    if (flatten) thumbPipeline = thumbPipeline.flatten({ background: '#ffffff' });
-    const thumb = await thumbPipeline.toFormat('jpeg', { quality: 78, mozjpeg: true }).toBuffer();
+    const buildThumb = async (wm: Buffer | null): Promise<Buffer> => {
+      let p = sharp(buffer)
+        .rotate()
+        .resize(UploadsService.THUMB_MAX_WIDTH, UploadsService.THUMB_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true });
+      if (flatten) p = p.flatten({ background: '#ffffff' });
+      if (wm) p = p.composite([{ input: wm, left: 0, top: 0 }]);
+      return p.toFormat('jpeg', { quality: 78, mozjpeg: true }).toBuffer(); // تامبنیل همیشه jpeg
+    };
+    const thumb = await buildThumb(wmThumb);
+    const thumbClean = wmThumb ? await buildThumb(null) : thumb;
 
     const out = await sharp(main).metadata();
     return {
       main,
+      mainClean,
       thumb,
+      thumbClean,
       width: out.width ?? 0,
       height: out.height ?? 0,
       mimeType: format === 'jpeg' ? 'image/jpeg' : format === 'png' ? 'image/png' : 'image/webp',
+      watermarked: !!wmMain,
     };
   }
 

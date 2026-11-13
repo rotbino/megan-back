@@ -7,8 +7,8 @@
  * در محل ذخیرهٔ کد بک‌اند هم ذخیره بشه در فولدر آپلودز، دقیقاً همون مسیر و
  * همون اسم.» این تست همان درایور واقعی بوت (buildStorage) را با credentials
  * واقعی .env می‌سازد و روی باکت واقعی آروان و دیسک واقعی می‌نویسد/می‌خواند/
- * پاک می‌کند — چیزی را mock نمی‌کند. فلگ واترمارک هم چک می‌شود (باید خاموش
- * باشد — خواستهٔ ۱۳-۱۱).
+ * پاک می‌کند — چیزی را mock نمی‌کند. فلگ واترمارک هم چک می‌شود (از ۱۴-۱۱
+ * روشن است — فقط نسخهٔ ابری؛ تست کامل تفکیک: test-watermark-split.ts).
  */
 import { existsSync } from 'node:fs';
 import { readFile, rm, mkdir } from 'node:fs/promises';
@@ -33,7 +33,7 @@ function check(name: string, ok: boolean, detail = ''): void {
 // ── ۰. فلگ‌ها ────────────────────────────────────────────────────────────────
 console.log('۰) فلگ‌های env:');
 check('STORAGE_MIRROR_LOCAL روشن است (پیش‌فرض خواستهٔ ۱۳-۱۱)', storage.MIRROR_LOCAL === true);
-check('WATERMARK_ENABLED خاموش است (موقتاً — خواستهٔ ۱۳-۱۱)', storage.WATERMARK_ENABLED === false);
+check('WATERMARK_ENABLED روشن است (فقط نسخهٔ ابری — خواستهٔ ۱۴-۱۱)', storage.WATERMARK_ENABLED === true);
 check('درایور = arvan (تست روی مسیر ابری واقعی)', storage.DRIVER === 'arvan');
 
 // ── ۱. درایور ────────────────────────────────────────────────────────────────

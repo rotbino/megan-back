@@ -32,8 +32,13 @@ export interface StorageDriver {
    * cacheControl اختیاری — پیش‌فرض «immutable یک‌ساله» است چون کلیدها یکتا و
    * تغییرناپذیرند؛ فقط «تعویض درجا» (replace-in-place همان کلید) هدر تازه‌تری
    * می‌فرستد تا کلاینت‌های تازه نسخهٔ جدید را بگیرند.
+   *
+   * mirrorBody اختیاری (خواستهٔ مالک ۱۴-۱۱): بایت‌های «معادل بدون واترمارک»
+   * برای آینهٔ لوکال — درایور آینه‌دار، ابر را با body و دیسک را با
+   * mirrorBody می‌نویسد تا نسخهٔ لوکال «سورس تمیز» بماند؛ درایورهای بدون
+   * آینه آن را نادیده می‌گیرند (ابر همان body را می‌گیرد).
    */
-  put(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<string>;
+  put(key: string, body: Buffer, contentType: string, cacheControl?: string, mirrorBody?: Buffer): Promise<string>;
   /** حذف بهترین‌حال — خطای ذخیره‌سازی هرگز جریان اصلی را نمی‌شکند. */
   delete(key: string): Promise<void>;
   /** اگر URL مال همین درایور باشد کلید ذخیره‌سازی‌اش را بده — برای پاک‌سازی
@@ -209,6 +214,13 @@ class LocalStorage implements StorageDriver {
 // سیاست خطا: آینه بهترین‌حال است — خطای دیسک هرگز عملیات اصلی را نمی‌شکند
 // (آپلود موفق می‌ماند، فقط هشدار لاگ می‌شود)؛ حذف/پاک‌سازی هر دو طرف را
 // «بی‌صدا» بهترین‌حال انجام می‌دهد تا نسخهٔ مرده روی دیسک نماند.
+//
+// سیاست واترمارک (خواستهٔ مالک ۱۴-۱۱): تصاویر آگهی روی ابر واترمارک‌دار و
+// روی دیسک بدون واترمارک نوشته می‌شوند — سرویس هر دو نسخه را می‌سازد و
+// نسخهٔ تمیز را به‌عنوان mirrorBody به put می‌دهد؛ دیسک «سورس تمیز» مالک
+// است تا اگر روزی واترمارک عوض شد، عکس اصلی موجود و نسخهٔ ابری از نو
+// ساخته شدنی باشد. فایل‌های بدون واترمارک (آواتار/مدارک/چت/…) همچنان
+// یک‌نسخه‌ای‌اند و mirrorBody برایشان ارسال نمی‌شود.
 
 class MirroredStorage implements StorageDriver {
   constructor(
@@ -216,12 +228,13 @@ class MirroredStorage implements StorageDriver {
     private readonly mirror: LocalStorage,
   ) {}
 
-  async put(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<string> {
+  async put(key: string, body: Buffer, contentType: string, cacheControl?: string, mirrorBody?: Buffer): Promise<string> {
     // اول ابر — URL مرجع همین است؛ اگر ابر شکست خورد کل عملیات شکست خورده
     const url = await this.primary.put(key, body, contentType, cacheControl);
-    // بعد دیسک — بهترین‌حال؛ مالک باید از هشدار باخبر شود ولی آپلود سالم بماند
+    // بعد دیسک — بهترین‌حال؛ مالک باید از هشدار باخبر شود ولی آپلود سالم بماند.
+    // mirrorBody = نسخهٔ معادل بدون واترمارک (سیاست ۱۴-۱۱) — دیسک سورس تمیز است.
     try {
-      await this.mirror.put(key, body, contentType);
+      await this.mirror.put(key, mirrorBody ?? body, contentType);
     } catch (err) {
       console.warn(`[storage] آینهٔ لوکال نتوانست بنویسد «${key}»: ${(err as Error).message}`);
     }
