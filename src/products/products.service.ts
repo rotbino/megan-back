@@ -530,19 +530,22 @@ export class ProductsService {
 
     if (viewer && viewer.id === p.userId) return { counted: false as const };
 
-    await this.prisma.$transaction([
-      this.prisma.productView.create({
-        data: {
-          productId: p.id,
-          viewerId: viewer?.id ?? null,
-          sessionId: viewer ? null : (dto.sessionId?.slice(0, 40) || null),
-        },
-      }),
-      this.prisma.product.update({
-        where: { id: p.id },
-        data: { viewCount: { increment: 1 } },
-      }),
-    ]);
+    // شمارندهٔ بازدید نباید مهر زمانی آگهی را دست بزند — update عادی پریسما،
+    // @updatedAt را به «اکنون» می‌گذارد و هر بازدید، آگهی‌های چندسالهٔ باسکولی
+    // را «۲ دقیقه پیش» نشان می‌داد (گزارش مالک ۱۳-۱۱: مهرهای باسکول دقیق
+    // بمانند تا خریدار قدیمی بودن قیمت را بفهمد). $inc خام مستقیم به مونگو
+    // می‌رود و updated_at را حفظ می‌کند؛ اتمیک هم هست.
+    await this.prisma.productView.create({
+      data: {
+        productId: p.id,
+        viewerId: viewer?.id ?? null,
+        sessionId: viewer ? null : (dto.sessionId?.slice(0, 40) || null),
+      },
+    });
+    await this.prisma.$runCommandRaw({
+      update: 'Product',
+      updates: [{ q: { _id: p.id }, u: { $inc: { view_count: 1 } } }],
+    });
     return { counted: true as const };
   }
 

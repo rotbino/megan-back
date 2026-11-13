@@ -107,11 +107,19 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
 
   private async reapExpiredLadders(): Promise<void> {
     try {
-      const res = await this.prisma.product.updateMany({
-        where: { isLadder: true, ladderExpiresAt: { lt: new Date() } },
-        data: { isLadder: false },
-      });
-      if (res.count > 0) this.cache.invalidateTag('products');
+      // دستور خام، نه updateMany پریسما — @updatedAt در updateMany هم مهر «اکنون»
+      // می‌گذارد و reaper ساعتی، مهرهای دقیق باسکول آگهی‌ها را پاک می‌کرد
+      // (خواستهٔ مالک ۱۳-۱۱: مهر ثبت/آپدیت/قیمت عین باسکول بمانند).
+      const res = (await this.prisma.$runCommandRaw({
+        update: 'Product',
+        updates: [
+          {
+            q: { is_ladder: true, ladder_expires_at: { $lt: { $date: new Date().toISOString() } } },
+            u: { $set: { is_ladder: false } },
+          },
+        ],
+      })) as unknown as { n?: number };
+      if (Number(res?.n ?? 0) > 0) this.cache.invalidateTag('products');
     } catch {
       /* reaper هرگز نباید کاربر را بیدار کند */
     }
@@ -130,24 +138,34 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
         where: { activePakageType: { gt: 0 }, packageExpiresAt: { gt: new Date() } },
         select: { id: true },
       });
-      const premiumIds = premiumUsers.map((u) => u.id);
+      const premiumIds = premiumUsers.map((u) => ({ $oid: u.id }));
 
-      const [on, off] = await this.prisma.$transaction([
+      // همان دو جاروی قبلی ولی با دستور خام — updateMany پریسما @updatedAt را
+      // به «اکنون» می‌گذارد و مهرهای باسکول آگهی‌ها پاک می‌شد (خواستهٔ مالک ۱۳-۱۱)
+      const run = (updates: Prisma.InputJsonObject[]) =>
+        this.prisma.$runCommandRaw({ update: 'Product', updates }) as unknown as Promise<{
+          n?: number;
+        }>;
+      const [on, off] = await Promise.all([
         // not:true (→ $ne) در مونگو اسنادِ «بدون فیلد» را هم می‌گیرد —
         // آگهی‌های مهاجرت‌شده قدیمی is_elevated صریح ندارند
-        this.prisma.product.updateMany({
-          where: { userId: { in: premiumIds }, isElevated: { not: true } },
-          data: { isElevated: true },
-        }),
-        this.prisma.product.updateMany({
-          where: {
-            isElevated: true,
-            ...(premiumIds.length > 0 ? { userId: { notIn: premiumIds } } : {}),
+        run([
+          {
+            q: { user_id: { $in: premiumIds }, is_elevated: { $ne: true } },
+            u: { $set: { is_elevated: true } },
           },
-          data: { isElevated: false },
-        }),
+        ]),
+        run([
+          {
+            q: {
+              is_elevated: true,
+              ...(premiumIds.length > 0 ? { user_id: { $nin: premiumIds } } : {}),
+            },
+            u: { $set: { is_elevated: false } },
+          },
+        ]),
       ]);
-      if (on.count > 0 || off.count > 0) this.cache.invalidateTag('products');
+      if (Number(on?.n ?? 0) > 0 || Number(off?.n ?? 0) > 0) this.cache.invalidateTag('products');
     } catch {
       /* reaper هرگز نباید کاربر را بیدار کند */
     }

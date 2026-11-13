@@ -1032,11 +1032,21 @@ export class ImporterService {
     }
 
     const name = (m.product_name ?? '').trim();
+    // مهرهای زمانی دقیق باسکول (خواستهٔ مالک ۱۳-۱۱): ثبت/آپدیت/آپدیت قیمت
+    // عیناً همان باسکول می‌مانند — «۲ دقیقه پیش» روی آگهی چندسالهٔ قدیمی،
+    // یعنی قیمت تازه است و خریدار گمراه می‌شود.
+    const priceUpdatedAt = this.bkDate(m.last_price_update);
     await this.prisma.product.upsert({
       where: { id: m.id },
       update: {
         productName: name,
         description: aimchifyBrandMentions((m.description ?? '').trim()),
+        priceUpdatedAt,
+        // پنجرهٔ اعتبار ۳روزه برای آگهی باسکولی بی‌معناست — قیمتش ماه‌ها/سال‌ها
+        // قدیمی است و بج «قیمت منقضی شده» پنل بلافاصله می‌افتاد؛ کهنگی عمومی
+        // با متن قرمز «بیش از یک ماه آپدیت نشده» در صفحهٔ آگهی گفته می‌شود.
+        // با اولین ویرایش واقعی فروشنده، پنجرهٔ انتخابی خودش فعال می‌شود.
+        priceValidityDays: 3650,
         categoryId,
         subCategoryId: m.sub_category_id,
         unit: m.unit || 'کیلوگرم',
@@ -1055,6 +1065,8 @@ export class ImporterService {
         productName: name,
         slug: `فروش-عمده-${name}-${m.id}`,
         description: aimchifyBrandMentions((m.description ?? '').trim()),
+        priceUpdatedAt,
+        priceValidityDays: 3650,
         categoryId,
         subCategoryId: m.sub_category_id,
         unit: m.unit || 'کیلوگرم',

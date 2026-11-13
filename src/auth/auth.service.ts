@@ -199,7 +199,15 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     const p = this.prisma;
 
     // ۱) رابطه‌های سادهٔ مالکیت — فقط جابه‌جایی مالک (بدون قید یکتا)
-    await p.product.updateMany({ where: { userId: sid }, data: { userId: kid } });
+    // آگهی‌ها با دستور خام جابه‌جا می‌شوند: updateMany عادی @updatedAt را به
+    // «اکنون» می‌گذارد و ادغام اکانت، مهرهای دقیق باسکول (ثبت/آپدیت/قیمت)
+    // را پاک می‌کرد (خواستهٔ مالک ۱۳-۱۱: مهرهای آگهی عین باسکول بمانند).
+    await p.$runCommandRaw({
+      update: 'Product',
+      updates: [
+        { q: { user_id: { $oid: sid } }, u: { $set: { user_id: { $oid: kid } } } },
+      ],
+    });
     await p.buyRequest.updateMany({ where: { userId: sid }, data: { userId: kid } });
     await p.chargeOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
     await p.packageOrder.updateMany({ where: { userId: sid }, data: { userId: kid } });
