@@ -536,7 +536,7 @@ export class FollowService {
     const [userRows, catMap, locNames, gallery] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
+        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true, avatarUrl: true },
       }),
       this.categories.getNameMap(), // کش‌شده
       this.locations.getNames(provinceIds, cityIds),
@@ -574,6 +574,7 @@ export class FollowService {
           lastName: seller?.lastName ?? UNKNOWN,
           activePakageType: 0,
           isVerified: seller?.isVerified ?? false,
+          avatarUrl: seller?.avatarUrl ?? null,
         },
         isLadder: p.isLadder,
         isElevated: p.isElevated,

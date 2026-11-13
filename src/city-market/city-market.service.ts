@@ -37,7 +37,7 @@ const fmtDate = (d: Date | null | undefined): string =>
 
 /** نام‌های join‌شده برای نمایش — عین NameMaps در products.service */
 interface NameMaps {
-  users: Map<string, { userName: string; firstName: string; lastName: string; isVerified: boolean }>;
+  users: Map<string, { userName: string; firstName: string; lastName: string; isVerified: boolean; avatarUrl: string | null }>;
   cats: Map<number, string>;
   provs: Map<number, string>;
   cities: Map<number, string>;
@@ -156,7 +156,7 @@ export class CityMarketService {
     const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
+        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true, avatarUrl: true },
       }),
       this.categories.getNameMap(),
       this.locations.getNames(provinceIds, cityIds),
@@ -165,7 +165,7 @@ export class CityMarketService {
     const users = new Map(
       userRows.map((u) => [
         u.id,
-        { userName: u.userName, firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified },
+        { userName: u.userName, firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified, avatarUrl: u.avatarUrl },
       ]),
     );
     const cats = new Map<number, string>();
@@ -242,6 +242,7 @@ export class CityMarketService {
         lastName: seller?.lastName ?? UNKNOWN,
         activePakageType: 0,
         isVerified: seller?.isVerified ?? false,
+        avatarUrl: seller?.avatarUrl ?? null,
       },
       isLadder: p.isLadder,
       isElevated: p.isElevated,

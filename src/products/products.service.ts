@@ -87,6 +87,9 @@ export interface ProductDto {
     lastName: string;
     activePakageType: 0;
     isVerified: boolean;
+    /** تصویر پروفایل فروشنده — در product-view کنار نام نمایش داده می‌شود
+     *  (خواستهٔ مالک ۱۴-۱۱)؛ اگر ست نشده باشد null و کلاینت آیکون می‌گذارد */
+    avatarUrl: string | null;
   };
   isLadder: boolean;
   isElevated: boolean;
@@ -115,7 +118,7 @@ const fmtDate = (d: Date | null | undefined): string =>
  * User↔Product با user_id)؛ این نام‌ها در لحظه خواندن ساخته می‌شوند.
  */
 interface NameMaps {
-  users: Map<string, { userName: string; firstName: string; lastName: string; isVerified: boolean }>;
+  users: Map<string, { userName: string; firstName: string; lastName: string; isVerified: boolean; avatarUrl: string | null }>;
   cats: Map<number, string>;
   provs: Map<number, string>;
   cities: Map<number, string>;
@@ -1386,7 +1389,7 @@ export class ProductsService {
     const [userRows, catMap, locNames] = await Promise.all([
       this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true },
+        select: { id: true, userName: true, firstName: true, lastName: true, isVerified: true, avatarUrl: true },
       }),
       this.categories.getNameMap(), // کش‌شده
       this.locations.getNames(provinceIds, cityIds),
@@ -1395,7 +1398,7 @@ export class ProductsService {
     const users = new Map(
       userRows.map((u) => [
         u.id,
-        { userName: u.userName, firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified },
+        { userName: u.userName, firstName: u.firstName, lastName: u.lastName, isVerified: u.isVerified, avatarUrl: u.avatarUrl },
       ]),
     );
     const cats = new Map<number, string>();
@@ -1472,6 +1475,7 @@ export class ProductsService {
         lastName: seller?.lastName ?? UNKNOWN,
         activePakageType: 0,
         isVerified: seller?.isVerified ?? false,
+        avatarUrl: seller?.avatarUrl ?? null,
       },
       isLadder: p.isLadder,
       isElevated: p.isElevated, // فروشنده ویژه — denorm از بسته فعال (۳۰-۱۰)
