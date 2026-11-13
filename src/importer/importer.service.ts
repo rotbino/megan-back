@@ -716,11 +716,15 @@ export class ImporterService {
           });
           if (res.ok) {
             await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: res.file.url } });
+            this.step(job, 'avatar', 'done');
             this.log(job, 'success', 'آواتار دانلود و در پوشهٔ خود کاربر ذخیره شد');
           } else {
+            // ردشدن گیرایی نیست — کاربر بدون آواتار ادامه می‌یابد (حرف اول نام)
+            this.step(job, 'avatar', 'done');
             this.log(job, 'warn', `آواتار رد شد (${res.reason})`);
           }
         } else {
+          this.step(job, 'avatar', 'done');
           this.log(job, 'warn', 'دانلود/پردازش آواتار ناموفق بود — رد شد');
         }
       } else {
