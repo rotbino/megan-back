@@ -119,6 +119,32 @@ function facetCount(batch: Record<string, unknown>[], key: string): number {
   return Number(arr?.[0]?.n ?? 0);
 }
 
+/**
+ * تاریخ خروجی $runCommandRaw — Prisma نتیجه را به‌صورت Extended JSON
+ * برمی‌گرداند (تاریخ = {$date: "…"}) نه Date جاوااسکریپت؛ هر دو شکل +
+ * رشتهٔ خام ISO پذیرفته می‌شوند.
+ */
+function toIso(v: unknown): string | null {
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'string' && v) return v;
+  if (v && typeof v === 'object') {
+    const d = (v as { $date?: unknown }).$date;
+    if (typeof d === 'string') return d;
+    if (d instanceof Date) return d.toISOString();
+  }
+  return null;
+}
+
+/** ObjectId خروجی $runCommandRaw — EJSON: {$oid: "…"}؛ هر دو شکل پذیرفته می‌شود */
+function toId(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object') {
+    const oid = (v as { $oid?: unknown }).$oid;
+    if (typeof oid === 'string') return oid;
+  }
+  return String(v);
+}
+
 @Injectable()
 export class ImportedUsersService {
   private readonly logger = new Logger(ImportedUsersService.name);
@@ -301,10 +327,10 @@ export class ImportedUsersService {
     const cityName = new Map(cities.filter((c) => c.type === 'city').map((c) => [c.buskolId, c.name]));
 
     const rows: ImportedUserRow[] = rawRows.map((r) => {
-      const bd = r.last_login_at instanceof Date ? (r.last_login_at as Date) : null;
-      const cd = r.created_at instanceof Date ? (r.created_at as Date) : null;
+      const lastLoginIso = toIso(r.last_login_at);
+      const createdIso = toIso(r.created_at) ?? '';
       return {
-        id: String(r._id),
+        id: toId(r._id),
         phone: String(r.phone ?? ''),
         userName: String(r.user_name ?? ''),
         bUserName: (r.b_user_name as string) ?? null,
@@ -322,8 +348,8 @@ export class ImportedUsersService {
         cityId: (r.city_id as number) ?? null,
         provinceName: provName.get((r.province_id as number) ?? -1) ?? null,
         cityName: cityName.get((r.city_id as number) ?? -1) ?? null,
-        createdAt: cd ? cd.toISOString() : '',
-        lastLoginAt: bd ? bd.toISOString() : null,
+        createdAt: createdIso,
+        lastLoginAt: lastLoginIso,
         b: asBUserData(r.b),
         productsCount: Number(r.productsCount ?? 0),
       };
