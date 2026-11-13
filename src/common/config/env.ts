@@ -128,6 +128,25 @@ export const storage = Object.freeze({
   ARVAN_ACCESS_KEY: process.env.ARVAN_ACCESS_KEY || '',
   ARVAN_SECRET_KEY: process.env.ARVAN_SECRET_KEY || '',
   ARVAN_BUCKET_NAME: process.env.ARVAN_BUCKET_NAME || '',
+
+  /**
+   * آینهٔ لوکال درایور ابری (خواستهٔ مالک ۱۳-۱۱): هر بایتی که روی آروان
+   * می‌نشیند، همان لحظه با «همان کلید» (همان مسیر و همان نام فایل) زیر
+   * UPLOAD_PATH هم کپی می‌شود — بدون استثنا (آپلود عادی، ایمپورتر، تعویض
+   * درجا، چت، پشتیبانی، همه از یک درایور می‌گذرند). نوشتن آینه بهترین‌حال
+   * است: خطای دیسک هرگز آپلود اصلی (آروان) را نمی‌شکند؛ فقط هشدار لاگ
+   * می‌شود. پیش‌فرض روشن — با STORAGE_MIRROR_LOCAL=false خاموش می‌شود.
+   */
+  MIRROR_LOCAL: bool(process.env.STORAGE_MIRROR_LOCAL, true),
+
+  /**
+   * واترمارک دائمی تصاویر آگهی — موقتاً خاموش (خواستهٔ مالک ۱۳-۱۱):
+   * «فعلاً واترمارک رو کدش رو غیرفعال کن… با یه فلگ فالزش کن». کد دست
+   * نخورده و با WATERMARK_ENABLED=true (یا برداشتن این پیش‌فرض) دوباره
+   * فعال می‌شود. وقتی خاموش است هیچ فایلی (آروان و آینهٔ لوکال) واترمارک
+   * نمی‌گیرد.
+   */
+  WATERMARK_ENABLED: bool(process.env.WATERMARK_ENABLED, false),
 });
 
 /** فایل‌های staged (relatedId=null) قدیمی‌تر از این — توسط reaper حذف می‌شوند. */

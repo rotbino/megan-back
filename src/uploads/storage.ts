@@ -1,12 +1,14 @@
 /**
  * ─── درایورهای ذخیره‌سازی ─────────────────────────────────────────────────────
- * یک اینترفیس کوچک، دو پیاده‌سازی (پورت از imach-back):
+ * یک اینترفیس کوچک، سه پیاده‌سازی (پورت از imach-back):
  *
  *   • ArvanStorage — object storage سازگار S3 (آروان). اشیا public-read با
  *     هدر کش immutable نوشته می‌شوند تا کلاینت بایت‌ها را مستقیم از CDN بگیرد —
  *     API هرگز بدنه فایل را پروکسی نمی‌کند (سرعت).
  *   • LocalStorage — دیسک ساده زیر UPLOAD_PATH با @fastify/static.
  *     «بعدا با کمترین هزینه قابل سوییچ باشه» یعنی یک env، نه بازنویسی.
+ *   • MirroredStorage — آروان + کپی همزمان روی دیسک با همان کلید
+ *     (خواستهٔ مالک ۱۳-۱۱: بک‌آپ/بانک کاری لوکال فولدر uploads).
  *
  * سطح درایور عمداً حداقلی است (put/delete) تا افزودن S3/MinIO/B2 بعدا یک فایل
  * باشد. جدول File مقدار storageKey را نگه می‌دارد تا تعویض پروایدر هیچ ردیفی
@@ -190,7 +192,58 @@ class LocalStorage implements StorageDriver {
   }
 }
 
+// ─── آینهٔ لوکال درایور ابری (خواستهٔ مالک ۱۳-۱۱) ─────────────────────────────
+// «موقع ایمپورت غیر از اینکه تصاویر بصورت آنلاین در ابرآروان ذخیره میشه، در
+// محل ذخیرهٔ کد بک‌اند هم ذخیره بشه در فولدر آپلودز، دقیقاً همون مسیر و همون
+// اسم.» این پوشش دقیقاً همین کار را می‌کند: درایور اصلی (آروان) مرجع URL و
+// منبع حقیقت است؛ همان بایت‌ها با همان کلید (مسیر/نام فایل) روی دیسک زیر
+// UPLOAD_PATH هم می‌نشینند. چون از buildStorage می‌گذرد، «همهٔ» نوشتن‌ها را
+// می‌گیرد: آپلود عادی کاربر، ingestExternal ایمپورتر (گالری + آواتار)،
+// تعویض درجای تصاویر آگهی‌ها، پیوست چت/پشتیبانی و … — نه فقط ایمپورت.
+//
+// سیاست خطا: آینه بهترین‌حال است — خطای دیسک هرگز عملیات اصلی را نمی‌شکند
+// (آپلود موفق می‌ماند، فقط هشدار لاگ می‌شود)؛ حذف/پاک‌سازی هر دو طرف را
+// «بی‌صدا» بهترین‌حال انجام می‌دهد تا نسخهٔ مرده روی دیسک نماند.
+
+class MirroredStorage implements StorageDriver {
+  constructor(
+    private readonly primary: StorageDriver,
+    private readonly mirror: LocalStorage,
+  ) {}
+
+  async put(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<string> {
+    // اول ابر — URL مرجع همین است؛ اگر ابر شکست خورد کل عملیات شکست خورده
+    const url = await this.primary.put(key, body, contentType, cacheControl);
+    // بعد دیسک — بهترین‌حال؛ مالک باید از هشدار باخبر شود ولی آپلود سالم بماند
+    try {
+      await this.mirror.put(key, body, contentType);
+    } catch (err) {
+      console.warn(`[storage] آینهٔ لوکال نتوانست بنویسد «${key}»: ${(err as Error).message}`);
+    }
+    return url;
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.primary.delete(key);
+    await this.mirror.delete(key).catch(() => undefined);
+  }
+
+  urlToKey(url: string): string | null {
+    // URLهای ثبت‌شده در DB همیشه مال درایور اصلی‌اند؛ آینه فقط خوانده می‌شود
+    return this.primary.urlToKey(url) ?? this.mirror.urlToKey(url);
+  }
+
+  async deletePrefix(prefix: string): Promise<number> {
+    const deleted = await this.primary.deletePrefix(prefix);
+    await this.mirror.deletePrefix(prefix).catch(() => 0);
+    return deleted;
+  }
+}
+
 /** در بوت ساخته می‌شود؛ STORAGE_DRIVER=arvan بدون credentials فوری می‌شکند. */
 export function buildStorage(): StorageDriver {
-  return storage.DRIVER === 'local' ? new LocalStorage() : new ArvanStorage();
+  if (storage.DRIVER === 'local') return new LocalStorage();
+  const arvan = new ArvanStorage();
+  // آینهٔ لوکال (پیش‌فرض روشن) — بایت‌ها هم روی آروان هم زیر UPLOAD_PATH
+  return storage.MIRROR_LOCAL ? new MirroredStorage(arvan, new LocalStorage()) : arvan;
 }
