@@ -36,6 +36,7 @@ export class SingleImportDto {
   phone?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(500)
@@ -46,18 +47,22 @@ export class ListImportDto {
   @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
   adminPhone!: string;
 
+  /** @Type(() => Number) — ورودی رشته‌ای (تست با curl/سواگر) هم پذیرفته می‌شود */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   offset?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(200)
   limit?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(500)

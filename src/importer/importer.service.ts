@@ -151,38 +151,130 @@ export class ImporterService {
    * دیتابیس منبع — کالکشن user-buskool در «همان دیتابیس» ایمچ (خواستهٔ مالک
    * ۱۳-۱۱: جدول را خودش با دامپ کاربران باسکول ساخته؛ دیگر دیتابیس جانبی
    * لازم نیست). خواندن با $runCommandRaw تا شکل سندهای دامپ (فیلدهای اضافی)
-   * مهم نباشد و فقط user_name/phone خوانده شود.
+   * مهم نباشد و فقط ستون‌های یوزرنیم/تلفن خوانده شود.
    */
   private sourceTable() {
     return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
   }
 
-  /** فیلدهای یوزرنیم/تلفن کالکشن منبع — مطابق دامپ باسکول */
-  private sourceFields() {
+  /** کش ستون‌های تشخیص‌داده‌شدهٔ کالکشن منبع — هر جدول یک‌بار در عمر پروسه */
+  private sourceColumnsCache: { table: string; userName: string; phone: string; keys: string[] } | null = null;
+
+  /**
+   * ستون‌های یوزرنیم/تلفن کالکشن منبع — ترتیب اولویت: env صریح، تشخیص خودکار
+   * از کلیدهای سند نمونه، پیش‌فرض. ریشهٔ باگ ۱۳-۱۱: دامپ واقعی باسکول فیلد
+   * «userName» (camelCase) دارد ولی پیش‌فرض قبلی user_name بود — find سند را
+   * برمی‌گرداند ولی فیلتر JS همهٔ ردیف‌ها را می‌انداخت و خطای «ردیفی نبود»
+   * می‌داد (با کالکشن ۵۵هزارتایی!). با تشخیص خودکار، جورشدن نام ستون دیگر
+   * به حافظهٔ ما و مالک وابسته نیست.
+   */
+  private async sourceFields(): Promise<{ userName: string; phone: string; keys: string[] }> {
+    const table = this.sourceTable();
+    if (this.sourceColumnsCache?.table !== table) {
+      let userName = 'userName';
+      let phone = 'phone';
+      let keys: string[] = [];
+      try {
+        const res = (await this.prisma.$runCommandRaw({
+          find: table,
+          limit: 1,
+          batchSize: 1,
+        })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+        const doc = res?.cursor?.firstBatch?.[0];
+        if (doc) {
+          keys = Object.keys(doc);
+          const userKey =
+            ['userName', 'user_name', 'username'].find((k) => keys.includes(k)) ??
+            keys.find((k) => /^user[-_]?name$/i.test(k));
+          const phoneKey =
+            ['phone', 'mobile', 'phone_number'].find((k) => keys.includes(k)) ??
+            keys.find((k) => /^(phone|mobile|cell)[-_]?(number)?$/i.test(k));
+          if (userKey) userName = userKey;
+          if (phoneKey) phone = phoneKey;
+        }
+      } catch {
+        // کالکشن خالی/ناخوانا — پیش‌فرض‌ها می‌مانند؛ خطای واقعی در sourceRead دیده می‌شود
+      }
+      this.sourceColumnsCache = { table, userName, phone, keys };
+    }
+    const c = this.sourceColumnsCache;
     return {
-      userName: process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || 'user_name',
-      phone: process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || 'phone',
+      userName: process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim() || c.userName,
+      phone: process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim() || c.phone,
+      keys: c.keys,
     };
   }
 
-  /** خواندن دسته‌ای از کالکشن منبع، مرتب بر اساس یوزرنیم */
-  private async sourceRead(offset: number, limit: number): Promise<{ userName: string; phone: string | null }[]> {
-    const { userName: uf, phone: pf } = this.sourceFields();
+  /**
+   * خواندن دسته‌ای از کالکشن منبع، مرتب بر اساس _id (ایندکس‌دار). سورت روی
+   * ستون بی‌ایندکس (مثل userName) در آتلاس با «Sort exceeded memory limit
+   * 32MB» می‌ترکد — با skip بزرگ، بافر سورت به حد کل کالکشن می‌رسد (کاوش
+   * ۱۳-۱۱). rawIdx = جایگاه «سند خام» (قبل از حذف ردیف‌های بدون یوزرنیم)
+   * تا offset پیمایش همیشه روی سند خام بماند؛ rawCount هم برای همین است.
+   */
+  private async sourceRead(
+    offset: number,
+    limit: number,
+  ): Promise<{ rows: { userName: string; phone: string | null; rawIdx: number }[]; rawCount: number }> {
+    const { userName: uf, phone: pf } = await this.sourceFields();
     const res = (await this.prisma.$runCommandRaw({
       find: this.sourceTable(),
-      sort: { [uf]: 1 },
+      sort: { _id: 1 },
       skip: offset,
       limit,
       batchSize: limit,
+      // اگر روزی سورت روی ستون دیگری رفت، دیسک مجاز است تا حافظه نترکد
+      allowDiskUse: true,
       projection: { [uf]: 1, [pf]: 1 },
     })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
-    return (res?.cursor?.firstBatch ?? [])
-      .map((d) => {
+    const batch = res?.cursor?.firstBatch ?? [];
+    const rows = batch
+      .map((d, i) => {
         const userName = String(d[uf] ?? '').trim();
         const rawPhone = d[pf] == null ? '' : String(d[pf]).replace(/[^0-9]/g, '');
-        return { userName, phone: /^09\d{9}$/.test(rawPhone) ? rawPhone : null };
+        return { userName, phone: /^09\d{9}$/.test(rawPhone) ? rawPhone : null, rawIdx: offset + i };
       })
       .filter((r) => r.userName.length > 0);
+    return { rows, rawCount: batch.length };
+  }
+
+  /**
+   * پیام خطای خودتوضیح‌شونده برای خواندنِ خالی — سه حالت را از هم جدا می‌کند:
+   * کالکشن خالی/ناوجود، گذشته از پایان لیست، و ناهماهنگی نام ستون یوزرنیم
+   * (باگ ۱۳-۱۱: ۵۵هزار سند بود ولی «ردیفی نبود» می‌گرفتیم).
+   */
+  private async sourceEmptyError(offset: number, limit: number): Promise<string> {
+    const base = `ردیفی در کالکشن ${this.sourceTable()} از offset=${offset} نبود`;
+    try {
+      const { userName: uf } = await this.sourceFields();
+      const total = await this.sourceCount();
+      if (total === 0) {
+        return `${base} — کالکشن در دیتابیسی که برنامه به آن وصل است خالی است یا وجود ندارد (شمارش: ۰)`;
+      }
+      if (offset >= total) {
+        return `${base} — کل لیست ${total.toLocaleString('fa-IR')} ردیف است و offset=${offset} از پایان آن گذشته`;
+      }
+      const raw = (await this.prisma.$runCommandRaw({
+        find: this.sourceTable(),
+        sort: { _id: 1 },
+        skip: offset,
+        limit,
+        batchSize: limit,
+        allowDiskUse: true,
+      })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+      const batch = raw?.cursor?.firstBatch ?? [];
+      if (batch.length) {
+        const docKeys = Object.keys(batch[0]);
+        return (
+          `${base} — سند در این بازه هست (${batch.length} سند از ${total.toLocaleString('fa-IR')}) ` +
+          `ولی ستون یوزرنیم «${uf}» در سندها مقدار ندارد؛ کلیدهای سند اول: ${docKeys.slice(0, 15).join('، ')} — ` +
+          `نام درست را با IMPORT_SOURCE_USERNAME_COLUMN تنظیم کنید`
+        );
+      }
+      return `${base} — خواندن خام در این بازه خالی برگشت (کل کالکشن: ${total.toLocaleString('fa-IR')} سند)`;
+    } catch {
+      return `${base} — شاید به انتهای لیست رسیده‌اید`;
+    }
   }
 
   /** تعداد کل ردیف‌های کالکشن منبع */
@@ -197,6 +289,8 @@ export class ImporterService {
     table?: string;
     phoneColumn?: string;
     userNameColumn?: string;
+    /** کلیدهای واقعی سند نمونه — عیب‌یابی فوری ناهماهنگی نام ستون */
+    rawKeys?: string[];
     total?: number;
     imported?: number;
     failed?: number;
@@ -208,7 +302,8 @@ export class ImporterService {
       if (total === 0) {
         return { connected: false, table, reason: `کالکشن ${table} در دیتابیس فعلی خالی است یا وجود ندارد` };
       }
-      const [sample, imported, failed] = await Promise.all([
+      const fields = await this.sourceFields();
+      const [{ rows: sample }, imported, failed] = await Promise.all([
         this.sourceRead(0, 5),
         this.prisma.user.count({ where: { bUserName: { not: null } } }),
         this.prisma.user.count({ where: { failedImport: true } }),
@@ -216,8 +311,9 @@ export class ImporterService {
       return {
         connected: true,
         table,
-        phoneColumn: this.sourceFields().phone,
-        userNameColumn: this.sourceFields().userName,
+        phoneColumn: fields.phone,
+        userNameColumn: fields.userName,
+        rawKeys: fields.keys,
         total,
         imported,
         failed,
@@ -261,16 +357,16 @@ export class ImporterService {
 
     let first: { offset: number; userName: string } | null = null;
     let remaining = 0;
-    let scanned = 0;
+    let scanned = 0; // پیمایش روی «سند خام» — ردیف‌های بدون یوزرنیم هم جلو می‌روند
     while (scanned < total) {
-      const rows = await this.sourceRead(scanned, 5000);
-      if (!rows.length) break;
-      for (const [i, r] of rows.entries()) {
+      const { rows, rawCount } = await this.sourceRead(scanned, 5000);
+      if (!rawCount) break;
+      for (const r of rows) {
         if (imported.has(r.userName)) continue;
         remaining++;
-        if (!first) first = { offset: scanned + i, userName: r.userName };
+        if (!first) first = { offset: r.rawIdx, userName: r.userName };
       }
-      scanned += rows.length;
+      scanned += rawCount;
     }
 
     if (!first) {
@@ -296,7 +392,7 @@ export class ImporterService {
   /** شمارهٔ تلفن از کالکشن منبع — پرکردن خودکار شمارهٔ تستر تک‌کاربره */
   private async sourcePhoneFor(userName: string): Promise<string | null> {
     try {
-      const { userName: uf, phone: pf } = this.sourceFields();
+      const { userName: uf, phone: pf } = await this.sourceFields();
       const res = (await this.prisma.$runCommandRaw({
         find: this.sourceTable(),
         filter: { [uf]: userName },
@@ -435,9 +531,9 @@ export class ImporterService {
     // خواندن لیست از کالکشن user-buskool — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 5;
-    const rows = await this.sourceRead(offset, limit);
+    const { rows } = await this.sourceRead(offset, limit);
     if (!rows.length) {
-      throw new Error(`ردیفی در کالکشن ${this.sourceTable()} از offset=${offset} نبود — شاید به انتهای لیست رسیده‌اید`);
+      throw new Error(await this.sourceEmptyError(offset, limit));
     }
 
     job.totalUsers = rows.length;
