@@ -97,15 +97,28 @@ export class BuskoolClient {
 
 // ─── تایپ‌های پاسخ (فقط فیلدهای مصرفی) ─────────────────────────────────────
 
+/** عنوان بستهٔ باسکول از کد active_pakage_type — همان نگاشت پکیج‌های آیمچ
+ *  (۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله)؛ فقط برای «نمایش» در داده‌های b */
+export const BK_PACKAGE_TITLES: Record<number, string> = {
+  0: 'رایگان',
+  1: 'دوماهه',
+  2: 'شش‌ماهه',
+  3: 'یک‌ساله',
+};
+
 export interface BkProfileResp {
   profile: {
     id: number;
     description: string | null;
     activity_domain: string | null;
+    /** URL مستقیم عکس پروفایل — در پاسخ load_profile_by_user_name (نمونهٔ
+     *  مالک ۱۳-۱۱)؛ منبع اصلی آواتار ایمپورتر است */
     profile_photo: string | null;
     address: string | null;
+    postal_code?: string | null;
     is_company: number;
     company_name: string | null;
+    company_register_code?: string | null;
     confirmed: number;
     myuser_id: number;
   } | null;
@@ -118,12 +131,29 @@ export interface BkProfileResp {
     sex: string | null;
     province: string | null;
     city: string | null;
+    /** «1»=تولیدی/… (رشتهٔ عددی باسکول) */
+    activity_type?: string | null;
     is_verified: number;
     is_buyer: number;
     is_seller: number;
+    is_blocked?: number;
+    wallet_balance?: number;
+    phone_view_permission?: string;
+    category_id?: number | null;
     active_pakage_type: number;
+    customer_status?: string;
+    support_status?: string;
+    coming_from?: string | null;
   };
-  relateds?: { name?: string }[];
+  /** عکس‌های مرتبط — آرایهٔ URL رشته‌ای (نمونهٔ مالک ۱۳-۱۱)؛ برای سازگاری
+   *  با پاسخ‌های قدیمی، شکل {name} هم پذیرفته می‌شود */
+  relateds?: (string | { name?: string })[];
+  /** دامنهٔ فعالیت به‌صورت نام (مثل «تنقلات و شیرینی») — بالاتر از profile */
+  activity_domain?: string | null;
+  /** ibp باسکول (نمونهٔ مالک: false) — سوابق رفتاری، عیناً ذخیره می‌شود */
+  ibp?: boolean;
+  certificates?: unknown[];
+  meta?: unknown[];
 }
 
 export interface BkStatsResp {
@@ -137,7 +167,7 @@ export interface BkStatsResp {
       is_verified: number;
     };
     rating_info: { total_count: number; avg_rating_score: number };
-  };
+  } | null;
 }
 
 export interface BkCommentsResp {

@@ -3,7 +3,14 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../common/api-response';
 import { ImporterService } from './importer.service';
-import { CleanupDto, ListImportDto, SingleImportDto, StopJobDto } from './dto';
+import { ImportedUsersService } from './imported-users.service';
+import {
+  CleanupDto,
+  ListImportDto,
+  MigrateBDto,
+  SingleImportDto,
+  StopJobDto,
+} from './dto';
 
 /**
  * ایمپورتر باسکول — ابزار داخلی ادمین برای مهاجرت داده از buskool.com.
@@ -14,7 +21,10 @@ import { CleanupDto, ListImportDto, SingleImportDto, StopJobDto } from './dto';
 @Throttle({ default: { limit: 60, ttl: 60_000 } })
 @Controller('importer')
 export class ImporterController {
-  constructor(private readonly importer: ImporterService) {}
+  constructor(
+    private readonly importer: ImporterService,
+    private readonly importedUsers: ImportedUsersService,
+  ) {}
 
   @Get('ping')
   @ApiOperation({ summary: 'وضعیت ایمپورتر — اتصال، تاخیر باسکول، کوکی، مشغولی' })
@@ -44,6 +54,15 @@ export class ImporterController {
   @ApiOperation({ summary: 'پاک‌سازی کامل دیتابیس — فقط حساب ادمین می‌ماند (خطرناک)' })
   async cleanup(@Body() dto: CleanupDto) {
     return ok(await this.importer.cleanup(dto.adminPhone));
+  }
+
+  @Post('migrate-b')
+  @ApiOperation({
+    summary:
+      'مهاجرت رکوردهای قدیمی به ساختار b — فیلدهای b_* پراکنده → سند یکپارچه + صفر شدن activePakageType کپی‌شده از باسکول',
+  })
+  async migrateB(@Body() dto: MigrateBDto) {
+    return ok(await this.importedUsers.migrateB(dto.adminPhone));
   }
 
   @Post('single')

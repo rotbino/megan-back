@@ -87,10 +87,33 @@ model User {
   /// پیاپی کل جاب متوقف می‌شود.
   failedImport Boolean  @default(false) @map("failed_import")
 
-  /// بسته فعال — عین active_pakage_type باسکول:
-  /// ۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله. انقضای گذشته عملاً رایگان است
-  /// (effectivePakageType در پکیج‌سرویس محاسبه می‌شود؛ فیلد دست‌نخورده می‌ماند
-  /// تا سابقه پس از تمدید دوباره زنده شود).
+  /// 📦 داده‌های باسکول این کاربر — «سند رفتار کاربر در باسکول» (خواستهٔ مالک
+  /// ۱۳-۱۱): همهٔ فیلدهای مختص باسکول که برای بازاریابی/تحلیل لازم است، در
+  /// همین یک فیلد JSON با کلیدهای زیر نگه داشته می‌شوند (به‌جای پخش‌کردن
+  /// فیلدهای b_* در جای‌جای مدل):
+  ///   source:'buskool', userName, userId, profileId,
+  ///   premium:{ isPremium, packageType, packageTitle }   ← ویژه بودن در باسکول
+  ///     ⚠️ ویژه بودنِ باسکول هرگز به activePakageType آیمچ کپی نمی‌شود —
+  ///     کاربر فقط با پرداخت واقعی در آیمچ ویژه می‌شود (خواستهٔ مالک)؛ این
+  ///     داده فقط برای شناسایی «پیشنهاد تخفیف به ویژه‌های سابق باسکول» است.
+  ///   isVerified/isBuyer/isSeller/isBlocked, walletBalance,
+  ///   phoneViewPermission, categoryId, customerStatus, supportStatus,
+  ///   comingFrom, activityType, activityDomain, sex, province, city,
+  ///   address, postalCode, isCompany, companyName, companyRegisterCode,
+  ///   confirmed, relateds[], profilePhotoUrl, descriptionRaw,
+  ///   descriptionIsAuto, responseRate, reputationScore, productsCount,
+  ///   ratingCount, ratingAvg, ibp, createdAt (ثبت‌نام باسکول),
+  ///   importedAt, contactedAt (CRM — تماس/دعوت مالک)
+  /// فیلتر/سورت صفحهٔ «مدیریت کاربران ایمپورت‌شده» با کوئری خام مونگو روی
+  /// همین مسیرها (b.premium.isPremium و…) انجام می‌شود.
+  b Json?
+
+  /// بسته فعال آیمچ — ۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله؛ فقط با پرداخت
+  /// واقعی در آیمچ پر می‌شود. ⚠️ ایمپورتر باسکول هرگز این فیلد را پر نمی‌کند
+  /// (خواستهٔ مالک ۱۳-۱۱) — بستهٔ باسکول در b.premium نگه داشته می‌شود تا بعداً
+  /// با تماس/تخفیف، خود کاربر آن را بخرد؛ effectivePakageType در
+  /// پکیج‌سرویس محاسبه می‌شود (انقضای گذشته عملاً رایگان است؛ فیلد
+  /// دست‌نخورده می‌ماند تا سابقه پس از تمدید دوباره زنده شود).
   activePakageType Int        @default(0) @map("active_pakage_type")
   /// انقضای بسته فعال — null یعنی هیچ بسته‌ای خریداری نشده
   packageExpiresAt DateTime?  @map("package_expires_at")

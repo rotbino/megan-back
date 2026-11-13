@@ -22,6 +22,14 @@
  *     با همان کلیدهای استاندارد profile embedded ذخیره می‌شوند؛ متن خودکار
  *     باسکول (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک خودش
  *     (lib/seller-text فرانت) را نشان می‌دهد، نه کپی باسکول را.
+ *   • سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱): همهٔ فیلدهای ارزشمند باسکول
+ *     (ویژه بودن + نوع بسته، آمار، دامنهٔ فعالیت، کیف پول، coming_from و…)
+ *     در فیلد JSON «b» ذخیره می‌شود — b-user-data.ts. ⚠️ ویژه بودن باسکول
+ *     هرگز به activePakageType آیمچ کپی نمی‌شود؛ کاربر در آیمچ رایگان
+ *     می‌ماند تا خودش با پرداخت واقعی ویژه شود.
+ *   • آواتار: منبع اصلی فیلد profile_photo در پاسخ load_profile_by_user_name
+ *     است (کوکی همان‌جا هست)؛ اندپوینت get_user_last_confirmed_profile_photo
+ *     فقط fallback است — عکس «تأییدنشده»ها را برنمی‌گرداند.
  *   • همهٔ درخواست‌های باسکول از صف BuskoolClient با فاصلهٔ BUSKOOL_DELAY_MS.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
@@ -42,6 +50,7 @@ import {
   type BkStatsResp,
 } from './buskool.client';
 import { importerAdminPhone } from './dto';
+import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
 
 // ─── تایپ‌های جاب (قرارداد فرانت) ───────────────────────────────────────────
 
@@ -525,29 +534,80 @@ export class ImporterService {
     // (users/updateProfile) و کاتالوگ عمومی می‌خواند (getSeller)؛ متن
     // خودکار باسکول (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن پارامتریک
     // آیمچ را نشان دهد (lib/seller-text در فرانت).
-    const businessDesc = isBuskoolAutoDesc(pf?.description)
-      ? null
-      : (pf?.description ?? '').trim() || null;
+    const descAuto = isBuskoolAutoDesc(pf?.description);
+    const businessDesc = descAuto ? null : (pf?.description ?? '').trim() || null;
+
+    // ── سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱) ──
+    // ویژه بودن باسکول فقط اینجا ثبت می‌شود — هرگز به activePakageType
+    // آیمچ کپی نمی‌شود؛ کاربر در آیمچ رایگان می‌ماند تا خودش با پرداخت
+    // واقعی ویژه شود (بعداً با تماس/تخفیف دعوتش می‌کنیم).
+    // در ایمپورت مجدد، مهرهای CRM (contactedAt) و تاریخ اولین ایمپورت
+    // (importedAt) از سند قبلی حفظ می‌شوند.
+    const prevDoc = await this.prisma.user.findFirst({
+      where: { userName },
+      select: { b: true },
+    });
+    const prevB = asBUserData(prevDoc?.b);
+    const bkPackageType = st?.active_package_type ?? ui.active_pakage_type ?? 0;
+    const bkPremium = bkPackageType > 0;
+    const relatedUrls = (profile.relateds ?? [])
+      .map((r) => (typeof r === 'string' ? r.trim() : (r?.name ?? '').trim()))
+      .filter(Boolean);
+    const bData: BUserData = {
+      source: 'buskool',
+      userName,
+      userId: ui.id,
+      profileId: pf?.id ?? null,
+      premium: {
+        isPremium: bkPremium,
+        packageType: bkPackageType,
+        packageTitle: bkPackageTitle(bkPackageType),
+      },
+      isVerified: ui.is_verified === 1,
+      isBuyer: ui.is_buyer === 1,
+      isSeller: ui.is_seller === 1,
+      isBlocked: (ui.is_blocked ?? 0) === 1,
+      walletBalance: ui.wallet_balance ?? 0,
+      phoneViewPermission: ui.phone_view_permission ?? null,
+      categoryId: ui.category_id ?? null,
+      customerStatus: ui.customer_status ?? null,
+      supportStatus: ui.support_status ?? null,
+      comingFrom: ui.coming_from ?? null,
+      activityType: ui.activity_type ?? null,
+      activityDomain: profile.activity_domain ?? pf?.activity_domain ?? null,
+      sex: ui.sex ?? null,
+      province: ui.province ?? null,
+      city: ui.city ?? null,
+      address: pf?.address ?? null,
+      postalCode: (pf?.postal_code ?? '') || null,
+      isCompany: pf?.is_company === 1 || Boolean((pf?.company_name ?? '').trim()),
+      companyName: (pf?.company_name ?? '').trim(),
+      companyRegisterCode: (pf?.company_register_code ?? '') || null,
+      confirmed: pf?.confirmed === 1,
+      relateds: relatedUrls,
+      profilePhotoUrl: (pf?.profile_photo ?? '') || null,
+      descriptionRaw: (pf?.description ?? '') || null,
+      descriptionIsAuto: descAuto,
+      responseRate: st?.response_rate ?? null,
+      reputationScore: st?.reputation_score ?? null,
+      productsCount: st?.products_count ?? null,
+      ratingCount: statsResp?.statistics?.rating_info?.total_count ?? null,
+      ratingAvg: statsResp?.statistics?.rating_info?.avg_rating_score ?? null,
+      ibp: profile.ibp === true,
+      createdAt: this.bkDate(ui.created_at)?.toISOString() ?? null,
+      importedAt: prevB?.importedAt ?? new Date().toISOString(),
+      contactedAt: prevB?.contactedAt ?? null,
+    };
 
     // فیلدهای نمایشی پروفایل با «همان کلیدهای استاندارد» فرم ویرایش پروفایل
     // آیمچ (profile embedded: address/isCompany/companyName/activityDomain)
     // ذخیره می‌شوند تا کاتالوگ عمومی، دفتر خرید و فرم ویرایش، دادهٔ باسکول
-    // را «در جای خودش» ببینند؛ پیشوند b فقط برای فیلدهای مختص باسکول
-    // (شناسه‌ها/اعتبار) می‌ماند (خواستهٔ مالک ۱۳-۱۱).
+    // را «در جای خودش» ببینند؛ داده‌های مختص باسکول همه در b است.
     const profileJson = {
-      bUserId: ui.id,
-      bProfileId: pf?.id ?? null,
       address: pf?.address ?? null,
       isCompany: pf?.is_company === 1 || Boolean((pf?.company_name ?? '').trim()),
       companyName: (pf?.company_name ?? '').trim(),
-      activityDomain: pf?.activity_domain ?? null,
-      bConfirmed: pf?.confirmed === 1,
-      bRelateds: (profile.relateds ?? []).map((r) => r?.name ?? '').filter(Boolean),
-      bResponseRate: st?.response_rate ?? null,
-      bReputationScore: st?.reputation_score ?? null,
-      bProductsCount: st?.products_count ?? null,
-      importedFrom: 'buskool',
-      importedAt: new Date().toISOString(),
+      activityDomain: profile.activity_domain ?? pf?.activity_domain ?? null,
     };
 
     const user = await this.prisma.user.upsert({
@@ -559,10 +619,13 @@ export class ImporterService {
         isVerified: ui.is_verified === 1,
         isBuyer: ui.is_buyer === 1,
         isSeller: ui.is_seller === 1 || true,
-        activePakageType: st?.active_package_type ?? ui.active_pakage_type ?? 0,
+        // ⚠️ activePakageType عمداً دست نمی‌خورد — ویژه شدن باسکول فقط در
+        // b.premium ثبت می‌شود؛ در آیمچ فقط پرداخت واقعی کاربر را ویژه می‌کند
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        // سند رفتار باسکول — همهٔ فیلدهای ارزشمند در یک JSON (خواستهٔ مالک)
+        b: bData as object,
         // دربارهٔ کسب‌وکار در جای خودش (خواستهٔ مالک ۱۳-۱۱) — همان ستونی که
         // کاتالوگ عمومی و فرم ویرایش می‌خوانند
         businessDesc,
@@ -580,16 +643,23 @@ export class ImporterService {
         isVerified: ui.is_verified === 1,
         isBuyer: ui.is_buyer === 1,
         isSeller: true,
-        activePakageType: st?.active_package_type ?? ui.active_pakage_type ?? 0,
         provinceId: provinceLoc?.buskolId ?? null,
         cityId: cityLoc?.buskolId ?? null,
         profile: profileJson as object,
+        b: bData as object,
         businessDesc,
         bUserName: userName,
         createdAt: this.bkDate(ui.created_at) ?? new Date(),
       },
     });
     this.step(job, 'profile', 'done');
+    if (bkPremium) {
+      this.log(
+        job,
+        'info',
+        `در باسکول ویژه بوده (بستهٔ ${bData.premium.packageTitle}) — فقط در داده‌های باسکولی ثبت شد؛ در آیمچ رایگان می‌ماند تا خودش پرداخت کند`,
+      );
+    }
     this.log(
       job,
       'info',
@@ -604,15 +674,29 @@ export class ImporterService {
     );
 
     // ── ۲. آواتار ──
+    // منبع اصلی (خواستهٔ مالک ۱۳-۱۱): فیلد profile_photo در پاسخ
+    // load_profile_by_user_name — همان درخواستی که برای پروفایل زده‌ایم و
+    // کوکی باسکول رویش هست (نمونهٔ پاسخ: URL مستقیم profile-photos آروان).
+    // اندپوینت جداگانهٔ get_user_last_confirmed_profile_photo فقط fallback
+    // است — برای کاربرانی که عکسشان هنوز «تأییدشده» نیست خالی برمی‌گردد و
+    // همین باعث می‌شد آواتار برخی کاربران رد شود.
     this.step(job, 'avatar', 'active');
     try {
-      const av: BkAvatarResp = await bk.call('/get_user_last_confirmed_profile_photo', { user_id: ui.id });
-      const avUrl =
-        typeof av?.profile_photo === 'string'
-          ? av.profile_photo
-          : ((av?.profile_photo as { file_path?: string; url?: string } | null)?.file_path ??
-            (av?.profile_photo as { url?: string } | null)?.url ??
-            null);
+      let avUrl: string | null = (pf?.profile_photo ?? '').trim() || null;
+      if (!avUrl) {
+        try {
+          const av: BkAvatarResp = await bk.call('/get_user_last_confirmed_profile_photo', { user_id: ui.id });
+          avUrl =
+            typeof av?.profile_photo === 'string'
+              ? av.profile_photo
+              : ((av?.profile_photo as { file_path?: string; url?: string } | null)?.file_path ??
+                (av?.profile_photo as { url?: string } | null)?.url ??
+                null);
+        } catch (err) {
+          if ((err as Error).message === 'JOB_STOPPED') throw err;
+          this.log(job, 'info', 'اندپوینت عکس تأییدشده جواب نداد — ادامه بدون آن');
+        }
+      }
       if (avUrl) {
         const img = await fetchImage(avUrl);
         const norm = img ? await normalizeImage(img.buf, img.mime) : null;
@@ -1142,6 +1226,7 @@ export class ImporterService {
     const provName = new Map(provs.map((p) => [p.buskolId, p.name]));
 
     const pj = (user.profile ?? {}) as Record<string, unknown>;
+    const b = asBUserData(user.b);
     const avatarUrl = user.avatarUrl;
 
     return {
@@ -1155,10 +1240,14 @@ export class ImporterService {
         isSeller: user.isSeller,
         role: user.role,
         createdAt: user.createdAt.toISOString(),
-        bUserId: (pj.bUserId as number) ?? null,
-        bActivePackageType: user.activePakageType,
-        bResponseRate: (pj.bResponseRate as number) ?? null,
-        bReputationScore: (pj.bReputationScore as string) ?? null,
+        // داده‌های باسکول از سند b؛ fallback رکوردهای قدیمی (پیش از b)
+        bUserId: b?.userId ?? ((pj.bUserId as number) ?? null),
+        bActivePackageType: b?.premium.packageType ?? user.activePakageType,
+        bPremium: b ? b.premium : null,
+        bResponseRate: b?.responseRate ?? ((pj.bResponseRate as number) ?? null),
+        bReputationScore: b?.reputationScore ?? ((pj.bReputationScore as string) ?? null),
+        bActivityDomain: b?.activityDomain ?? ((pj.activityDomain as string) ?? null),
+        bBuskoolCreatedAt: b?.createdAt ?? null,
       },
       profile: user.profile
         ? {
@@ -1167,8 +1256,8 @@ export class ImporterService {
             address: (pj.address as string) ?? (pj.bAddress as string) ?? null,
             companyName: (pj.companyName as string) ?? (pj.bCompanyName as string) ?? '',
             description: user.businessDesc ?? ((pj.bDescription as string) ?? null),
-            confirmed: (pj.bConfirmed as boolean) ?? false,
-            bRelateds: (pj.bRelateds as string[]) ?? [],
+            confirmed: b?.confirmed ?? ((pj.bConfirmed as boolean) ?? false),
+            bRelateds: b?.relateds ?? ((pj.bRelateds as string[]) ?? []),
           }
         : null,
       avatar: {
