@@ -47,6 +47,8 @@
  *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { randomBytes } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { buildStorage } from '../uploads/storage';
 import { UploadsService } from '../uploads/uploads.service';
@@ -124,10 +126,17 @@ const MAX_PHOTOS_PER_PRODUCT = 4;
 /** سقف تصاویر کسب‌وکار هر کاربر — همان سقف گالری فرم ویرایش پروفایل (۸) */
 const MAX_RELATEDS_PER_USER = 8;
 /** آپ‌سرت‌های مستقل DB در هر دستهٔ موازی کوچک */
-const DB_CHUNK = 4;
+const DB_CHUNK = 8;
 
 @Injectable()
 export class ImporterService {
+  /** کش دسته‌ها — بارگذاری یک‌بار؛ ensureCategory خودش تازه‌سازی می‌کند.
+   *  قبلاً به‌ازای هر کاربر یک findMany کامل روی جدول دسته‌ها می‌رفت (جاب
+   *  لیستی ۵۰۰ نفره = ۵۰۰ کوئری اضافه). با cleanup باطل می‌شود. */
+  private catCache: Map<number, { parentId: number | null }> | null = null;
+  /** کش استان/شهر به نام — جدول locations تغییرناپذیر است؛ findFirst های
+   *  تکراری هر کاربر (۲ تا) در جاب لیستی حذف می‌شود */
+  private readonly locCache = new Map<string, { id: string; buskolId: number | null } | null>();
   private readonly logger = new Logger(ImporterService.name);
   private readonly jobs = new Map<string, JobInternal>();
 
@@ -682,14 +691,12 @@ export class ImporterService {
       (await this.uniqueFakePhone(ui.id, userName));
 
     // مکان از نام‌ها (اگر آگهی باشد، در مرحلهٔ بعد با id دقیق اصلاح می‌شود)
-    const provinceLoc = ui.province
-      ? await this.prisma.location.findFirst({ where: { type: 'province', name: ui.province } })
-      : null;
-    const cityLoc = ui.city && provinceLoc
-      ? await this.prisma.location.findFirst({
-          where: { type: 'city', name: ui.city, parentId: provinceLoc.id },
-        })
-      : null;
+    // — از کش (۱۵-۱۱): در جاب لیستی، findFirst های تکراری حذف می‌شود
+    const provinceLoc = ui.province ? await this.findLocationCached('province', ui.province) : null;
+    const cityLoc =
+      ui.city && provinceLoc
+        ? await this.findLocationCached('city', ui.city, provinceLoc.id)
+        : null;
 
     // «درباره کسب‌وکار» (خواستهٔ مالک ۱۳-۱۱): متنِ خودِ کاربر به ستون
     // businessDesc می‌رود — همان جایی که فرم ویرایش پروفایل آیمچ می‌نویسد
@@ -879,21 +886,44 @@ export class ImporterService {
     this.bump(job, 'productsTotal', items.length);
     this.log(job, 'info', `${items.length} آگهی عمومی از باسکول دریافت شد`);
 
-    const catById = new Map<number, { parentId: number | null }>();
-    for (const c of await this.prisma.category.findMany({ select: { id: true, parentId: true } })) {
-      catById.set(c.id, { parentId: c.parentId });
-    }
+    const catById = await this.getCatById();
 
     let maxProductId = 0;
     for (const item of items) maxProductId = Math.max(maxProductId, item.main.id);
-    // آپ‌سرت‌های مستقل — دسته‌های کوچک موازی (رقابت ساخت دسته در
-    // ensureCategory با catch حل می‌شود)؛ ترتیب ثبت مهم نیست
-    for (let c = 0; c < items.length; c += DB_CHUNK) {
+
+    // ── ثبت لیستی (خواستهٔ مالک ۱۵-۱۱: «کلا لیستی‌ها رو این کارو انجام بده») ──
+    // جدیدها = یک createMany برای همه؛ موجودها = آپدیت دستهٔ موازی. قبلاً:
+    // upsert تک‌تکی (۱ رفت‌وبرگشت Atlas به‌ازای هر آگهی) — کاربر ۵۰ آگهی‌ای
+    // ≈ ۵۰ رفت‌وبرگشت؛ حالا ایمپورت اول ≈ ۳ رفت‌وبرگشت برای همه.
+    const existingProdIds = new Set(
+      (
+        await this.prisma.product.findMany({
+          where: { id: { in: items.map((it) => it.main.id) } },
+          select: { id: true },
+        })
+      ).map((p) => p.id),
+    );
+    // آماده‌سازی موازی (ساخت دستهٔ غایب هم همین‌جا — رقابت با catch حل می‌شود)
+    const prepared = await Promise.all(
+      items.map(async (it) => ({
+        ...(await this.buildProductData(job, it.main, user.id, catById)),
+        isNew: !existingProdIds.has(it.main.id),
+      })),
+    );
+    const toCreateProducts = prepared.filter((p) => p.isNew).map((p) => p.create);
+    const toUpdateProducts = prepared.filter((p) => !p.isNew);
+    if (toCreateProducts.length) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
-      const chunk = items.slice(c, c + DB_CHUNK);
-      await Promise.all(chunk.map((item) => this.upsertProduct(job, item.main, user.id, catById)));
-      this.bump(job, 'products', chunk.length);
+      await this.prisma.product.createMany({ data: toCreateProducts });
     }
+    for (let c = 0; c < toUpdateProducts.length; c += DB_CHUNK) {
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
+      const chunk = toUpdateProducts.slice(c, c + DB_CHUNK);
+      await Promise.all(
+        chunk.map((p) => this.prisma.product.update({ where: { id: p.id }, data: p.update })),
+      );
+    }
+    this.bump(job, 'products', items.length);
     // اصلاح مکان کاربر با اولین آگهی (اگر از نام‌ها پیدا نشده بود)
     if (items.length && (!provinceLoc || !cityLoc) && items[0].main.province_id) {
       await this.prisma.user
@@ -930,30 +960,114 @@ export class ImporterService {
     // بعد = deleteMany همین دو جدول، بدون دست‌زدن به جدول کاربران.
     this.step(job, 'reviews', 'active');
     const comments = await commentsP;
-    const list = comments?.comments ?? [];
-    for (const c of list) {
-      if (job.stopRequested) throw new Error('JOB_STOPPED');
-      if (!c.rating_score && !c.text) continue;
-      // نویسندهٔ ساختگی — findThenCreate با bUserId (fallback bCommentId)
-      const reviewer = await this.ensureBCommentAuthor(job, c);
-      await this.prisma.bComment.upsert({
-        where: { authorId_sellerId: { authorId: reviewer.id, sellerId: user.id } },
-        update: {
-          rating: c.rating_score ?? 5,
-          // متن خالیِ پاسخ جدید (کوکی منقضی شده یا کامنت فقط-امتیازی) نباید
-          // متنِ قبلاً دریافت‌شده را پاک کند — فقط متنِ واقعی جایگزین می‌شود
-          ...(c.text ? { text: aimchifyBrandMentions(c.text.slice(0, 1000)) } : {}),
-          createdAt: this.bkDate(c.created_at) ?? new Date(),
-        },
-        create: {
-          sellerId: user.id,
-          authorId: reviewer.id,
-          rating: c.rating_score ?? 5,
-          text: aimchifyBrandMentions((c.text ?? '').slice(0, 1000)),
-          createdAt: this.bkDate(c.created_at) ?? new Date(),
-        },
-      });
-      this.bump(job, 'reviews');
+    const list = (comments?.comments ?? []).filter((c) => c.rating_score || c.text);
+    if (job.stopRequested) throw new Error('JOB_STOPPED');
+    {
+      // ── ثبت لیستی (خواستهٔ مالک ۱۵-۱۱: «کامنتها رو لیستی بگیر و لیستی اینزرت کن») ──
+      // قبلاً: به‌ازای هر کامنت ۲+ رفت‌وبرگشت به Atlas (findFirst نویسنده + upsert)
+      // = کاربرِ ۱۶۰ کامنتی ≈ ۳۲۰ رفت‌وبرگشت ≈ ده‌ها ثانیه. حالا ۳-۴ کوئری
+      // برای همه: findMany نویسنده‌ها ← createMany غایب‌ها (id سمت کلاینت) ←
+      // findMany کامنت‌های موجود ← createMany جدیدها + آپدیت فقط تغییرکرده‌ها.
+      if (list.length) {
+        // جدیدترین کامنتِ هر نویسنده ملاک است (تکراری‌های احتمالی باسکول)
+        const byAuthor = new Map<string, BkCommentsResp['comments'][number]>();
+        for (const c of list) {
+          const key = c.user_id ? `u${c.user_id}` : `c${c.c_id}`;
+          const prev = byAuthor.get(key);
+          if (!prev || (c.created_at ?? '') >= (prev.created_at ?? '')) byAuthor.set(key, c);
+        }
+        const uniq = [...byAuthor.values()];
+
+        // ۱) نویسنده‌های موجود — یک کوئری
+        const bkIds = uniq.filter((c) => c.user_id).map((c) => c.user_id as number);
+        const cIds = uniq.filter((c) => !c.user_id).map((c) => c.c_id);
+        const existingAuthors = await this.prisma.userForBComment.findMany({
+          where: {
+            OR: [
+              ...(bkIds.length ? [{ bUserId: { in: bkIds } }] : []),
+              ...(cIds.length ? [{ bCommentId: { in: cIds } }] : []),
+            ],
+          },
+          select: { id: true, bUserId: true, bCommentId: true },
+        });
+        const authorIdByKey = new Map<string, string>();
+        for (const a of existingAuthors) {
+          if (a.bUserId != null) authorIdByKey.set(`u${a.bUserId}`, a.id);
+          if (a.bCommentId != null) authorIdByKey.set(`c${a.bCommentId}`, a.id);
+        }
+
+        // ۲) نویسنده‌های غایب — یک createMany با id ساخته‌شده سمت کلاینت
+        const missing = uniq.filter((c) => !authorIdByKey.has(c.user_id ? `u${c.user_id}` : `c${c.c_id}`));
+        if (missing.length) {
+          await this.prisma.userForBComment.createMany({
+            data: missing.map((c) => {
+              const id = newObjectId();
+              authorIdByKey.set(c.user_id ? `u${c.user_id}` : `c${c.c_id}`, id);
+              return {
+                id,
+                bUserId: c.user_id ?? null,
+                bCommentId: c.c_id ?? null,
+                firstName: c.first_name ?? '',
+                lastName: c.last_name ?? '',
+                // شهر نویسنده از خود باسکول — زیر کامنت نمایش داده می‌شود
+                city: (c.city ?? '').trim() || null,
+              };
+            }),
+          });
+          this.bump(job, 'bCommentAuthors', missing.length);
+        }
+
+        // ۳) کامنت‌های موجود این فروشنده — یک کوئری
+        const allAuthorIds = [...authorIdByKey.values()];
+        const existingComments = allAuthorIds.length
+          ? await this.prisma.bComment.findMany({
+              where: { sellerId: user.id, authorId: { in: allAuthorIds } },
+              select: { authorId: true, rating: true, text: true, createdAt: true },
+            })
+          : [];
+        const existingByAuthor = new Map(existingComments.map((r) => [r.authorId, r]));
+
+        // ۴) جدیدها یک‌جا + آپدیت فقط تغییرکرده‌ها
+        const toCreate: Prisma.BCommentCreateManyInput[] = [];
+        const toUpdate: { authorId: string; rating: number; text?: string; createdAt: Date }[] = [];
+        for (const c of uniq) {
+          const authorId = authorIdByKey.get(c.user_id ? `u${c.user_id}` : `c${c.c_id}`)!;
+          const rating = c.rating_score ?? 5;
+          const createdAt = this.bkDate(c.created_at) ?? new Date();
+          const text = c.text ? aimchifyBrandMentions(c.text.slice(0, 1000)) : '';
+          const prev = existingByAuthor.get(authorId);
+          if (!prev) {
+            toCreate.push({ sellerId: user.id, authorId, rating, text, createdAt });
+          } else {
+            // متن خالیِ پاسخ جدید (کوکی منقضی/کامنت فقط-امتیازی) متنِ قبلی را
+            // پاک نمی‌کند — فقط متنِ واقعی جایگزین می‌شود
+            const textChanged = !!text && text !== prev.text;
+            if (prev.rating !== rating || textChanged || prev.createdAt.getTime() !== createdAt.getTime()) {
+              toUpdate.push({
+                authorId,
+                rating,
+                ...(textChanged ? { text } : {}),
+                createdAt,
+              });
+            }
+          }
+        }
+        if (toCreate.length) await this.prisma.bComment.createMany({ data: toCreate });
+        // آپدیت‌ها مستقل‌اند — دستهٔ کوچک موازی
+        for (let i = 0; i < toUpdate.length; i += DB_CHUNK) {
+          if (job.stopRequested) throw new Error('JOB_STOPPED');
+          const chunk = toUpdate.slice(i, i + DB_CHUNK);
+          await Promise.all(
+            chunk.map((u) =>
+              this.prisma.bComment.update({
+                where: { authorId_sellerId: { authorId: u.authorId, sellerId: user.id } },
+                data: { rating: u.rating, ...(u.text ? { text: u.text } : {}), createdAt: u.createdAt },
+              }),
+            ),
+          );
+        }
+        this.bump(job, 'reviews', toCreate.length + toUpdate.length);
+      }
     }
     this.step(job, 'reviews', 'done');
     {
@@ -969,7 +1083,7 @@ export class ImporterService {
         );
       }
     }
-    this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (بدون ساخت کاربر)`);
+    this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (لیستی، بدون ساخت کاربر)`);
 
     // ── ۵. تصاویر — آواتار + کسب‌وکار + عکس‌های آگهی‌ها، یک استخر موازی مشترک ──
     this.step(job, 'relateds', 'active');
@@ -1259,13 +1373,18 @@ export class ImporterService {
     return items;
   }
 
-  /** ثبت/بروزرسانی یک آگهی باسکول (الگوی scripts/seed-products.mjs) */
-  private async upsertProduct(
+  /** دادهٔ ساخت/آپدیت یک آگهی باسکول — خروجی دو شیء آماده برای createMany/
+   *  update (ثبت لیستی ۱۵-۱۱؛ الگوی scripts/seed-products.mjs) */
+  private async buildProductData(
     job: JobInternal,
     m: BkProductItem['main'],
     userId: string,
     catById: Map<number, { parentId: number | null }>,
-  ) {
+  ): Promise<{
+    id: number;
+    create: Prisma.ProductCreateManyInput;
+    update: Prisma.ProductUpdateInput;
+  }> {
     // دسته پدر: اگر برگ زیر یک دستهٔ میانی است، پدر درستش را بگیر
     let categoryId = m.category_id;
     const sub = catById.get(m.sub_category_id);
@@ -1290,12 +1409,14 @@ export class ImporterService {
     const bkUpdated = this.bkDate(m.updated_at);
     const priceUpdatedAt = this.bkDate(m.last_price_update) ?? bkUpdated;
     const updatedAt = bkUpdated ?? priceUpdatedAt ?? this.bkDate(m.p_created_at) ?? new Date();
-    await this.prisma.product.upsert({
-      where: { id: m.id },
+    const description = aimchifyBrandMentions(descToText(m.description));
+    return {
+      id: m.id,
+      // آپدیت موجود‌ها — همان فیلدهای قبلی upsert
       update: {
         productName: name,
         // <hr/> جداکنندهٔ خطوط باسکول → خط نو (خواستهٔ مالک ۱۴-۱۱)
-        description: aimchifyBrandMentions(descToText(m.description)),
+        description,
         // مهر غایب = مقدار موجود حفظ می‌شود (null ننویس — کارت به مهر قدیمی
         // تکیه می‌کند)
         ...(priceUpdatedAt ? { priceUpdatedAt } : {}),
@@ -1317,11 +1438,12 @@ export class ImporterService {
         status: 'confirmed',
         updatedAt,
       },
+      // ساخت جدیدها — همان فیلدها + id/slug/userId/مهر ثبت
       create: {
         id: m.id,
         productName: name,
         slug: `فروش-عمده-${name}-${m.id}`,
-        description: aimchifyBrandMentions(descToText(m.description)),
+        description,
         priceUpdatedAt: priceUpdatedAt ?? updatedAt,
         priceValidityDays: 3650,
         categoryId,
@@ -1339,7 +1461,37 @@ export class ImporterService {
         createdAt: this.bkDate(m.p_created_at) ?? new Date(),
         updatedAt: this.bkDate(m.updated_at) ?? new Date(),
       },
+    };
+  }
+
+  /** دسته‌ها با کش — یک findMany در عمر پروسه؛ ensureCategory نقشه را تازه
+   *  نگه می‌دارد و cleanup باطلش می‌کند */
+  private async getCatById(): Promise<Map<number, { parentId: number | null }>> {
+    if (!this.catCache) {
+      const m = new Map<number, { parentId: number | null }>();
+      for (const c of await this.prisma.category.findMany({ select: { id: true, parentId: true } })) {
+        m.set(c.id, { parentId: c.parentId });
+      }
+      this.catCache = m;
+    }
+    return this.catCache;
+  }
+
+  /** استان/شهر با کش — جدول locations تغییرناپذیر است؛ نتیجه (حتی null) کش
+   *  می‌شود تا جاب لیستی برای هر کاربر ۲ findFirst نزند */
+  private async findLocationCached(
+    type: 'province' | 'city',
+    name: string,
+    parentId?: string,
+  ): Promise<{ id: string; buskolId: number | null } | null> {
+    const key = `${type}:${name}:${parentId ?? ''}`;
+    if (this.locCache.has(key)) return this.locCache.get(key) ?? null;
+    const row = await this.prisma.location.findFirst({
+      where: { type, name, ...(parentId ? { parentId } : {}) },
+      select: { id: true, buskolId: true },
     });
+    this.locCache.set(key, row);
+    return row;
   }
 
   /** ساخت زنجیرهٔ دستهٔ غایب (id عددی باسکول) */
@@ -1355,29 +1507,6 @@ export class ImporterService {
       .create({ data: { id, parentId, categoryName: name || `دسته ${id}`, slug } })
       .catch(() => undefined); // رقابت — قبلاً ساخته شده
     catById.set(id, { parentId });
-  }
-
-  /** نویسندهٔ ساختگی کامنت باسکول — ردیف user_for_b_comment (نه User!).
-   *  ضدتکرار با bUserId (fallback bCommentId)؛ تک‌جاب بودن ایمپورتر تضمین
-   *  می‌کند دو فراخوانی هم‌زمان روی یک نویسنده نباشد. */
-  private async ensureBCommentAuthor(job: JobInternal, c: BkCommentsResp['comments'][number]) {
-    const existing = await this.prisma.userForBComment.findFirst({
-      where: c.user_id ? { bUserId: c.user_id } : { bCommentId: c.c_id },
-    });
-    if (existing) return existing;
-
-    const created = await this.prisma.userForBComment.create({
-      data: {
-        bUserId: c.user_id ?? null,
-        bCommentId: c.c_id ?? null,
-        firstName: c.first_name ?? '',
-        lastName: c.last_name ?? '',
-        // شهر نویسنده از خود باسکول — زیر کامنت نمایش داده می‌شود
-        city: (c.city ?? '').trim() || null,
-      },
-    });
-    this.bump(job, 'bCommentAuthors');
-    return created;
   }
 
   /**
@@ -1460,6 +1589,9 @@ export class ImporterService {
   /** پاک‌سازی کامل برای شروع مهاجرت — فقط حساب ادمین می‌ماند */
   async cleanup(adminPhone: string) {
     this.assertAdmin(adminPhone);
+    // کش‌های ایمپورتر با دیتای پاک‌شده بی‌اعتبار می‌شوند (۱۵-۱۱)
+    this.catCache = null;
+    this.locCache.clear();
     const counts: Record<string, number | string> = {};
     const wipe = async (key: string, fn: () => Promise<{ count: number }>) => {
       counts[key] = (await fn()).count;
@@ -1798,6 +1930,13 @@ function imagePoolSize(): number {
   const raw = Number(process.env.IMPORTER_IMAGE_CONCURRENCY ?? 4);
   const n = Number.isFinite(raw) ? Math.floor(raw) : 4;
   return Math.min(Math.max(n, 1), 8);
+}
+
+/** ObjectId سازگار با Mongo — ۱۲ بایت تصادفی hex؛ برای createMany سطرهایی که
+ *  بعداً باید idشان را بدانیم (نویسندگان کامنت) — Prisma در createMany idهای
+ *  ساخته‌شده را برنمی‌گرداند، پس خودمان می‌سازیم (همان طرح auto()). */
+function newObjectId(): string {
+  return randomBytes(12).toString('hex');
 }
 
 /** دانلود تصویر با دو تلاش — CDN گاهی یک‌باره قطع می‌کند؛ تلاش دوم نرخ

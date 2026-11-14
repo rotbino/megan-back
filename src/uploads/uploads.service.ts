@@ -320,7 +320,9 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
 
       // تصویر اصلی — فقط عرض محدود می‌شود؛ طول خودکار/تناسبی (fit inside با عرض ۱۲۰۰)
       const main = await encodeMain(wmMain); // نسخهٔ ابری — واترمارک‌دار
-      const mainClean = wmMain ? await encodeMain(null) : main; // آینهٔ لوکال — تمیز
+      // نسخهٔ تمیز فقط وقتی انکود می‌شود که واقعاً جایی مصرف شود (آینهٔ لوکال
+      // روشن + واترمارک فعال) — وگرنه انکود دوم فقط CPU می‌سوزاند (۱۵-۱۱)
+      const mainClean = wmMain && storage.MIRROR_LOCAL ? await encodeMain(null) : main;
 
       const encodeThumb = async (wm: Buffer | null): Promise<Buffer> => {
         let pipeline = sharp(buffer)
@@ -332,7 +334,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
           .toBuffer();
       };
       const thumb = await encodeThumb(wmThumb); // نسخهٔ ابری — واترمارک‌دار
-      const thumbClean = wmThumb ? await encodeThumb(null) : thumb; // آینهٔ لوکال — تمیز
+      const thumbClean = wmThumb && storage.MIRROR_LOCAL ? await encodeThumb(null) : thumb;
 
       const outMeta = await sharp(main).metadata();
       const mainMime = isWebp ? 'image/webp' : hasAlpha ? 'image/png' : 'image/jpeg';
@@ -591,17 +593,16 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     }
     const key = this.keyFor(user.id, input.model, modelId, input.fieldKey, processed.mainExt);
     // ابر = main (واترمارک‌دار) · آینهٔ لوکال = mainClean (بدون واترمارک) — ۱۴-۱۱
-    const url = await this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean);
-
-    let thumbUrl: string | null = null;
-    let thumbKey: string | null = null;
-    if (processed.thumb) {
-      thumbKey = `${key}.thumb.jpg`; // همیشه jpeg — تامبنیل کاشی‌های <img>
-      thumbUrl = await this.driver
-        .put(thumbKey, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
-        .catch(() => null);
-      if (!thumbUrl) thumbKey = null;
-    }
+    // PUT اصلی و تامبنیل موازی‌اند (۱۵-۱۱) — دو رفت‌وبرگشت سری برای هر عکس
+    const [url, thumbUrl] = await Promise.all([
+      this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean),
+      processed.thumb
+        ? this.driver
+            .put(`${key}.thumb.jpg`, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const thumbKey = thumbUrl ? `${key}.thumb.jpg` : null;
 
     const row = await this.prisma.file.create({
       data: {
@@ -685,17 +686,16 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
 
     const key = this.keyFor(input.ownerId, input.model, input.modelId, input.fieldKey, processed.mainExt);
     // ابر = main (واترمارک‌دار) · آینهٔ لوکال = mainClean (بدون واترمارک) — ۱۴-۱۱
-    const url = await this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean);
-
-    let thumbUrl: string | null = null;
-    let thumbKey: string | null = null;
-    if (processed.thumb) {
-      thumbKey = `${key}.thumb.jpg`; // همیشه jpeg — تامبنیل کاشی‌های <img>
-      thumbUrl = await this.driver
-        .put(thumbKey, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
-        .catch(() => null);
-      if (!thumbUrl) thumbKey = null;
-    }
+    // PUT اصلی و تامبنیل موازی‌اند (۱۵-۱۱) — دو رفت‌وبرگشت سری برای هر عکس
+    const [url, thumbUrl] = await Promise.all([
+      this.driver.put(key, processed.main, processed.mainMime, undefined, processed.mainClean),
+      processed.thumb
+        ? this.driver
+            .put(`${key}.thumb.jpg`, processed.thumb, 'image/jpeg', undefined, processed.thumbClean ?? processed.thumb)
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const thumbKey = thumbUrl ? `${key}.thumb.jpg` : null;
 
     const row = await this.prisma.file.create({
       data: {
@@ -1018,7 +1018,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       return out;
     };
     const main = await encodeMain(wmMain); // نسخهٔ ابری — واترمارک‌دار
-    const mainClean = wmMain ? await encodeMain(null) : main; // آینهٔ لوکال — تمیز
+    // نسخهٔ تمیز فقط وقتی انکود می‌شود که مصرف‌کننده دارد (آینهٔ لوکال روشن) — ۱۵-۱۱
+    const mainClean = wmMain && storage.MIRROR_LOCAL ? await encodeMain(null) : main;
 
     const buildThumb = async (wm: Buffer | null): Promise<Buffer> => {
       let p = sharp(buffer)
@@ -1029,7 +1030,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       return p.toFormat('jpeg', { quality: 78, mozjpeg: true }).toBuffer(); // تامبنیل همیشه jpeg
     };
     const thumb = await buildThumb(wmThumb);
-    const thumbClean = wmThumb ? await buildThumb(null) : thumb;
+    const thumbClean = wmThumb && storage.MIRROR_LOCAL ? await buildThumb(null) : thumb;
 
     const out = await sharp(main).metadata();
     return {
