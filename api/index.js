@@ -1,24 +1,16 @@
 /**
  * تابع serverless ورسل — پلِ (req, res) ورسل به اپ Nest+Fastify.
  *
- * معماری: dist کامپایل‌شده با tsc (متادیتای دیکوریتور سالم) لود می‌شود و
- * درخواست‌ها با fastify.inject (light-my-request) تزریق می‌شوند؛ بدون listen
- * و بدون سوکت. وب‌سوکت چت روی ورسل کار نمی‌کند (محدودیت پلتفرم).
+ * معماری: NestJS 12 فقط ESM است و require آن روی ران‌تایم ورسل خطای
+ * ERR_REQUIRE_ESM می‌دهد؛ به همین دلیل اپ در زمان build با esbuild در
+ * «یک فایل CJS» (‎.serverless/serverless-bundle.cjs از dist تلفیق‌شده با
+ * tsc) بافته می‌شود و این‌جا لود می‌شود. درخواست‌ها با fastify.inject
+ * (light-my-request) تزریق می‌شوند؛ بدون listen و بدون سوکت — وب‌سوکت چت
+ * روی ورسل کار نمی‌کند (محدودیت پلتفرم؛ بک‌اند لوکال کامل است).
  *
- * لایهٔ تشخیصی (موقت): requireهای سنگین «تنبل» و داخل try هستند تا اگر
- * ماژولی در لود شکست بخورد، همان stack در پاسخ HTTP برگردد (به‌جای صفحهٔ
- * FUNCTION_INVOCATION_FAILED ورسل که هیچ چیزی نمی‌گوید). هدر x-megan-diag
- * هم آخرین مرحلهٔ رسیده را نشان می‌دهد.
+ * خطاها به‌جای صفحهٔ خام ورسل، با مرحله (stage) و جزئیات در JSON برمی‌گردند
+ * و هدر x-megan-diag می‌گوید بوت تا کجا پیش رفته است.
  */
-let diagLib = null;
-try {
-  diagLib = require('../dist/vercel-boot-diag');
-} catch {
-  /* حتی بدون بیکن هم تشخیص از طریق پاسخ HTTP کار می‌کند */
-}
-const beacon = (stage, extra) =>
-  diagLib ? diagLib.beacon(stage, extra).catch(() => {}) : Promise.resolve();
-
 /** هدرهای hop-by-hop که نباید به پاسخ کپی شوند */
 const HOP_HEADERS = new Set([
   'connection',
@@ -36,7 +28,7 @@ let fastifyPromise = null;
 async function getFastify() {
   if (!fastifyPromise) {
     fastifyPromise = Promise.resolve()
-      .then(() => require('../.serverless/serverless-bundle.cjs')) // باندل esbuild — تنبل
+      .then(() => require('../.serverless/serverless-bundle.cjs')) // require سنگین — تنبل
       .then((m) => m.getApp())
       .then((app) => app.getHttpAdapter().getInstance())
       .catch((err) => {
@@ -47,14 +39,13 @@ async function getFastify() {
   return fastifyPromise;
 }
 
-function fail(res, stage, err, diag) {
+function fail(res, stage, err) {
   res.setHeader('x-megan-diag', stage);
   res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
   res.end(
     JSON.stringify({
       status: false,
       stage,
-      diag,
       detail: String(err?.stack ?? err).slice(0, 1500),
     }),
   );
@@ -63,12 +54,11 @@ function fail(res, stage, err, diag) {
 module.exports = async function handler(req, res) {
   let diag = 'handler-enter';
   try {
-    await beacon('handler-enter');
     res.setHeader('x-megan-diag', diag);
 
     const fastify = await getFastify();
     diag = 'app-ready';
-    await beacon('app-ready');
+    res.setHeader('x-megan-diag', diag);
 
     // بدنهٔ درخواست — خام و بدون دست‌کاری (multipart هم همین‌طور می‌رسد)
     const chunks = [];
@@ -96,7 +86,6 @@ module.exports = async function handler(req, res) {
     res.writeHead(reply.statusCode, headers);
     res.end(reply.rawPayload);
   } catch (err) {
-    void beacon('handler-error', { stage: diag, err: String(err?.stack ?? err) });
-    fail(res, 'handler-error:' + diag, err, diag);
+    fail(res, 'handler-error:' + diag, err);
   }
 };

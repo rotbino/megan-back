@@ -1,6 +1,4 @@
 import 'reflect-metadata';
-// تشخیص موقت ورسل — باید قبل از بقیه ارزیابی شود تا هندلرهای خطا زود نصب شوند
-import { beacon } from './vercel-boot-diag';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -30,7 +28,6 @@ function genReqId(req: import('fastify').FastifyRequest): string {
 }
 
 async function bootstrap(): Promise<void> {
-  await beacon('bootstrap-start');
   const adapter = new FastifyAdapter({
     trustProxy: true, // پشت reverse proxy — برای rate limit بر پایه IP واقعی
     // آپلود multipart به فضای بیشتری از MAX_FILE_SIZE نیاز دارد: مدارک احراز
@@ -58,7 +55,6 @@ async function bootstrap(): Promise<void> {
     // لاگ‌های Nest از طریق فیلتر/سکوت — لاگ HTTP ساختاریافته را pino فستیفای می‌دهد
     logger: isProd ? false : ['error', 'warn', 'log'],
   });
-  await beacon('app-created');
 
   // ── امنیت و پلتفرم ──────────────────────────────────────────────────────────
   // CORP = cross-origin: عکس‌های عمومی (آروان) از دامنه‌ی دیگری سرو می‌شوند؛
@@ -126,7 +122,6 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.listen({ port: env.PORT, host: env.HOST });
-  await beacon('listening', { port: env.PORT, host: env.HOST });
 
   // اتصال io به نگهدارنده + منطق handshake — بعد از listen (سرور آماده است)
   // (fastify-socket.io نمونه io را روی instance تزئین می‌کند — typing ندارد)
@@ -186,7 +181,5 @@ async function bootstrap(): Promise<void> {
 
 void bootstrap().catch((err) => {
   console.error('Fatal bootstrap error:', err);
-  void beacon('bootstrap-fatal', { err: String(err?.stack ?? err) }).finally(() =>
-    process.exit(1),
-  );
+  process.exit(1);
 });

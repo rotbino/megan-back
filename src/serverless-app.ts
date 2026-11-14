@@ -9,9 +9,6 @@
  * درایور فایل روی ورسل همیشه arvan است (env.ts دیسک readonly را قفل
  * می‌کند) — پس fastify-static لازم نیست.
  */
-// بیکن تشخیصی باید اولین require باشد تا اگر هر ماژول دیگری در لود شکست خورد،
-// هندلر خطا از قبل نصب شده باشد (تشخیص موقت — حذف خواهد شد)
-import { beacon } from './vercel-boot-diag';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -33,7 +30,6 @@ function genReqId(req: import('fastify').FastifyRequest): string {
 }
 
 async function buildApp(): Promise<NestFastifyApplication> {
-  await beacon('serverless-app-init');
   const adapter = new FastifyAdapter({
     trustProxy: true,
     bodyLimit: Math.max(1024 * 1024, storage.MAX_FILE_SIZE * 4 + 2 * 1024 * 1024),
@@ -75,7 +71,6 @@ async function buildApp(): Promise<NestFastifyApplication> {
   app.enableShutdownHooks();
 
   await app.init(); // مثل listen ولی بدون پورت — آمادهٔ inject
-  await beacon('serverless-app-ready');
   return app;
 }
 
