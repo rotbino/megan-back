@@ -8,6 +8,8 @@
  * listen می‌کند (FUNCTION_INVOCATION_FAILED).
  */
 import dotenv from 'dotenv';
+// تشخیص موقت ورسل — حذف خواهد شد
+import { beacon } from '../../vercel-boot-diag';
 const isVercel = !!process.env.VERCEL;
 if (!isVercel) dotenv.config({ path: '.env', override: true });
 
@@ -33,7 +35,11 @@ function exitIfMissing(): void {
   } else {
     console.error('مقادیر را در فایل .env پروژه ست کنید.');
   }
-  process.exit(1);
+  // تشخیص موقت: گزارش بیکن، سپس خروج (بیکن روی ورسل فعال است)
+  void beacon('missing-env', { list: [...missingRequired] })
+    .catch(() => {})
+    .finally(() => process.exit(1));
+  setTimeout(() => process.exit(1), 3000); // ضربه‌گیر اگر بیکن گیر کند
 }
 
 function num(name: string, value: string | undefined, fallback: number): number {
