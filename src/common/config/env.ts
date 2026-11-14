@@ -136,8 +136,10 @@ export const storage = Object.freeze({
    * درجا، چت، پشتیبانی، همه از یک درایور می‌گذرند). نوشتن آینه بهترین‌حال
    * است: خطای دیسک هرگز آپلود اصلی (آروان) را نمی‌شکند؛ فقط هشدار لاگ
    * می‌شود. پیش‌فرض روشن — با STORAGE_MIRROR_LOCAL=false خاموش می‌شود.
+   * روی ورسل (env VERCEL) پیش‌فرض خاموش است — دیسک تابع فقط-خواندنی
+   * است و آینه‌ای وجود ندارد؛ فایل‌ها فقط روی آروان می‌نشینند.
    */
-  MIRROR_LOCAL: bool(process.env.STORAGE_MIRROR_LOCAL, true),
+  MIRROR_LOCAL: bool(process.env.STORAGE_MIRROR_LOCAL, !process.env.VERCEL),
 
   /**
    * واترمارک دائمی تصاویر آگهی — از ۱۴-۱۱ دوباره روشن، اما فقط روی نسخهٔ

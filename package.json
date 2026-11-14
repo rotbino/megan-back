@@ -8,6 +8,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "dev": "nest start --watch",
+    "postinstall": "node scripts/vercel-postinstall.js",
     "db:generate": "prisma generate",
     "db:push": "node scripts/db-push.mjs",
     "fetch:base-data": "node scripts/fetch-buskool-base-data.mjs",
