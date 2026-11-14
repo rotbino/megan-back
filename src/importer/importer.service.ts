@@ -58,6 +58,7 @@ import {
   BuskoolClient,
   buskoolConfig,
   buskoolPace,
+  buskoolSessionLoggedIn,
   type BkAvatarResp,
   type BkCommentsResp,
   type BkProductDetailResp,
@@ -147,13 +148,17 @@ export class ImporterService {
 
   // ═══════════════════════════ وضعیت ‌و آمار ═══════════════════════════
 
-  ping() {
+  async ping() {
     const { delayMs, cookie } = buskoolConfig();
     return {
       ok: true,
       delayMs,
       busy: [...this.jobs.values()].some((j) => j.status === 'running'),
       cookieSet: cookie.length > 0,
+      // سلامت سشن (۱۵-۱۱): کوکی مهمان هم cookieSet:true می‌دهد ولی چیزی
+      // باز نمی‌کند — این فیلد نشان می‌دهد سشن واقعاً لاگین است یا نه
+      // (null = بدون کوکی/خطای شبکه؛ یک تماس در عمر پروسه، کش‌شده).
+      cookieLoggedIn: await buskoolSessionLoggedIn(),
       adminPhone: importerAdminPhone(),
       // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های باسکول دقیقاً
       // در همان جا (users/{userId}/…) می‌نشینند. فرانت نشان می‌دهد.
@@ -1075,11 +1080,19 @@ export class ImporterService {
       if (empty > 0 && !buskoolConfig().cookie) {
         this.log(job, 'warn', `${empty} کامنت بدون متن است — با BUSKOOL_COOKIE متن کامل گرفته می‌شود`);
       } else if (empty > 0) {
-        // کوکی هست ولی باز متن خالی آمد — یا سشن منقضی شده یا کامنت فقط-امتیازی است
+        // کوکی هست ولی باز متن خالی آمد — علت را دقیق بگوییم (کشف ۱۵-۱۱:
+        // کوکیِ مهمان از سمت باسکول پذیرفته می‌شود ولی چیزی باز نمی‌کند)
+        const loggedIn = await buskoolSessionLoggedIn();
+        const why =
+          loggedIn === false
+            ? 'کوکی لاگین نیست (سشن مهمان) — بعد از ورود به حساب در buskool.com کوکی تازه بگیرید'
+            : loggedIn === true
+              ? 'سشن لاگین است ولی باسکول متن این کامنت‌ها را نمی‌دهد (فقط-امتیازی یا منتظر تأیید)'
+              : 'سشن منقضی/بی‌اثر است یا شبکه خطا داد';
         this.log(
           job,
           'warn',
-          `${empty} کامنت بدون متن آمد با اینکه BUSKOOL_COOKIE تنظیم است — اگر همه‌شان خالی‌اند احتمالاً کوکی منقضی شده (متن‌های قبلی حفظ شدند)`,
+          `${empty} کامنت بدون متن آمد با اینکه BUSKOOL_COOKIE تنظیم است — ${why} (متن‌های قبلی حفظ شدند)`,
         );
       }
     }

@@ -78,6 +78,46 @@ export function buskoolPace() {
   };
 }
 
+// ─── سلامت سشن: اصلاً لاگین است؟ (کشف ۱۵-۱۱) ─────────────────────────────
+//
+// کوکیِ «مهمان» هم از سمت باسکول پذیرفته می‌شود (همان id با انقضای تمدیدشده
+// برمی‌گردد) ولی هیچ چیزی را باز نمی‌کند — متن کامنت‌های confirmed=0 هم
+// null می‌ماند و already_liked هم null است. سنجش قطعی: GET /api/user —
+// سشن لاگین‌شده 200 می‌گیرد، مهمان 401 Unauthenticated.
+//
+// کش ماژول-سطح با کلیدِ مقدار کوکی: کوکی فقط با ری‌استارت عوض می‌شود، پس
+// در عمل یک تماس در عمر پروسه (+ تلاش مجدد فقط اگر شبکه خطا داد).
+
+let sessionProbe: { cookie: string; p: Promise<boolean | null> } | null = null;
+
+/** آیا کوکی تنظیم‌شده سشنِ لاگین‌شده است؟
+ *  true = لاگین، false = مهمان/بی‌اثر، null = کوکی خالی یا خطای شبکه */
+export function buskoolSessionLoggedIn(): Promise<boolean | null> {
+  const { cookie } = buskoolConfig();
+  if (!cookie) return Promise.resolve(false);
+  if (sessionProbe?.cookie === cookie) return sessionProbe.p;
+  const p = (async (): Promise<boolean | null> => {
+    try {
+      const res = await fetch(`${API}/api/user`, {
+        headers: {
+          'User-Agent': UA,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json, text/plain, */*',
+          Referer: `${API}/`,
+          Cookie: cookie,
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+      return res.status !== 401;
+    } catch {
+      sessionProbe = null; // تلاش مجدد در سنجش بعدی
+      return null;
+    }
+  })();
+  sessionProbe = { cookie, p };
+  return p;
+}
+
 // ─── گیت نرخ سراسری ─────────────────────────────────────────────────────────
 //
 // تضمین می‌کند: (۱) بین «شروع» دو درخواست حداقل فاصلهٔ مؤثر فاصله باشد،

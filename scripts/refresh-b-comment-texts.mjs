@@ -15,6 +15,8 @@
  *   ۴) node scripts/refresh-b-comment-texts.mjs
  *
  * چه می‌کند (idempotent — اجرای مکرر بی‌ضرر):
+ *   • اول لاگین‌بودن سشن را می‌سنجد (GET /api/user — مهمان 401 می‌گیرد؛
+ *     کشف ۱۵-۱۱: کوکی مهمان از باسکول پذیرفته می‌شود ولی چیزی باز نمی‌کند)
  *   • فروشنده‌هایی که کامنت بدون متن (text='') دارند پیدا می‌کند
  *   • کامنت‌هایشان را با کوکی از باسکول می‌گیرد
  *   • متنِ کامنت‌های موجود را پر می‌کند (متن پرشده هرگز با خالی بازنویسی نمی‌شود)
@@ -92,6 +94,37 @@ async function main() {
     process.exit(1);
   }
   console.log('── تکمیل متن کامنت‌های باسکول (با کوکی) ──\n');
+
+  // سنجش لاگین‌بودن سشن (کشف ۱۵-۱۱) — کوکیِ مهمان پذیرفته می‌شود ولی
+  // متن confirmed=0 را باز نمی‌کند؛ قبل از زدن ۴۰۰ درخواست بی‌فایده بایستیم.
+  // GET /api/user: سشن لاگین‌شده 200، مهمان 401 Unauthenticated.
+  {
+    let status = null;
+    try {
+      const res = await fetch(`${API}/api/user`, {
+        headers: {
+          'User-Agent': UA,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json, text/plain, */*',
+          Referer: `${API}/`,
+          Cookie: cookie,
+        },
+        signal: AbortSignal.timeout(20_000),
+      });
+      status = res.status;
+    } catch {
+      /* شبکه */
+    }
+    if (status === 401) {
+      console.error('✖ این کوکی سشنِ «مهمان» است — لاگین نیست.');
+      console.error('  لاراول بعد از ورود به حساب session id را عوض می‌کند؛');
+      console.error('  کوکیِ قبل از لاگین (یا از مرورگرِ لاگین‌نکرده) هیچ چیزی را باز نمی‌کند.');
+      console.error('  راه درست: در buskool.com وارد حساب شوید → بعد F12 → Network →');
+      console.error('  یک درخواست XHR → Copy whole Cookie header → در .env بگذارید و دوباره اجرا کنید.');
+      process.exit(1);
+    }
+    console.log(status === 200 ? '✓ سشن لاگین است\n' : `؟ وضعیت سشن نامشخص (HTTP ${status}) — ادامه می‌دهیم\n`);
+  }
 
   // فروشنده‌های دارای کامنت بدون متن + شناسهٔ باسکولشان
   const emptySellers = await prisma.bComment.findMany({

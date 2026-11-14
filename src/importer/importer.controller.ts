@@ -28,8 +28,9 @@ export class ImporterController {
 
   @Get('ping')
   @ApiOperation({ summary: 'وضعیت ایمپورتر — اتصال، تاخیر باسکول، کوکی، مشغولی' })
-  ping() {
-    return ok(this.importer.ping());
+  async ping() {
+    // await لازم است: ping حالا async است (سنجش لاگین سشن باسکول، ۱۵-۱۱)
+    return ok(await this.importer.ping());
   }
 
   @Get('stats')
