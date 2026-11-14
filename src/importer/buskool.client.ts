@@ -10,9 +10,17 @@
  *                                           from_record_number, to_record_number}
  *   POST /get_product_by_id                {product_id}
  *
- * ادب شبکه:
- *   • همهٔ درخواست‌ها زنجیره‌ای و فاصلهٔ BUSKOOL_DELAY_MS (پیش‌فرض ۵ ثانیه)
- *     بین هر دو درخواست — سرور باسکول بار اضافه نمی‌بیند.
+ * ادب شبکه (بازطراحی سرعت ۱۴-۱۱ — خواستهٔ مالک: سریع‌تر، بدون بلاک شدن):
+ *   • به‌جای زنجیرهٔ ترتیبیِ «درخواست بعدی فقط بعد از پایان قبلی + ۵ ثانیه»،
+ *     یک «گیت نرخ» سراسری: فاصلهٔ حداقلی بین «شروع» دو درخواست
+ *     (BUSKOOL_DELAY_MS، پیش‌فرض ۵۰۰ms) + حداکثر BUSKOOL_CONCURRENCY
+ *     درخواست هم‌زمان در پرواز (پیش‌فرض ۴). الگوی بار دقیقاً مثل یک
+ *     مرورگر واقعی است که چند XHR موازی می‌زند — برای باسکول هم عادی‌تر
+ *     و هم چند برابر سریع‌تر از قبل است.
+ *   • عقب‌نشینی تطبیقی: با اولین نشانهٔ محدودیت (HTTP 429/403) فاصلهٔ
+ *     مؤثر به‌صورت نمایی زیاد می‌شود (تا ۱۰ برابر) و با هر موفقیت آرام
+ *     به حالت عادی برمی‌گردد — یعنی هرگز «به‌انگازانه» به سرور فشار
+ *     نمی‌آید و خودش را از بلاک خارج می‌کند.
  *   • retry با backoff خطی (۳ تلاش) مثل scripts/fetch-buskool-base-data.mjs.
  *   • کوکی اختیاری BUSKOOL_COOKIE — با آن متن کامل کامنت‌ها برمی‌گردد
  *     (بدون کوکی فیلد text کامنت‌ها null است).
@@ -21,17 +29,106 @@
 const API = 'https://www.buskool.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+/** محدودهٔ مجاز فاصلهٔ شروع درخواست‌ها — حتی اگر env مقدار بزرگ‌تر بدهد
+ *  (مثل BUSKOOL_DELAY_MS=5000 قدیمی)، سقف ۱۲۰۰ms اعمال می‌شود تا سرعت
+ *  پیش‌فرض پروژه همیشه برقرار بماند. */
+const GAP_MIN_MS = 200;
+const GAP_MAX_MS = 1200;
+const GAP_DEFAULT_MS = 500;
+/** سقف هم‌زمانی درخواست‌های در پرواز به باسکول */
+const CONCURRENCY_DEFAULT = 4;
+const CONCURRENCY_MAX = 8;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export function buskoolConfig() {
+  const raw = Number(process.env.BUSKOOL_DELAY_MS ?? GAP_DEFAULT_MS);
+  const gap = Number.isFinite(raw) ? raw : GAP_DEFAULT_MS;
+  const rawC = Number(process.env.BUSKOOL_CONCURRENCY ?? CONCURRENCY_DEFAULT);
+  const concurrency = Number.isFinite(rawC) ? rawC : CONCURRENCY_DEFAULT;
   return {
-    delayMs: Math.max(250, Number(process.env.BUSKOOL_DELAY_MS ?? 5000)),
+    // فاصلهٔ حداقلی بین «شروع» دو درخواست — نه انتظار برای پایان قبلی
+    delayMs: Math.min(Math.max(gap, GAP_MIN_MS), GAP_MAX_MS),
+    concurrency: Math.min(Math.max(Math.floor(concurrency), 1), CONCURRENCY_MAX),
     cookie: (process.env.BUSKOOL_COOKIE ?? '').trim(),
   };
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+// ─── عقب‌نشینی تطبیقی (ماژول-سطح؛ سرور زنده/گرم بین جاب‌ها حفظ می‌شود) ────────
 
-/** گلوِ درخواست‌ها — همهٔ فراخوانی‌ها از این صف واحد با فاصلهٔ تنظیمشده رد می‌شوند */
-let chain: Promise<unknown> = Promise.resolve();
+/** ضریب ادب جاری — ۱ یعنی سرعت عادی؛ با 429/403 نمایی بالا می‌رود (تا ۱۰)
+ *  و با هر پاسخ موفق آرام (۰٫۸۵×) برمی‌گردد. */
+let pacePenalty = 1;
+const PENALTY_MAX = 10;
+const EFFECTIVE_GAP_MAX_MS = 12_000;
+
+function effectiveGapMs(): number {
+  const { delayMs } = buskoolConfig();
+  return Math.min(Math.round(delayMs * pacePenalty), EFFECTIVE_GAP_MAX_MS);
+}
+
+/** وضعیت گام فعلی — برای ping و مشاهدهٔ زندهٔ رفتار ایمپورتر */
+export function buskoolPace() {
+  const { delayMs, concurrency } = buskoolConfig();
+  return {
+    gapMs: delayMs,
+    effectiveGapMs: effectiveGapMs(),
+    concurrency,
+    penalty: Math.round(pacePenalty * 100) / 100,
+  };
+}
+
+// ─── گیت نرخ سراسری ─────────────────────────────────────────────────────────
+//
+// تضمین می‌کند: (۱) بین «شروع» دو درخواست حداقل فاصلهٔ مؤثر فاصله باشد،
+// (۲) هم‌زمان حداکثر N درخواست در پرواز باشد. برخلاف زنجیرهٔ قبلی،
+// انتظارِ شبکهٔ درخواست‌های قبلی جلوی شروعِ بعدی‌ها را نمی‌گیرد.
+
+class PaceGate {
+  private active = 0;
+  private nextStart = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly waiters: Array<() => void> = [];
+
+  private tryStart(): boolean {
+    const { concurrency } = buskoolConfig();
+    if (this.active >= concurrency) return false;
+    const now = Date.now();
+    if (now < this.nextStart) return false;
+    this.nextStart = now + effectiveGapMs();
+    this.active++;
+    return true;
+  }
+
+  private pump(): void {
+    while (this.waiters.length && this.tryStart()) this.waiters.shift()!();
+    // اگر منتظرِ فاصلهٔ زمانی هستیم، تایمر بگذار (در محیط serverlessِ فریز-و-ادامه
+    // هم درست کار می‌کند — تایمنِ گذشته بلافاصله بعد از thaw فایر می‌شود)
+    if (this.waiters.length && !this.timer) {
+      const wait = Math.max(5, this.nextStart - Date.now() + 5);
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.pump();
+      }, wait);
+    }
+  }
+
+  async acquire(): Promise<void> {
+    if (this.tryStart()) return;
+    await new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+      this.pump();
+    });
+  }
+
+  release(): void {
+    this.active = Math.max(0, this.active - 1);
+    this.pump();
+  }
+}
+
+/** گیت مشترک همهٔ جاب‌ها — ایمپورتر تک‌جاب است، پس یک صف واحد کافی است */
+const gate = new PaceGate();
 
 export class BuskoolClient {
   /** آخرین مهر یک درخواست موفق — برای گزارش تعداد تماس با باسکول */
@@ -42,56 +139,60 @@ export class BuskoolClient {
     this.stop = stop;
   }
 
-  /** درخواست زنجیره‌ای — پیش از هر فراخوانی توقف جاب و فاصلهٔ ادب رعایت می‌شود */
-  call<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const run = async (): Promise<T> => {
-      if (this.stop()) throw new Error('JOB_STOPPED');
-      const { delayMs, cookie } = buskoolConfig();
-      await sleep(delayMs);
-      if (this.stop()) throw new Error('JOB_STOPPED');
+  /** درخواست با گیت نرخ — پیش از هر تلاش توقف جاب بررسی و فاصلهٔ ادب رعایت می‌شود */
+  async call<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    let lastErr: unknown;
 
-      let lastErr: unknown;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            'User-Agent': UA,
-            'X-Requested-With': 'XMLHttpRequest',
-            Accept: 'application/json, text/plain, */*',
-            Origin: API,
-            Referer: `${API}/`,
-          };
-          if (cookie) headers.Cookie = cookie;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (this.stop()) throw new Error('JOB_STOPPED');
+      await gate.acquire();
+      let released = false;
+      try {
+        const { cookie } = buskoolConfig();
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'User-Agent': UA,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'application/json, text/plain, */*',
+          Origin: API,
+          Referer: `${API}/`,
+        };
+        if (cookie) headers.Cookie = cookie;
 
-          const res = await fetch(`${API}${path}`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30_000),
-            redirect: 'follow',
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
-          const ctype = (res.headers.get('content-type') ?? '').split(';')[0];
-          if (ctype.includes('text/html')) {
-            // باسکول برای اندپوینت‌های لاگین‌دار (مثل عکس پروفایل) بدون کوکی
-            // به /login ریدایرکت می‌کند — پیام روشن بده نه خطای JSON parse
-            throw new Error('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
-          }
-          this.requests++;
-          return (await res.json()) as T;
-        } catch (err) {
-          lastErr = err;
-          if (this.stop()) throw new Error('JOB_STOPPED');
-          if (attempt < 3) await sleep(1500 * attempt);
+        const res = await fetch(`${API}${path}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30_000),
+          redirect: 'follow',
+        });
+        if (res.status === 429 || res.status === 403) {
+          // نشانهٔ محدودسازی — عقب‌نشینی نمایی؛ شاید درخواست بعدی بلافاصله رد شود
+          pacePenalty = Math.min(pacePenalty * 2, PENALTY_MAX);
+          throw new Error(`HTTP ${res.status} on ${path} (backoff ×${Math.round(pacePenalty)})`);
         }
+        if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+        const ctype = (res.headers.get('content-type') ?? '').split(';')[0];
+        if (ctype.includes('text/html')) {
+          // باسکول برای اندپوینت‌های لاگین‌دار (مثل عکس پروفایل) بدون کوکی
+          // به /login ریدایرکت می‌کند — پیام روشن بده نه خطای JSON parse
+          throw new Error('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
+        }
+        this.requests++;
+        // پاسخ سالم — آرام به سرعت عادی برگرد
+        pacePenalty = Math.max(1, pacePenalty * 0.85);
+        return (await res.json()) as T;
+      } catch (err) {
+        lastErr = err;
+        gate.release();
+        released = true;
+        if (this.stop()) throw new Error('JOB_STOPPED');
+        if (attempt < 3) await sleep(1500 * attempt * Math.min(pacePenalty, 4));
+      } finally {
+        if (!released) gate.release();
       }
-      throw new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`);
-    };
-
-    const result = chain.then(run, run);
-    // زنجیر را حتی در صورت خطا ادامه بده — یک خطا صف را قفل نکند
-    chain = result.catch(() => undefined);
-    return result;
+    }
+    throw new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`);
   }
 }
 

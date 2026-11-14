@@ -39,7 +39,12 @@
  *     (users/{userId}/avatars/gallery/…) تا کاتالوگ عمومی (/c/…) آنها را
  *     نشان دهد؛ کاربران قدیمی هم در اجرای بعدی لیست، از همان URLهای
  *     b.relateds بازآوری می‌شوند (idempotent با metadata.originalUrl).
- *   • همهٔ درخواست‌های باسکول از صف BuskoolClient با فاصلهٔ BUSKOOL_DELAY_MS.
+ *   • سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن باسکول»):
+ *     درخواست‌های مستقل باسکول هم‌زمان شروع می‌شوند (گیت نرخ با فاصلهٔ
+ *     کوتاه بین «شروع» درخواست‌ها + سقف هم‌زمانی + عقب‌نشینی خودکار روی
+ *     429/403 — buskool.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
+ *     همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
+ *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
@@ -50,6 +55,7 @@ import { storage } from '../common/config/env';
 import {
   BuskoolClient,
   buskoolConfig,
+  buskoolPace,
   type BkAvatarResp,
   type BkCommentsResp,
   type BkProductDetailResp,
@@ -117,6 +123,8 @@ const PAGE = 20; // اندازهٔ صفحهٔ لیست آگهی‌های باس�
 const MAX_PHOTOS_PER_PRODUCT = 4;
 /** سقف تصاویر کسب‌وکار هر کاربر — همان سقف گالری فرم ویرایش پروفایل (۸) */
 const MAX_RELATEDS_PER_USER = 8;
+/** آپ‌سرت‌های مستقل DB در هر دستهٔ موازی کوچک */
+const DB_CHUNK = 4;
 
 @Injectable()
 export class ImporterService {
@@ -141,6 +149,9 @@ export class ImporterService {
       // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های باسکول دقیقاً
       // در همان جا (users/{userId}/…) می‌نشینند. فرانت نشان می‌دهد.
       storageDriver: storage.DRIVER,
+      // وضعیت گامِ فعلی باسکول (۱۴-۱۱): فاصلهٔ مؤثر (بعد از عقب‌نشینی‌ها)،
+      // هم‌زمانی و ضریب ادب — برای مشاهدهٔ زندهٔ رفتار ایمپورتر در پنل
+      pace: buskoolPace(),
     };
   }
 
@@ -620,7 +631,15 @@ export class ImporterService {
     this.finishJob(job);
   }
 
-  /** یک کاربر باسکول را کامل ایمپورت می‌کند — خروجی: رکورد User ایمچ */
+  /** یک کاربر باسکول را کامل ایمپورت می‌کند — خروجی: رکورد User ایمچ.
+   *
+   * معماری سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن باسکول»):
+   * درخواست‌های مستقل باسکول (آمار، کامنت‌ها، لیست آگهی‌ها، آواتارِ
+   * fallback) بلافاصله پس از پروفایل «هم‌زمان» شروع می‌شوند — گیتِ نرخِ
+   * BuskoolClient خودش فاصلهٔ ادب و سقف هم‌زمانی را رعایت می‌کند. کارهای
+   * دیتابیس در همین حین انجام می‌شوند، جزئیات آگهی‌ها موازی گرفته می‌شوند
+   * و همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
+   * دانلود/پردازش/ذخیره می‌شوند. نتیجه: همان داده، چند برابر سریع‌تر. */
   private async importOneUser(
     job: JobInternal,
     bk: BuskoolClient,
@@ -636,10 +655,25 @@ export class ImporterService {
     const ui = profile.user_info;
     const pf = profile.profile;
 
-    const statsResp: BkStatsResp | null = await bk
-      .call<BkStatsResp>('/get_user_statistics_by_user_name', { user_name: userName })
-      .catch(() => null);
-    const st = statsResp?.statistics?.user_info;
+    // ── درخواست‌های مستقل هم‌زمان (گیت نرخ فاصله/سقف هم‌زمانی را رعایت می‌کند) ──
+    const statsP = guarded(
+      bk.call<BkStatsResp>('/get_user_statistics_by_user_name', { user_name: userName }).catch(() => null),
+    );
+    const commentsP = guarded(
+      bk
+        .call<BkCommentsResp>('/profile/get-user-comments', { user_id: ui.id })
+        .catch(() => null as unknown as BkCommentsResp),
+    );
+    const itemsP = guarded(this.fetchProductItems(job, bk, userName, maxProducts));
+    // آواتار — منبع اصلی فیلد profile_photo همین پاسخ پروفایل است؛ اندپوینت
+    // عکس تأییدشده فقط fallback است و فقط وقتی لازم است صدا زده می‌شود.
+    const avatarFallbackP = guarded(
+      (pf?.profile_photo ?? '').trim()
+        ? Promise.resolve(null)
+        : bk.call<BkAvatarResp>('/get_user_last_confirmed_profile_photo', { user_id: ui.id }).catch(() => null),
+    );
+
+    // ── کارهای دیتابیس در حین پرواز درخواست‌های باسکول ──
 
     // شماره موبایل: دستی > جدول منبع > ساختگی از bUserId
     const phone =
@@ -678,6 +712,11 @@ export class ImporterService {
       select: { b: true },
     });
     const prevB = asBUserData(prevDoc?.b);
+
+    // آمار باسکول — از همان ابتدای جاب موازی در پرواز بود، الان آماده است
+    const statsResp = await statsP;
+    const st = statsResp?.statistics?.user_info;
+
     const bkPackageType = st?.active_package_type ?? ui.active_pakage_type ?? 0;
     const bkPremium = bkPackageType > 0;
     const relatedUrls = (profile.relateds ?? [])
@@ -807,7 +846,7 @@ export class ImporterService {
       `کاربر ${ui.first_name} ${ui.last_name} (@${userName}) ثبت شد — ایمچ #${user.id.slice(-6)} • باسکول #${ui.id}`,
     );
 
-    // ── ۲. آواتار ──
+    // ── ۲. آواتار — تعیین منبع (دانلود/ذخیره در استخر مشترک تصاویر، مرحلهٔ ۵) ──
     // منبع اصلی (خواستهٔ مالک ۱۳-۱۱): فیلد profile_photo در پاسخ
     // load_profile_by_user_name — همان درخواستی که برای پروفایل زده‌ایم و
     // کوکی باسکول رویش هست (نمونهٔ پاسخ: URL مستقیم profile-photos آروان).
@@ -815,115 +854,28 @@ export class ImporterService {
     // است — برای کاربرانی که عکسشان هنوز «تأییدشده» نیست خالی برمی‌گردد و
     // همین باعث می‌شد آواتار برخی کاربران رد شود.
     this.step(job, 'avatar', 'active');
-    try {
-      let avUrl: string | null = (pf?.profile_photo ?? '').trim() || null;
-      if (!avUrl) {
-        try {
-          const av: BkAvatarResp = await bk.call('/get_user_last_confirmed_profile_photo', { user_id: ui.id });
-          avUrl =
-            typeof av?.profile_photo === 'string'
-              ? av.profile_photo
-              : ((av?.profile_photo as { file_path?: string; url?: string } | null)?.file_path ??
-                (av?.profile_photo as { url?: string } | null)?.url ??
-                null);
-        } catch (err) {
-          if ((err as Error).message === 'JOB_STOPPED') throw err;
-          this.log(job, 'info', 'اندپوینت عکس تأییدشده جواب نداد — ادامه بدون آن');
-        }
-      }
-      if (avUrl) {
-        const img = await fetchImage(avUrl);
-        const norm = img ? await normalizeImage(img.buf, img.mime) : null;
-        if (norm) {
-          // همان مسیر/پردازش آپلود عادی پروفایل: users/{userId}/avatars/avatar/…
-          // (خواستهٔ مالک ۱۳-۱۱) — انگار که کاربر خودش عکس پروفایل را گذاشته
-          const res = await this.uploads.ingestExternal({
-            ownerId: user.id,
-            model: 'User',
-            modelId: user.id,
-            fieldKey: 'avatar',
-            buffer: norm.buf,
-            mimetype: norm.mime,
-            filename: avUrl.split('/').pop() || `buskool-avatar-${userName}`,
-            replace: true, // اسلات تک‌فایلی — عین پنل کاربر
-            metadata: { importedFrom: 'buskool', originalUrl: avUrl },
-          });
-          if (res.ok) {
-            await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: res.file.url } });
-            this.step(job, 'avatar', 'done');
-            this.log(job, 'success', 'آواتار دانلود و در پوشهٔ خود کاربر ذخیره شد');
-          } else {
-            // ردشدن گیرایی نیست — کاربر بدون آواتار ادامه می‌یابد (حرف اول نام)
-            this.step(job, 'avatar', 'done');
-            this.log(job, 'warn', `آواتار رد شد (${res.reason})`);
-          }
-        } else {
-          this.step(job, 'avatar', 'done');
-          this.log(job, 'warn', 'دانلود/پردازش آواتار ناموفق بود — رد شد');
-        }
-      } else {
-        this.step(job, 'avatar', 'skipped');
-        this.log(job, 'info', 'آواتاری روی باسکول ثبت نشده است');
-      }
-    } catch (err) {
-      if ((err as Error).message === 'JOB_STOPPED') throw err;
+    let avUrl: string | null = (pf?.profile_photo ?? '').trim() || null;
+    if (!avUrl) {
+      const av = await avatarFallbackP;
+      avUrl =
+        typeof av?.profile_photo === 'string'
+          ? av.profile_photo
+          : ((av?.profile_photo as { file_path?: string; url?: string } | null)?.file_path ??
+            (av?.profile_photo as { url?: string } | null)?.url ??
+            null);
+    }
+    if (!avUrl) {
       this.step(job, 'avatar', 'skipped');
-      this.log(job, 'warn', `آواتار رد شد: ${(err as Error).message}`);
+      this.log(job, 'info', 'آواتاری روی باسکول ثبت نشده است');
     }
 
-    // ── ۲.۵. تصاویر کسب‌وکار (relateds باسکول) ──
-    // (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل باسکول همان تصاویر
-    // کسب‌وکار کاربرند (محصولات | شرکت | کارکنان) — به اسلات استاندارد گالری
-    // کاربر rehost می‌شوند تا کاتالوگ عمومی (/c/…) آنها را در بخش «مجوزها،
-    // گواهی‌نامه‌ها و جوایز» نشان دهد؛ همان مسیر/پردازش آپلود عادی:
-    // users/{userId}/avatars/gallery/… — «انگار که کاربر خودش تصاویر را گذاشته».
-    this.step(job, 'relateds', 'active');
-    try {
-      if (relatedUrls.length) {
-        this.log(job, 'info', `تصاویر کسب‌وکار باسکول (${Math.min(relatedUrls.length, MAX_RELATEDS_PER_USER)} مورد)…`);
-        const { done, already } = await this.ingestUserRelateds(job, user.id, relatedUrls);
-        this.step(job, 'relateds', 'done');
-        if (done > 0) {
-          this.log(
-            job,
-            'success',
-            `${done} تصویر کسب‌وکار در گالری کاربر ذخیره شد${already ? ` (${already} مورد قبلاً بود)` : ''}`,
-          );
-        } else if (already > 0) {
-          this.log(job, 'info', 'تصاویر کسب‌وکار قبلاً ذخیره شده‌اند — رد شد');
-        } else {
-          this.log(job, 'warn', 'هیچ‌کدام از تصاویر کسب‌وکار دانلود/پذیرش نشد');
-        }
-      } else {
-        this.step(job, 'relateds', 'skipped');
-        this.log(job, 'info', 'تصویر کسب‌وکاری روی باسکول ثبت نشده است');
-      }
-    } catch (err) {
-      if ((err as Error).message === 'JOB_STOPPED') throw err;
-      this.step(job, 'relateds', 'skipped');
-      this.log(job, 'warn', `تصاویر کسب‌وکار رد شد: ${(err as Error).message}`);
-    }
+    // (تصاویر کسب‌وکار relateds — خواستهٔ مالک ۱۴-۱۱ — همراه آواتار و عکس‌های
+    //  آگهی‌ها، همه در استخر موازی مشترکِ مرحلهٔ ۵ پردازش می‌شوند؛ سقف همان
+    //  MAX_RELATEDS_PER_USER و idempotent با metadata.originalUrl)
 
-    // ── ۳. آگهی‌ها ──
+    // ── ۳. آگهی‌ها — لیست از ابتدای جاب موازی در حال دریافت بوده؛ الان آماده است ──
     this.step(job, 'products', 'active');
-    const items: BkProductItem[] = [];
-    for (let from = 0; ; from += PAGE) {
-      const resp: BkProductListResp = await bk.call('/get_product_list_by_user_name', {
-        user_name: userName,
-        status: 2,
-        is_public: true,
-        from_record_number: from,
-        to_record_number: from + PAGE,
-      });
-      const batch = (resp?.products ?? []).filter((p) => p?.main && !p.main.is_rejected && !p.main.deleted_at);
-      items.push(...batch);
-      if (maxProducts > 0 && items.length >= maxProducts) {
-        items.length = maxProducts;
-        break;
-      }
-      if (batch.length < PAGE) break;
-      if (job.stopRequested) throw new Error('JOB_STOPPED');
-    }
+    const items = await itemsP;
     this.bump(job, 'productsTotal', items.length);
     this.log(job, 'info', `${items.length} آگهی عمومی از باسکول دریافت شد`);
 
@@ -933,12 +885,14 @@ export class ImporterService {
     }
 
     let maxProductId = 0;
-    for (const item of items) {
+    for (const item of items) maxProductId = Math.max(maxProductId, item.main.id);
+    // آپ‌سرت‌های مستقل — دسته‌های کوچک موازی (رقابت ساخت دسته در
+    // ensureCategory با catch حل می‌شود)؛ ترتیب ثبت مهم نیست
+    for (let c = 0; c < items.length; c += DB_CHUNK) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
-      const m = item.main;
-      maxProductId = Math.max(maxProductId, m.id);
-      await this.upsertProduct(job, m, user.id, catById);
-      this.bump(job, 'products');
+      const chunk = items.slice(c, c + DB_CHUNK);
+      await Promise.all(chunk.map((item) => this.upsertProduct(job, item.main, user.id, catById)));
+      this.bump(job, 'products', chunk.length);
     }
     // اصلاح مکان کاربر با اولین آگهی (اگر از نام‌ها پیدا نشده بود)
     if (items.length && (!provinceLoc || !cityLoc) && items[0].main.province_id) {
@@ -966,66 +920,8 @@ export class ImporterService {
       });
     }
 
-    // ── ۴. عکس‌های آگهی‌ها ──
-    this.step(job, 'images', 'active');
-    for (const item of items) {
-      if (job.stopRequested) throw new Error('JOB_STOPPED');
-      const pid = item.main.id;
-      // idempotent: اگر قبلاً rehost شده، رد شو
-      const existing = await this.prisma.file.findFirst({
-        where: { relatedModel: 'Product', relatedId: String(pid), fieldKey: 'gallery' },
-        select: { id: true },
-      });
-      if (existing) continue;
-
-      const detail = await bk
-        .call<BkProductDetailResp>('/get_product_by_id', { product_id: pid })
-        .catch(() => null);
-      const photos = (detail?.product?.photos ?? [])
-        .map((p) => p.file_path)
-        .filter(Boolean)
-        .slice(0, MAX_PHOTOS_PER_PRODUCT);
-      if (!photos.length) continue;
-      this.log(job, 'info', `عکس‌های آگهی #${pid} (${photos.length} مورد)…`);
-
-      for (const [i, url] of photos.entries()) {
-        if (job.stopRequested) throw new Error('JOB_STOPPED');
-        const img = await fetchImage(url);
-        const norm = img ? await normalizeImage(img.buf, img.mime) : null;
-        if (!norm) {
-          this.bump(job, 'imagesFailed');
-          continue;
-        }
-        try {
-          // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
-          // users/{userId}/products/{pid}/gallery/… با واترمارک و تامبنیل —
-          // «انگار که آگهی توسط کاربر ایجاد شده»؛ ردیف File با storageKey کامل.
-          const res = await this.uploads.ingestExternal({
-            ownerId: user.id,
-            model: 'Product',
-            modelId: String(pid),
-            fieldKey: 'gallery',
-            buffer: norm.buf,
-            mimetype: norm.mime,
-            filename: url.split('/').pop() || `buskool-${pid}-${i}`,
-            replace: false, // گالری چندفایلی
-            metadata: { importedFrom: 'buskool', originalUrl: url },
-          });
-          if (res.ok) {
-            this.bump(job, 'imagesDownloaded');
-          } else {
-            this.bump(job, 'imagesFailed');
-            this.log(job, 'warn', `عکس ${pid}/${i} رد شد (${res.reason})`);
-          }
-        } catch (err) {
-          this.bump(job, 'imagesFailed');
-          this.log(job, 'warn', `عکس ${pid}/${i} ناموفق: ${(err as Error).message}`);
-        }
-      }
-    }
-    this.step(job, 'images', 'done');
-
-    // ── ۵. کامنت‌ها ──
+    // ── ۴. کامنت‌ها (قبل از تصاویر — پاسخ باسکول از ابتدای جاب آماده بوده و
+    //    ثبت DB سبک است؛ اگر وسط تصاویر جاب متوقف شود، این داده از قبل ثبت شده است) ──
     // (خواستهٔ مالک ۱۳-۱۱) نویسندگان کامنت‌های باسکول کاربر واقعی ایمچ نیستند —
     // دیگر برایشان User با شمارهٔ موبایل ساختگی ساخته نمی‌شود (اشغال شمارهٔ
     // واقعی + پر شدن جدول کاربران از کاربران الکی). نام/شهرشان در جدول
@@ -1033,9 +929,7 @@ export class ImporterService {
     // getSellerReviews: اول کامنت‌های واقعی، بعد این‌ها. پاک‌سازی ۲-۳ سال
     // بعد = deleteMany همین دو جدول، بدون دست‌زدن به جدول کاربران.
     this.step(job, 'reviews', 'active');
-    const comments: BkCommentsResp = await bk
-      .call<BkCommentsResp>('/profile/get-user-comments', { user_id: ui.id })
-      .catch(() => null as unknown as BkCommentsResp);
+    const comments = await commentsP;
     const list = comments?.comments ?? [];
     for (const c of list) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
@@ -1067,6 +961,191 @@ export class ImporterService {
       }
     }
     this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (بدون ساخت کاربر)`);
+
+    // ── ۵. تصاویر — آواتار + کسب‌وکار + عکس‌های آگهی‌ها، یک استخر موازی مشترک ──
+    this.step(job, 'relateds', 'active');
+    this.step(job, 'images', 'active');
+
+    // ۵.الف) تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل
+    // باسکول همان تصاویر کسب‌وکار کاربرند — به اسلات استاندارد گالری کاربر
+    // rehost می‌شوند تا کاتالوگ عمومی (/c/…) آنها را نشان دهد؛ idempotent با
+    // metadata.originalUrl
+    const relatedCapped = relatedUrls.slice(0, MAX_RELATEDS_PER_USER);
+    const relatedExisting = await this.prisma.file.findMany({
+      where: { relatedModel: 'User', relatedId: user.id, fieldKey: 'gallery' },
+      select: { metadata: true },
+    });
+    const relatedSeen = new Set(
+      relatedExisting
+        .map((f) => (f.metadata as { originalUrl?: string } | null)?.originalUrl)
+        .filter((u): u is string => Boolean(u)),
+    );
+    const relatedTodo = relatedCapped.filter((u) => !relatedSeen.has(u));
+    const relatedAlready = relatedCapped.length - relatedTodo.length;
+    if (relatedCapped.length) {
+      this.log(job, 'info', `تصاویر کسب‌وکار باسکول (${relatedCapped.length} مورد)…`);
+    } else {
+      this.step(job, 'relateds', 'skipped');
+      this.log(job, 'info', 'تصویر کسب‌وکاری روی باسکول ثبت نشده است');
+    }
+
+    // ۵.ب) آگهی‌های بدون عکسِ قبلاً ذخیره‌شده — یک کوئری برای همه (قبلاً یکی‌یکی)
+    const pidStrs = items.map((it) => String(it.main.id));
+    const doneFiles = pidStrs.length
+      ? await this.prisma.file.findMany({
+          where: { relatedModel: 'Product', fieldKey: 'gallery', relatedId: { in: pidStrs } },
+          select: { relatedId: true },
+        })
+      : [];
+    const pidsDone = new Set(doneFiles.map((f) => f.relatedId));
+    const needDetails = items.filter((it) => !pidsDone.has(String(it.main.id)));
+
+    // ۵.ج) جزئیات آگهی‌ها موازی — گیت نرخ خودش فاصلهٔ ادب را رعایت می‌کند
+    const detailResps = await Promise.all(
+      needDetails.map((it) =>
+        bk.call<BkProductDetailResp>('/get_product_by_id', { product_id: it.main.id }).catch(() => null),
+      ),
+    );
+    const photosByPid = new Map<number, string[]>();
+    needDetails.forEach((it, idx) => {
+      const photos = (detailResps[idx]?.product?.photos ?? [])
+        .map((p) => p.file_path)
+        .filter(Boolean)
+        .slice(0, MAX_PHOTOS_PER_PRODUCT);
+      if (photos.length) {
+        photosByPid.set(it.main.id, photos);
+        this.log(job, 'info', `عکس‌های آگهی #${it.main.id} (${photos.length} مورد)…`);
+      }
+    });
+
+    // ۵.د) استخر موازی مشترک: دانلود → نرمال‌سازی → همان مسیر/پردازش آپلود عادی
+    type ImgTask =
+      | { kind: 'avatar'; url: string }
+      | { kind: 'related'; url: string; i: number }
+      | { kind: 'product'; pid: number; url: string; i: number };
+    const imgTasks: ImgTask[] = [];
+    if (avUrl) imgTasks.push({ kind: 'avatar', url: avUrl });
+    relatedTodo.forEach((url, i) => imgTasks.push({ kind: 'related', url, i }));
+    for (const [pid, urls] of photosByPid) urls.forEach((url, i) => imgTasks.push({ kind: 'product', pid, url, i }));
+
+    let relatedDone = 0;
+    const imgWorker = async (t: ImgTask): Promise<void> => {
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
+      const img = await fetchImage(t.url);
+      const norm = img ? await normalizeImage(img.buf, img.mime) : null;
+      if (!norm) {
+        if (t.kind === 'avatar') {
+          this.step(job, 'avatar', 'done');
+          this.log(job, 'warn', 'دانلود/پردازش آواتار ناموفق بود — رد شد');
+        } else if (t.kind === 'related') {
+          this.bump(job, 'relatedsFailed');
+        } else {
+          this.bump(job, 'imagesFailed');
+        }
+        return;
+      }
+      try {
+        if (t.kind === 'avatar') {
+          // همان مسیر/پردازش آپلود عادی پروفایل: users/{userId}/avatars/avatar/…
+          // (خواستهٔ مالک ۱۳-۱۱) — انگار که کاربر خودش عکس پروفایل را گذاشته
+          const res = await this.uploads.ingestExternal({
+            ownerId: user.id,
+            model: 'User',
+            modelId: user.id,
+            fieldKey: 'avatar',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: t.url.split('/').pop() || `buskool-avatar-${userName}`,
+            replace: true, // اسلات تک‌فایلی — عین پنل کاربر
+            metadata: { importedFrom: 'buskool', originalUrl: t.url },
+          });
+          if (res.ok) {
+            await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: res.file.url } });
+            this.step(job, 'avatar', 'done');
+            this.log(job, 'success', 'آواتار دانلود و در پوشهٔ خود کاربر ذخیره شد');
+          } else {
+            // ردشدن گیرایی نیست — کاربر بدون آواتار ادامه می‌یابد (حرف اول نام)
+            this.step(job, 'avatar', 'done');
+            this.log(job, 'warn', `آواتار رد شد (${res.reason})`);
+          }
+        } else if (t.kind === 'related') {
+          // همان مسیر/پردازش آپلود عادی تصاویر کسب‌وکار:
+          // users/{userId}/avatars/gallery/… با تامبنیل و بدون واترمارک
+          const res = await this.uploads.ingestExternal({
+            ownerId: user.id,
+            model: 'User',
+            modelId: user.id,
+            fieldKey: 'gallery',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
+            replace: false, // گالری چندفایلی
+            metadata: { importedFrom: 'buskool', originalUrl: t.url },
+          });
+          if (res.ok) {
+            relatedDone++;
+            this.bump(job, 'relatedsDownloaded');
+          } else {
+            this.bump(job, 'relatedsFailed');
+            this.log(job, 'warn', `تصویر کسب‌وکار ${t.i + 1} رد شد (${res.reason})`);
+          }
+        } else {
+          // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
+          // users/{userId}/products/{pid}/gallery/… با واترمارک و تامبنیل —
+          // «انگار که آگهی توسط کاربر ایجاد شده»؛ ردیف File با storageKey کامل.
+          const res = await this.uploads.ingestExternal({
+            ownerId: user.id,
+            model: 'Product',
+            modelId: String(t.pid),
+            fieldKey: 'gallery',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: t.url.split('/').pop() || `buskool-${t.pid}-${t.i}`,
+            replace: false, // گالری چندفایلی
+            metadata: { importedFrom: 'buskool', originalUrl: t.url },
+          });
+          if (res.ok) {
+            this.bump(job, 'imagesDownloaded');
+          } else {
+            this.bump(job, 'imagesFailed');
+            this.log(job, 'warn', `عکس ${t.pid}/${t.i} رد شد (${res.reason})`);
+          }
+        }
+      } catch (err) {
+        if ((err as Error).message === 'JOB_STOPPED') throw err;
+        if (t.kind === 'avatar') {
+          this.step(job, 'avatar', 'done');
+          this.log(job, 'warn', `آواتار رد شد: ${(err as Error).message}`);
+        } else if (t.kind === 'related') {
+          this.bump(job, 'relatedsFailed');
+          this.log(job, 'warn', `تصویر کسب‌وکار ${t.i + 1} ناموفق: ${(err as Error).message}`);
+        } else {
+          this.bump(job, 'imagesFailed');
+          this.log(job, 'warn', `عکس ${t.pid}/${t.i} ناموفق: ${(err as Error).message}`);
+        }
+      }
+    };
+
+    if (imgTasks.length) {
+      await runPool(imgTasks, imagePoolSize(), () => job.stopRequested, imgWorker);
+    }
+
+    // جمع‌بندی مراحل تصویری
+    if (relatedCapped.length) {
+      this.step(job, 'relateds', 'done');
+      if (relatedDone > 0) {
+        this.log(
+          job,
+          'success',
+          `${relatedDone} تصویر کسب‌وکار در گالری کاربر ذخیره شد${relatedAlready ? ` (${relatedAlready} مورد قبلاً بود)` : ''}`,
+        );
+      } else if (relatedAlready > 0) {
+        this.log(job, 'info', 'تصاویر کسب‌وکار قبلاً ذخیره شده‌اند — رد شد');
+      } else {
+        this.log(job, 'warn', 'هیچ‌کدام از تصاویر کسب‌وکار دانلود/پذیرش نشد');
+      }
+    }
+    this.step(job, 'images', 'done');
 
     return user;
   }
@@ -1100,20 +1179,16 @@ export class ImporterService {
         .map((f) => (f.metadata as { originalUrl?: string } | null)?.originalUrl)
         .filter((u): u is string => Boolean(u)),
     );
+    const todo = capped.map((url, i) => ({ url, i })).filter((t) => !seen.has(t.url));
+    if (!todo.length) return { done: 0, already: capped.length };
 
     let done = 0;
-    let already = 0;
-    for (const [i, url] of capped.entries()) {
-      if (job.stopRequested) throw new Error('JOB_STOPPED');
-      if (seen.has(url)) {
-        already++;
-        continue;
-      }
-      const img = await fetchImage(url);
+    await runPool(todo, imagePoolSize(), () => job.stopRequested, async (t) => {
+      const img = await fetchImage(t.url);
       const norm = img ? await normalizeImage(img.buf, img.mime) : null;
       if (!norm) {
         this.bump(job, 'relatedsFailed');
-        continue;
+        return;
       }
       try {
         // همان مسیر/پردازش آپلود عادی تصاویر کسب‌وکار:
@@ -1125,24 +1200,54 @@ export class ImporterService {
           fieldKey: 'gallery',
           buffer: norm.buf,
           mimetype: norm.mime,
-          filename: url.split('/').pop() || `buskool-related-${i + 1}`,
+          filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
           replace: false, // گالری چندفایلی
-          metadata: { importedFrom: 'buskool', originalUrl: url },
+          metadata: { importedFrom: 'buskool', originalUrl: t.url },
         });
         if (res.ok) {
           done++;
           this.bump(job, 'relatedsDownloaded');
         } else {
           this.bump(job, 'relatedsFailed');
-          this.log(job, 'warn', `تصویر کسب‌وکار ${i + 1} رد شد (${res.reason})`);
+          this.log(job, 'warn', `تصویر کسب‌وکار ${t.i + 1} رد شد (${res.reason})`);
         }
       } catch (err) {
         if ((err as Error).message === 'JOB_STOPPED') throw err;
         this.bump(job, 'relatedsFailed');
-        this.log(job, 'warn', `تصویر کسب‌وکار ${i + 1} ناموفق: ${(err as Error).message}`);
+        this.log(job, 'warn', `تصویر کسب‌وکار ${t.i + 1} ناموفق: ${(err as Error).message}`);
       }
+    });
+    return { done, already: capped.length - todo.length };
+  }
+
+  /** لیست صفحه‌بندی‌شدهٔ آگهی‌های عمومی باسکول — صفحات ترتیبی‌اند (شمارهٔ
+   *  رکورد ادامهٔ صفحهٔ قبل است) ولی خودِ این حلقه از ابتدای جاب موازی با
+   *  بقیهٔ درخواست‌های کاربر در پرواز است. */
+  private async fetchProductItems(
+    job: JobInternal,
+    bk: BuskoolClient,
+    userName: string,
+    maxProducts: number,
+  ): Promise<BkProductItem[]> {
+    const items: BkProductItem[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const resp: BkProductListResp = await bk.call('/get_product_list_by_user_name', {
+        user_name: userName,
+        status: 2,
+        is_public: true,
+        from_record_number: from,
+        to_record_number: from + PAGE,
+      });
+      const batch = (resp?.products ?? []).filter((p) => p?.main && !p.main.is_rejected && !p.main.deleted_at);
+      items.push(...batch);
+      if (maxProducts > 0 && items.length >= maxProducts) {
+        items.length = maxProducts;
+        break;
+      }
+      if (batch.length < PAGE) break;
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
     }
-    return { done, already };
+    return items;
   }
 
   /** ثبت/بروزرسانی یک آگهی باسکول (الگوی scripts/seed-products.mjs) */
@@ -1633,7 +1738,63 @@ function aimchifyBrandMentions(text: string | null | undefined): string {
     .replace(/این[كک]وبا[كک]/g, 'آیمچ');
 }
 
+// ─── ابزارهای هم‌زمانی ──────────────────────────────────────────────────────
+
+/** promise معلق را در برابر «unhandled rejection» امن می‌کند — در فاز موازی
+ *  ممکن است خطای مسیر دیگر (مثلاً DB) زودتر پرتاب شود و این درخواست‌ها هرگز
+ *  await نشوند؛ گارد، کرشِ پروسهٔ serverless را غیرممکن می‌کند. */
+function guarded<T>(p: Promise<T>): Promise<T> {
+  p.catch(() => undefined);
+  return p;
+}
+
+/** استخر کارگر موازی — N کارگر وظیفه‌ها را از یک صف مشترک برمی‌دارند.
+ *  خطای هر وظیفه مستقل است (درون worker مدیریت می‌شود)؛ فقط JOB_STOPPED
+ *  کل استخر را می‌اندازد. */
+async function runPool<T>(
+  tasks: T[],
+  concurrency: number,
+  stop: () => boolean,
+  worker: (task: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const size = Math.max(1, Math.min(concurrency, tasks.length));
+  const runners = Array.from({ length: size }, async () => {
+    for (;;) {
+      if (stop()) throw new Error('JOB_STOPPED');
+      const i = next++;
+      if (i >= tasks.length) return;
+      try {
+        await worker(tasks[i]);
+      } catch (err) {
+        if ((err as Error)?.message === 'JOB_STOPPED') throw err;
+        // خطای مستقلِ این وظیفه — بقیهٔ صف ادامه می‌دهند؛ لاگ/شمارندهٔ خطا
+        // وظیفهٔ خود worker است (مثل imgWorker که هر عکس را جدا مدیریت می‌کند)
+      }
+    }
+  });
+  await Promise.all(runners);
+}
+
+/** هم‌زمانی دانلود/پردازش تصاویر (sharp + آپلود ابر) — پیش‌فرض ۴ */
+function imagePoolSize(): number {
+  const raw = Number(process.env.IMPORTER_IMAGE_CONCURRENCY ?? 4);
+  const n = Number.isFinite(raw) ? Math.floor(raw) : 4;
+  return Math.min(Math.max(n, 1), 8);
+}
+
+/** دانلود تصویر با دو تلاش — CDN گاهی یک‌باره قطع می‌کند؛ تلاش دوم نرخ
+ *  موفقیت را در شبکهٔ لرزان بالا می‌برد (خطای هر عکس مستقل است). */
 async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const r = await fetchImageOnce(rawUrl);
+    if (r) return r;
+    if (attempt < 2) await new Promise<void>((res) => setTimeout(res, 700));
+  }
+  return null;
+}
+
+async function fetchImageOnce(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
   try {
     const u = new URL(rawUrl);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
@@ -1641,7 +1802,13 @@ async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string }
     if (host === 'localhost' || /^127\.|^10\.|^192\.168\.|^169\.254\./.test(host)) return null;
     const res = await fetch(u.toString(), {
       signal: AbortSignal.timeout(20_000),
-      headers: { 'user-agent': 'Megan-importer/1.0', accept: 'image/*' },
+      // هدرهای مرورگرگونه — CDN آروان با آن‌ها پایدارتر پاسخ می‌دهد
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        referer: 'https://www.buskool.com/',
+      },
       redirect: 'follow',
     });
     if (!res.ok) return null;
