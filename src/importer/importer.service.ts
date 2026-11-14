@@ -54,6 +54,7 @@ import {
   type BkStatsResp,
 } from './buskool.client';
 import { importerAdminPhone } from './dto';
+import { descToText } from './desc-text';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
 
 // ─── تایپ‌های جاب (قرارداد فرانت) ───────────────────────────────────────────
@@ -1040,7 +1041,8 @@ export class ImporterService {
       where: { id: m.id },
       update: {
         productName: name,
-        description: aimchifyBrandMentions((m.description ?? '').trim()),
+        // <hr/> جداکنندهٔ خطوط باسکول → خط نو (خواستهٔ مالک ۱۴-۱۱)
+        description: aimchifyBrandMentions(descToText(m.description)),
         priceUpdatedAt,
         // پنجرهٔ اعتبار ۳روزه برای آگهی باسکولی بی‌معناست — قیمتش ماه‌ها/سال‌ها
         // قدیمی است و بج «قیمت منقضی شده» پنل بلافاصله می‌افتاد؛ کهنگی عمومی
@@ -1064,7 +1066,7 @@ export class ImporterService {
         id: m.id,
         productName: name,
         slug: `فروش-عمده-${name}-${m.id}`,
-        description: aimchifyBrandMentions((m.description ?? '').trim()),
+        description: aimchifyBrandMentions(descToText(m.description)),
         priceUpdatedAt,
         priceValidityDays: 3650,
         categoryId,
