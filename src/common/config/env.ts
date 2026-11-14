@@ -1,16 +1,39 @@
 /**
  * پیکربندی محیط — یک‌بار در بوت لود و اعتبارسنجی می‌شود (fail-fast).
  * dotenv با override چون سندباکس/پلتفرم ممکن است DATABASE_URL پیش‌فرض داشته باشد.
+ *
+ * روی ورسل (سرورلس) فایل .env اصلاً لود نمی‌شود: متغیرهای ست‌شده در پنل
+ * ورسل منبع حقیقت‌اند. اگر .env همراه باندل تابع بیاید و با override لود
+ * شود، PORT پلتفرم را با PORT=4000 لوکال له می‌کند و تابع روی پورت اشتباه
+ * listen می‌کند (FUNCTION_INVOCATION_FAILED).
  */
 import dotenv from 'dotenv';
-dotenv.config({ path: '.env', override: true });
+const isVercel = !!process.env.VERCEL;
+if (!isVercel) dotenv.config({ path: '.env', override: true });
+
+/** متغیرهای الزامی غایب — همه با هم جمع و یک‌بار گزارش می‌شوند */
+const missingRequired: string[] = [];
 
 function required(name: string, value: string | undefined, minLen = 1): string {
   if (!value || value.length < minLen) {
-    console.error(`Invalid environment: ${name} is required${minLen > 1 ? ` (min ${minLen} chars)` : ''}`);
-    process.exit(1);
+    missingRequired.push(name + (minLen > 1 ? ` (حداقل ${minLen} نویسه)` : ''));
+    return '' as string;
   }
   return value;
+}
+
+function exitIfMissing(): void {
+  if (!missingRequired.length) return;
+  console.error('مگان: متغیرهای محیطی الزامی ست نشده‌اند:');
+  for (const item of missingRequired) console.error(`  - ${item}`);
+  if (isVercel) {
+    console.error(
+      'در ورسل این‌ها را در Settings → Environment Variables ست کنید (برای Production و Preview) و Redeploy بگیرید.',
+    );
+  } else {
+    console.error('مقادیر را در فایل .env پروژه ست کنید.');
+  }
+  process.exit(1);
 }
 
 function num(name: string, value: string | undefined, fallback: number): number {
@@ -71,6 +94,10 @@ export const env = Object.freeze({
   VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@imach.ir',
 });
 
+// بعد از ارزیابی کل آبجکت env — همهٔ required()ها اجرا شده‌اند؛ حالا اگر
+// چیزی غایب بود با یک پیام جمع‌بندی‌شده خارج می‌شویم (نه اولین مورد).
+exitIfMissing();
+
 /**
  * کد ثابت OTP — تا وقتی پنل پیامکی نداریم (خواسته مالک: «فعلا کد 1234»).
  * مقدار غیرخالی → همیشه همان کد صادر می‌شود؛ با رسیدن پنل پیامک، این کلید را
@@ -115,7 +142,16 @@ export function jwtExpiresInSeconds(spec = env.JWT_EXPIRES_IN): number {
 export const storage = Object.freeze({
   /** «arvan» (S3-compatible) | «local» (دیسک زیر UPLOAD_PATH)
  *  پروفایل local درایور را به «local» مجبور می‌کند (سوییچ آفلاین). */
-  DRIVER: isLocalProfile ? 'local' : process.env.STORAGE_DRIVER || 'arvan',
+  DRIVER: (() => {
+    // روی ورسل دیسک تابع readonly است — درایور local هم آپلود را می‌شکست هم
+    // سرو فایل را؛ اگر خواسته شده باشد با هشدار نادیده گرفته می‌شود.
+    const wanted = isLocalProfile ? 'local' : process.env.STORAGE_DRIVER || 'arvan';
+    if (isVercel && wanted === 'local') {
+      console.warn('مگان: STORAGE_DRIVER=local روی ورسل پشتیبانی نمی‌شود (دیسک readonly) — درایور arvan اعمال شد.');
+      return 'arvan';
+    }
+    return wanted;
+  })(),
   MAX_FILE_SIZE: num('MAX_FILE_SIZE', process.env.MAX_FILE_SIZE, 5 * 1024 * 1024),
   /** فقط درایور local */
   UPLOAD_PATH: process.env.UPLOAD_PATH || './uploads',
