@@ -36,7 +36,7 @@ let fastifyPromise = null;
 async function getFastify() {
   if (!fastifyPromise) {
     fastifyPromise = Promise.resolve()
-      .then(() => require('../dist/serverless-app')) // require سنگین — تنبل
+      .then(() => require('../.serverless/serverless-bundle.cjs')) // باندل esbuild — تنبل
       .then((m) => m.getApp())
       .then((app) => app.getHttpAdapter().getInstance())
       .catch((err) => {

@@ -5,7 +5,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && node scripts/bundle-serverless.cjs",
     "start": "node dist/main.js",
     "dev": "nest start --watch",
     "postinstall": "node scripts/vercel-postinstall.js",
@@ -56,6 +56,7 @@
     "@nestjs/cli": "^12.0.1",
     "@types/node": "^24.5.2",
     "@types/web-push": "^3.6.4",
+    "esbuild": "^0.28.2",
     "mongodb": "^7.6.0",
     "prisma": "^6.19.3",
     "socket.io-client": "^4.8.4",
