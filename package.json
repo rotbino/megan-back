@@ -62,11 +62,6 @@
     "typescript": "^5.9.2"
   },
   "overrides": {
-    "fastify-socket.io": {
-      "fastify": "$fastify"
-    },
-    "@nestjs/platform-fastify": {
-      "fastify": "$fastify"
-    }
+    "fastify": "$fastify"
   }
 }
