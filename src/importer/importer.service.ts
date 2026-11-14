@@ -940,7 +940,9 @@ export class ImporterService {
         where: { authorId_sellerId: { authorId: reviewer.id, sellerId: user.id } },
         update: {
           rating: c.rating_score ?? 5,
-          text: aimchifyBrandMentions((c.text ?? '').slice(0, 1000)),
+          // متن خالیِ پاسخ جدید (کوکی منقضی شده یا کامنت فقط-امتیازی) نباید
+          // متنِ قبلاً دریافت‌شده را پاک کند — فقط متنِ واقعی جایگزین می‌شود
+          ...(c.text ? { text: aimchifyBrandMentions(c.text.slice(0, 1000)) } : {}),
           createdAt: this.bkDate(c.created_at) ?? new Date(),
         },
         create: {
@@ -958,6 +960,13 @@ export class ImporterService {
       const empty = list.filter((c) => !c.text).length;
       if (empty > 0 && !buskoolConfig().cookie) {
         this.log(job, 'warn', `${empty} کامنت بدون متن است — با BUSKOOL_COOKIE متن کامل گرفته می‌شود`);
+      } else if (empty > 0) {
+        // کوکی هست ولی باز متن خالی آمد — یا سشن منقضی شده یا کامنت فقط-امتیازی است
+        this.log(
+          job,
+          'warn',
+          `${empty} کامنت بدون متن آمد با اینکه BUSKOOL_COOKIE تنظیم است — اگر همه‌شان خالی‌اند احتمالاً کوکی منقضی شده (متن‌های قبلی حفظ شدند)`,
+        );
       }
     }
     this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (بدون ساخت کاربر)`);
