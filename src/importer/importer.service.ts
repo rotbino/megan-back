@@ -34,6 +34,11 @@
  *   • آواتار: منبع اصلی فیلد profile_photo در پاسخ load_profile_by_user_name
  *     است (کوکی همان‌جا هست)؛ اندپوینت get_user_last_confirmed_profile_photo
  *     فقط fallback است — عکس «تأییدنشده»ها را برنمی‌گرداند.
+ *   • تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل باسکول
+ *     (relateds) به اسلات استاندارد گالری کاربر rehost می‌شوند
+ *     (users/{userId}/avatars/gallery/…) تا کاتالوگ عمومی (/c/…) آنها را
+ *     نشان دهد؛ کاربران قدیمی هم در اجرای بعدی لیست، از همان URLهای
+ *     b.relateds بازآوری می‌شوند (idempotent با metadata.originalUrl).
  *   • همهٔ درخواست‌های باسکول از صف BuskoolClient با فاصلهٔ BUSKOOL_DELAY_MS.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
@@ -101,6 +106,7 @@ interface JobInternal extends ImportJob {
 const STEP_DEFS: { key: string; label: string }[] = [
   { key: 'profile', label: 'پروفایل و ساخت کاربر' },
   { key: 'avatar', label: 'آواتار' },
+  { key: 'relateds', label: 'تصاویر کسب‌وکار' },
   { key: 'products', label: 'آگهی‌ها' },
   { key: 'images', label: 'تصاویر آگهی‌ها' },
   { key: 'reviews', label: 'کامنت‌ها' },
@@ -109,6 +115,8 @@ const STEP_DEFS: { key: string; label: string }[] = [
 const MAX_JOBS = 50;
 const PAGE = 20; // اندازهٔ صفحهٔ لیست آگهی‌های باسکول
 const MAX_PHOTOS_PER_PRODUCT = 4;
+/** سقف تصاویر کسب‌وکار هر کاربر — همان سقف گالری فرم ویرایش پروفایل (۸) */
+const MAX_RELATEDS_PER_USER = 8;
 
 @Injectable()
 export class ImporterService {
@@ -558,7 +566,7 @@ export class ImporterService {
       // ── ضدتکرار (خواستهٔ مالک): کاربر ایمپورت‌شده — موفق یا ناقص — رد می‌شود ──
       const existing = await this.prisma.user.findFirst({
         where: { bUserName: row.userName },
-        select: { failedImport: true },
+        select: { id: true, failedImport: true, b: true },
       });
       if (existing) {
         this.bump(job, 'usersSkipped');
@@ -567,6 +575,24 @@ export class ImporterService {
           'warn',
           `↷ ${row.userName} رد شد — ${existing.failedImport ? 'ایمپورت ناقص قبلی (failedImport)' : 'قبلاً ایمپورت شده'}`,
         );
+        // بازآوری تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): کاربرانِ ایمپورت‌شدهٔ
+        // قدیمی عکس‌های مربوطهٔ باسکول را فقط به‌صورت URL خام در b.relateds
+        // دارند — بدون تماس جدیدی با باسکول، از همان URLهای آرشیوشده در
+        // گالری‌شان rehost می‌شوند؛ idempotent است و در اجرای بعدی رد می‌شود.
+        if (!existing.failedImport) {
+          const b = asBUserData(existing.b);
+          if (b?.relateds?.length) {
+            try {
+              const { done } = await this.ingestUserRelateds(job, existing.id, b.relateds);
+              if (done > 0) {
+                this.log(job, 'success', `  ↳ ${done} تصویر کسب‌وکار باسکول به گالری‌اش اضافه شد`);
+              }
+            } catch (err) {
+              if ((err as Error).message === 'JOB_STOPPED') throw err;
+              this.log(job, 'warn', `  ↳ بازآوری تصاویر کسب‌وکار ناموفق: ${(err as Error).message}`);
+            }
+          }
+        }
         continue;
       }
 
@@ -845,6 +871,39 @@ export class ImporterService {
       this.log(job, 'warn', `آواتار رد شد: ${(err as Error).message}`);
     }
 
+    // ── ۲.۵. تصاویر کسب‌وکار (relateds باسکول) ──
+    // (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل باسکول همان تصاویر
+    // کسب‌وکار کاربرند (محصولات | شرکت | کارکنان) — به اسلات استاندارد گالری
+    // کاربر rehost می‌شوند تا کاتالوگ عمومی (/c/…) آنها را در بخش «مجوزها،
+    // گواهی‌نامه‌ها و جوایز» نشان دهد؛ همان مسیر/پردازش آپلود عادی:
+    // users/{userId}/avatars/gallery/… — «انگار که کاربر خودش تصاویر را گذاشته».
+    this.step(job, 'relateds', 'active');
+    try {
+      if (relatedUrls.length) {
+        this.log(job, 'info', `تصاویر کسب‌وکار باسکول (${Math.min(relatedUrls.length, MAX_RELATEDS_PER_USER)} مورد)…`);
+        const { done, already } = await this.ingestUserRelateds(job, user.id, relatedUrls);
+        this.step(job, 'relateds', 'done');
+        if (done > 0) {
+          this.log(
+            job,
+            'success',
+            `${done} تصویر کسب‌وکار در گالری کاربر ذخیره شد${already ? ` (${already} مورد قبلاً بود)` : ''}`,
+          );
+        } else if (already > 0) {
+          this.log(job, 'info', 'تصاویر کسب‌وکار قبلاً ذخیره شده‌اند — رد شد');
+        } else {
+          this.log(job, 'warn', 'هیچ‌کدام از تصاویر کسب‌وکار دانلود/پذیرش نشد');
+        }
+      } else {
+        this.step(job, 'relateds', 'skipped');
+        this.log(job, 'info', 'تصویر کسب‌وکاری روی باسکول ثبت نشده است');
+      }
+    } catch (err) {
+      if ((err as Error).message === 'JOB_STOPPED') throw err;
+      this.step(job, 'relateds', 'skipped');
+      this.log(job, 'warn', `تصاویر کسب‌وکار رد شد: ${(err as Error).message}`);
+    }
+
     // ── ۳. آگهی‌ها ──
     this.step(job, 'products', 'active');
     const items: BkProductItem[] = [];
@@ -1010,6 +1069,80 @@ export class ImporterService {
     this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (بدون ساخت کاربر)`);
 
     return user;
+  }
+
+  /**
+   * تصاویر کسب‌وکار باسکول (relateds) → اسلات استاندارد گالری کاربر
+   * (File: relatedModel=User, fieldKey=gallery) — همان‌جایی که فرم ویرایش
+   * پروفایل می‌نویسد و کاتالوگ عمومی (getSeller → /c/…) می‌خواند.
+   *
+   * idempotent: هر URL فقط یک‌بار rehost می‌شود — ردیف‌های موجود گالری از
+   * روی metadata.originalUrl چک می‌شوند؛ در ایمپورت مجدد و بازآوری
+   * کاربران قدیمی چیزی دوبله نمی‌شود. سقف: MAX_RELATEDS_PER_USER (۸) —
+   * همان سقف گالری پنل، تا نتیجه عین گالری چیده‌شده توسط خود کاربر باشد.
+   * خطای هر عکس مستقل است و بقیه را نمی‌اندازد (شمارندهٔ relatedsFailed).
+   */
+  private async ingestUserRelateds(
+    job: JobInternal,
+    userId: string,
+    urls: string[],
+  ): Promise<{ done: number; already: number }> {
+    const capped = urls.filter(Boolean).slice(0, MAX_RELATEDS_PER_USER);
+    if (!capped.length) return { done: 0, already: 0 };
+
+    // URLهای قبلاً rehost‌شده — از metadata ردیف‌های موجود گالری کاربر
+    const existingRows = await this.prisma.file.findMany({
+      where: { relatedModel: 'User', relatedId: userId, fieldKey: 'gallery' },
+      select: { metadata: true },
+    });
+    const seen = new Set(
+      existingRows
+        .map((f) => (f.metadata as { originalUrl?: string } | null)?.originalUrl)
+        .filter((u): u is string => Boolean(u)),
+    );
+
+    let done = 0;
+    let already = 0;
+    for (const [i, url] of capped.entries()) {
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
+      if (seen.has(url)) {
+        already++;
+        continue;
+      }
+      const img = await fetchImage(url);
+      const norm = img ? await normalizeImage(img.buf, img.mime) : null;
+      if (!norm) {
+        this.bump(job, 'relatedsFailed');
+        continue;
+      }
+      try {
+        // همان مسیر/پردازش آپلود عادی تصاویر کسب‌وکار:
+        // users/{userId}/avatars/gallery/… با تامبنیل و بدون واترمارک
+        const res = await this.uploads.ingestExternal({
+          ownerId: userId,
+          model: 'User',
+          modelId: userId,
+          fieldKey: 'gallery',
+          buffer: norm.buf,
+          mimetype: norm.mime,
+          filename: url.split('/').pop() || `buskool-related-${i + 1}`,
+          replace: false, // گالری چندفایلی
+          metadata: { importedFrom: 'buskool', originalUrl: url },
+        });
+        if (res.ok) {
+          done++;
+          this.bump(job, 'relatedsDownloaded');
+        } else {
+          this.bump(job, 'relatedsFailed');
+          this.log(job, 'warn', `تصویر کسب‌وکار ${i + 1} رد شد (${res.reason})`);
+        }
+      } catch (err) {
+        if ((err as Error).message === 'JOB_STOPPED') throw err;
+        this.bump(job, 'relatedsFailed');
+        this.log(job, 'warn', `تصویر کسب‌وکار ${i + 1} ناموفق: ${(err as Error).message}`);
+      }
+    }
+    return { done, already };
   }
 
   /** ثبت/بروزرسانی یک آگهی باسکول (الگوی scripts/seed-products.mjs) */

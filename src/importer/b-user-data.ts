@@ -69,7 +69,9 @@ export interface BUserData {
   companyName: string;
   companyRegisterCode: string | null;
   confirmed: boolean;
-  /** URL عکس‌های مرتبط باسکول (related-photos آروان) */
+  /** URL عکس‌های مرتبط باسکول (related-photos آروان) — از ۱۴-۱۱ هنگام
+   *  ایمپورت در گالری کسب‌وکار کاربر هم rehost می‌شوند (اسلات استاندارد
+   *  gallery روی User)؛ این آرایه منبع بازآوری کاربران قدیمی است */
   relateds: string[];
   /** URL اصلی عکس پروفایل در باسکول (پیش از rehost در آیمچ) */
   profilePhotoUrl: string | null;
