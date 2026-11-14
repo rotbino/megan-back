@@ -39,7 +39,9 @@ export class SingleImportDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(500)
+  @Max(500, {
+    message: 'حداکثر آگهی هر ایمپورت تک‌کاربره ۵۰۰ است — برای همه، خالی بگذارید',
+  })
   maxProducts?: number;
 }
 
@@ -58,14 +60,17 @@ export class ListImportDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(200, {
+    message:
+      'تعداد کاربر هر جاب لیست حداکثر ۲۰۰ است — برای بیشتر، جاب‌ها را پشت‌سرهم اجرا کنید (دکمهٔ «ایمپورت‌نشدهٔ بعدی» offset را خودکار پر می‌کند)',
+  })
   limit?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  @Max(500)
+  @Max(500, { message: 'حداکثر آگهی هر کاربر ۵۰۰ است — برای همه، ۰ بگذارید' })
   maxProductsPerUser?: number;
 }
 
