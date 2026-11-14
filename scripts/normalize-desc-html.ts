@@ -14,17 +14,22 @@ const p = new PrismaClient();
 (async () => {
   const dirty = await p.product.findMany({
     where: { OR: [{ description: { contains: '<' } }, { description: { contains: '&' } }] },
-    select: { id: true, description: true },
+    select: { id: true, description: true, updatedAt: true },
   });
   console.log(`آگهی‌های نیازمند پاکسازی: ${dirty.length} (از کل ${await p.product.count()})`);
 
   let changed = 0;
-  for (const { id, description } of dirty) {
-    const clean = descToText(description);
-    if (clean === (description ?? '').trim()) continue;
+  for (const row of dirty) {
+    const clean = descToText(row.description);
+    if (clean === (row.description ?? '').trim()) continue;
     changed++;
     if (dry) continue;
-    await p.product.update({ where: { id }, data: { description: clean } });
+    // مهر updated_at حفظ می‌شود (درس ۱۵-۱۱): update عادی پریسما @updatedAt را
+    // به «اکنون» می‌برد و آگهی چندساله را بالای «جدیدترین» می‌نشاند
+    await p.product.update({
+      where: { id: row.id },
+      data: { description: clean, updatedAt: row.updatedAt },
+    });
   }
   console.log(dry ? `[dry-run] تغییرنیافته: ${changed}` : `به‌روز شد: ${changed}`);
 

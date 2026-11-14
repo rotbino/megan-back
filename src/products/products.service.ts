@@ -36,6 +36,24 @@ const PER_PAGE_DEFAULT = 16;
 /** سقف اسکن سورت «مطابق نیاز من» — رتبه‌بندی در حافظه؛ دادهٔ فعلی بازار
  *  بسیار کوچک‌تر است، سقف فقط حفاظت مقیاس است (خواستهٔ مالک ۱۱-۱۱) */
 const MATCH_SCAN_CAP = 1000;
+
+/** تاریخ مؤثر هر آگهی برای سورت = مهر آپدیت قیمت (همان چیزی که کارت
+ *  محصول نشان می‌دهد: priceUpdatedAt || updatedAt)؛ مهر updated_at
+ *  به‌تنهایی قابل‌آلودگی است — هر update عادی پریسما (اسکریپت‌های نگهداری/
+ *  بک‌فیل، ادغام و…) @updatedAt را به «اکنون» می‌برد و آگهی چندسالهٔ
+ *  باسکولی را بالای «جدیدترین» می‌نشانند در حالی که کارتش «۵ سال پیش»
+ *  است (گزارش مالک ۱۵-۱۱). priceUpdatedAt فقط با تغییر واقعی قیمت یا
+ *  ایمپورت با مهر باسکول جابه‌جا می‌شود — پایهٔ پایدار سورت است. */
+const NEWEST_ORDER: Prisma.ProductOrderByWithRelationInput[] = [
+  { priceUpdatedAt: 'desc' },
+  { updatedAt: 'desc' },
+];
+/** سورت طبیعی (RULES): نردبان ← فروشندهٔ ویژه ← تازه‌ترین قیمت ← تازه‌ترین ویرایش */
+const NATURAL_ORDER: Prisma.ProductOrderByWithRelationInput[] = [
+  { isLadder: 'desc' },
+  { isElevated: 'desc' },
+  ...NEWEST_ORDER,
+];
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
 const DAY_MS = 86_400_000;
 
@@ -148,7 +166,8 @@ export class ProductsService {
 
   /**
    * POST /products/getProductList — فیلتر دسته (با فرزندان) + استان/شهر + جستجو؛
-   * سورت «مرتبط‌ترین» = نردبان اول بعد جدیدترین (عین باسکول)؛ صفحه‌بندی.
+   * سورت «مرتبط‌ترین» = نردبان ← ویژه ← تازه‌ترین قیمت (تاریخ مؤثر =
+   * مهر آپدیت قیمت — همان چیزی که کارت نشان می‌دهد)؛ صفحه‌بندی.
    * کش ۳۰ثانیه‌ای با تگ products — هر ثبت/حذف/آپلود عکس بیاتش می‌کند.
    *
    * سورت «مطابق نیاز من» (خواستهٔ مالک ۱۱-۱۱): ورود خریدار از «درخواست‌های
@@ -209,11 +228,7 @@ export class ProductsService {
         ];
 
         const orderBy: Prisma.ProductOrderByWithRelationInput[] =
-          sort === 'newest'
-            ? [{ updatedAt: 'desc' }]
-            : // «مرتبط‌ترین» — خواسته مالک (۳۰-۱۰): نردبان اول، بعد آگهی‌های
-              // فروشندگان ویژه، بعد جدیدترین به‌روزرسانی
-              [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }];
+          sort === 'newest' ? NEWEST_ORDER : NATURAL_ORDER; // «مرتبط‌ترین» — خواسته مالک (۳۰-۱۰)
 
         // ── «مطابق نیاز من» — رتبه‌بندی در حافظه روی اسکن سقف‌دار ──
         let rows;
@@ -315,7 +330,7 @@ export class ProductsService {
 
   /** POST /products/getRelatedProducts — مشابه‌ها (خواسته مالک ۱-۱۱ دور هفتم):
    *  هم‌زیردسته اول، بعد بقیهٔ هم‌دستهٔ پدر؛ سورت طبیعی همه‌جا =
-   *  نردبان ← فروشندهٔ ویژه ← تازه‌ترین به‌روزرسانی (RULES.md §۳)؛ صفحه‌بندی. */
+   *  نردبان ← فروشندهٔ ویژه ← تازه‌ترین قیمت (RULES.md §۳)؛ صفحه‌بندی. */
   async getRelatedProducts(dto: GetRelatedProductsDto) {
     const page = dto.page ?? 1;
     const pageSize = dto.pageSize ?? dto.limit ?? 6;
@@ -326,11 +341,7 @@ export class ProductsService {
       // نردبان منقضی عملاً غیرفعال است
       OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }],
     };
-    const ORDER: Prisma.ProductOrderByWithRelationInput[] = [
-      { isLadder: 'desc' },
-      { isElevated: 'desc' },
-      { updatedAt: 'desc' },
-    ];
+    const ORDER = NATURAL_ORDER;
 
     // نزدیک‌ترین‌ها: هم‌زیردسته؛ اگر کم بود با بقیهٔ هم‌دستهٔ پدر پُر می‌شود
     const [subRows, subTotal] = await Promise.all([
@@ -394,7 +405,7 @@ export class ProductsService {
     };
     const rows = await this.prisma.product.findMany({
       where,
-      orderBy: [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }],
+      orderBy: NATURAL_ORDER,
       take: dto.limit ?? 12,
     });
     const [gallery, names] = await Promise.all([
@@ -1213,7 +1224,7 @@ export class ProductsService {
 
     const rows = await this.prisma.product.findMany({
       where: { userId: seller.id, status: 'confirmed' },
-      orderBy: [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }],
+      orderBy: NATURAL_ORDER,
       take: 48,
     });
     // احتمال پاسخگویی — مکالماتی که خریدار شروع کرده چندتایش جواب فروشنده دارد.

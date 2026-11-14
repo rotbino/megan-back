@@ -113,11 +113,12 @@ export class CityMarketService {
           { OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }] },
         ];
 
+        // سورت طبیعی (همان getProductList): نردبان ← ویژه ← تازه‌ترین قیمت ←
+        // تازه‌ترین ویرایش — تاریخ مؤثر = مهر آپدیت قیمت که کارت هم نشان می‌دهد
         const orderBy: Prisma.ProductOrderByWithRelationInput[] =
           sort === 'newest'
-            ? [{ updatedAt: 'desc' }]
-            : // «مرتبط‌ترین» — نردبان اول، بعد آگهی‌های فروشندگان ویژه، بعد جدیدترین
-              [{ isLadder: 'desc' }, { isElevated: 'desc' }, { updatedAt: 'desc' }];
+            ? [{ priceUpdatedAt: 'desc' }, { updatedAt: 'desc' }]
+            : [{ isLadder: 'desc' }, { isElevated: 'desc' }, { priceUpdatedAt: 'desc' }, { updatedAt: 'desc' }];
 
         const [total, rows] = await Promise.all([
           this.prisma.product.count({ where }),

@@ -18,13 +18,14 @@ const prisma = new PrismaClient();
 async function main() {
   const old = await prisma.product.findMany({
     where: { slug: { startsWith: 'خرید-عمده-' } },
-    select: { id: true, productName: true, slug: true },
+    select: { id: true, productName: true, slug: true, updatedAt: true },
     orderBy: { id: 'asc' },
   });
   console.log(`آگهی‌های با پیشوند قدیمی: ${old.length}`);
   for (const p of old) {
     const slug = `فروش-عمده-${p.productName.trim()}-${p.id}`;
-    await prisma.product.update({ where: { id: p.id }, data: { slug } });
+    // مهر updated_at حفظ می‌شود (درس ۱۵-۱۱) — اسلاگ تزئینی است، «آپدیت» نیست
+    await prisma.product.update({ where: { id: p.id }, data: { slug, updatedAt: p.updatedAt } });
     console.log(`  #${p.id}: ${p.slug} ← ${slug}`);
   }
   const remain = await prisma.product.count({ where: { slug: { startsWith: 'خرید-عمده-' } } });

@@ -93,7 +93,7 @@ for (const u of users) {
 const ids = users.map((u) => u.id);
 const products = await prisma.product.findMany({
   where: { userId: { in: ids } },
-  select: { id: true, productName: true, description: true },
+  select: { id: true, productName: true, description: true, updatedAt: true },
 });
 for (const p of products) {
   const raw = (p.description ?? '').trim();
@@ -103,7 +103,9 @@ for (const p of products) {
     nProduct++;
     changes.push(`  محصول #${p.id} «${p.productName}»: جایگزینی برند در توضیحات`);
     if (APPLY) {
-      await prisma.product.update({ where: { id: p.id }, data: { description: clean } });
+      // مهر updated_at حفظ می‌شود (درس ۱۵-۱۱): update عادی پریسما @updatedAt را
+      // به «اکنون» می‌برد و آگهی چندساله را بالای «جدیدترین» می‌نشاند
+      await prisma.product.update({ where: { id: p.id }, data: { description: clean, updatedAt: p.updatedAt } });
     }
   }
 }

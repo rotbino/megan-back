@@ -1274,14 +1274,22 @@ export class ImporterService {
     // مهرهای زمانی دقیق باسکول (خواستهٔ مالک ۱۳-۱۱): ثبت/آپدیت/آپدیت قیمت
     // عیناً همان باسکول می‌مانند — «۲ دقیقه پیش» روی آگهی چندسالهٔ قدیمی،
     // یعنی قیمت تازه است و خریدار گمراه می‌شود.
-    const priceUpdatedAt = this.bkDate(m.last_price_update);
+    // زنجیرهٔ fallback (۱۵-۱۱): مهر غایب هرگز به «لحظهٔ ایمپورت» نمی‌افتد —
+    // چون سورت لیست‌ها با همین مهرهاست، آگهی قدیمی با مهر تازهٔ جعلی بالای
+    // «جدیدترین» می‌نشیند. قیمت غایب ← updated_at باسکول؛ آپدیت غایب ←
+    // آپدیت قیمت ← ثبت باسکول.
+    const bkUpdated = this.bkDate(m.updated_at);
+    const priceUpdatedAt = this.bkDate(m.last_price_update) ?? bkUpdated;
+    const updatedAt = bkUpdated ?? priceUpdatedAt ?? this.bkDate(m.p_created_at) ?? new Date();
     await this.prisma.product.upsert({
       where: { id: m.id },
       update: {
         productName: name,
         // <hr/> جداکنندهٔ خطوط باسکول → خط نو (خواستهٔ مالک ۱۴-۱۱)
         description: aimchifyBrandMentions(descToText(m.description)),
-        priceUpdatedAt,
+        // مهر غایب = مقدار موجود حفظ می‌شود (null ننویس — کارت به مهر قدیمی
+        // تکیه می‌کند)
+        ...(priceUpdatedAt ? { priceUpdatedAt } : {}),
         // پنجرهٔ اعتبار ۳روزه برای آگهی باسکولی بی‌معناست — قیمتش ماه‌ها/سال‌ها
         // قدیمی است و بج «قیمت منقضی شده» پنل بلافاصله می‌افتاد؛ کهنگی عمومی
         // با متن قرمز «بیش از یک ماه آپدیت نشده» در صفحهٔ آگهی گفته می‌شود.
@@ -1298,14 +1306,14 @@ export class ImporterService {
         isElevated: m.is_elevated === 1,
         hasVideo: !!m.has_video,
         status: 'confirmed',
-        updatedAt: this.bkDate(m.updated_at) ?? new Date(),
+        updatedAt,
       },
       create: {
         id: m.id,
         productName: name,
         slug: `فروش-عمده-${name}-${m.id}`,
         description: aimchifyBrandMentions(descToText(m.description)),
-        priceUpdatedAt,
+        priceUpdatedAt: priceUpdatedAt ?? updatedAt,
         priceValidityDays: 3650,
         categoryId,
         subCategoryId: m.sub_category_id,
