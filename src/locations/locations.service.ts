@@ -109,6 +109,57 @@ export class LocationsService {
     );
   }
 
+  /**
+   * POST /locations/getTopCities — شهرهای پربازار ایران به تعداد آگهی عمومی
+   * (خواستهٔ مالک ۱۶-۱۱: «۵۰ شهری که بیشترین آگهی رو دارن بیار، از بیشترین
+   * اول لیست» — باکس «بازار عمده شهرها» صفحهٔ اول).
+   *
+   * ⚠️ سورت سمت جاوااسکریپت: پرایسما+مونگو orderBy روی _count در groupBy را
+   * بی‌صدا نادیده می‌گیرد (سنجش زندهٔ ۱۶-۱۱) ⇒ همهٔ گروه‌ها (چند صد ردیف
+   * سبک cityId+count) گرفته می‌شوند، این‌جا نزولی سورت و برش می‌خورند.
+   * نتیجه ۱۰ دقیقه کش و تگ products هر تغییر آگهی آن را تازه می‌کند —
+   * صفحهٔ اول هیچ هزینهٔ اضافه‌ای نمی‌پردازد.
+   */
+  async getTopCities(limit: number) {
+    const take = Math.min(Math.max(limit, 1), 100);
+    return this.cache.wrap(
+      `locations:top-cities:${take}`,
+      { ttlMs: 10 * TTL.MINUTE, tags: ['products', 'locations'] },
+      async () => {
+        const grouped = await this.prisma.product.groupBy({
+          by: ['cityId'],
+          // همان فیلتر عمومی لیست‌ها (city-market/products) — آگهی نامرئی شمرده نمی‌شود
+          where: { status: 'confirmed', user: { isActive: true } },
+          _count: { _all: true },
+        });
+        // نزولی به تعداد آگهی، بعد برش به تعداد خواسته‌شده
+        const top = grouped
+          .sort((a, b) => b._count._all - a._count._all)
+          .slice(0, Math.max(take * 2, take)); // کمی اضافه برای حذف شهرهای بی‌نام پایین‌تر
+        if (top.length === 0) return [];
+        const cityRows = await this.prisma.location.findMany({
+          where: { type: 'city', buskolId: { in: top.map((g) => g.cityId) } },
+          select: { buskolId: true, name: true, parentId: true, isActive: true },
+        });
+        const byId = new Map(cityRows.map((c) => [c.buskolId, c]));
+        // فقط شهرهای موجود و فعال — آگهی‌های شهر پاک‌شده/غیرفعال بی‌نام می‌مانند
+        return top
+          .map((g) => {
+            const loc = byId.get(g.cityId);
+            if (!loc || !loc.isActive) return null;
+            return {
+              id: loc.buskolId,
+              city_name: loc.name,
+              province_id: this.parentBuskolId(loc.parentId),
+              count: g._count._all,
+            };
+          })
+          .filter((c): c is { id: number; city_name: string; province_id: number | null; count: number } => c !== null)
+          .slice(0, take);
+      },
+    );
+  }
+
   /** یافتن گره لوکیشن (هر نوعی) با کلید ترکیبی */
   async getLocationByKey(key: string) {
     return this.prisma.location.findUnique({ where: { id: key } });

@@ -81,6 +81,13 @@ export class StopJobDto {
   adminPhone!: string;
 }
 
+/** POST /importer/jobs/:id/pause و :id/resume — توقف موقت/ادامهٔ جاب
+ *  (خواستهٔ مالک ۱۶-۱۱: «هر موقع خواستم پالز کنم یا پلی کنم») */
+export class PauseJobDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+}
+
 // ─── مدیریت کاربران ایمپورت‌شده (بخش «دیتا ایمپورت») ────────────────────────────
 
 /** GET /importer/users — فیلتر/سورت/صفحه‌بندی جدول مدیریت */
