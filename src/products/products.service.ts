@@ -343,45 +343,59 @@ export class ProductsService {
     };
     const ORDER = NATURAL_ORDER;
 
-    // نزدیک‌ترین‌ها: هم‌زیردسته؛ اگر کم بود با بقیهٔ هم‌دستهٔ پدر پُر می‌شود
-    const [subRows, subTotal] = await Promise.all([
-      this.prisma.product.findMany({
-        where: { ...baseWhere, subCategoryId: dto.subCategoryId },
-        orderBy: ORDER,
-        take: 60,
-      }),
-      this.prisma.product.count({ where: { ...baseWhere, subCategoryId: dto.subCategoryId } }),
+    // نزدیک‌ترین‌ها: هم‌زیردسته؛ وقتی تمام شد با بقیهٔ هم‌دستهٔ پدر ادامه می‌یابد.
+    // صفحه‌بندی واقعی روی کل اتحاد (رفع باگ ۱۶-۱۱): قبلاً فقط ۶۰ رکورد اول
+    // در حافظه صفحه‌بندی می‌شد، ولی total/pageCount از شمارش واقعی می‌آمدند —
+    // نتیجه: از صفحهٔ ۴ به بعد (pageSize=20) لیست همیشه خالی بود؛ حالا هر
+    // صفحه برش درست خودش را از دیتابیس می‌گیرد.
+    const subWhere = { ...baseWhere, subCategoryId: dto.subCategoryId };
+    const catWhere =
+      dto.categoryId != null
+        ? {
+            ...baseWhere,
+            categoryId: dto.categoryId,
+            subCategoryId: { not: dto.subCategoryId },
+          }
+        : null;
+
+    const [subTotal, catTotal] = await Promise.all([
+      this.prisma.product.count({ where: subWhere }),
+      catWhere ? this.prisma.product.count({ where: catWhere }) : Promise.resolve(0),
     ]);
-
-    let rows = subRows;
-    let total = subTotal;
-    if (dto.categoryId != null && rows.length < 60) {
-      // دستهٔ پدر گسترش می‌دهد — خودِ زیردسته قبلاً آمده، حذف تکرار با id
-      const have = new Set(rows.map((r) => r.id));
-      const catRows = await this.prisma.product.findMany({
-        where: {
-          ...baseWhere,
-          categoryId: dto.categoryId,
-          id: { notIn: [...have, dto.excludeId] },
-        },
-        orderBy: ORDER,
-        take: 60 - rows.length,
-      });
-      rows = [...rows, ...catRows];
-      total += await this.prisma.product.count({
-        where: { ...baseWhere, categoryId: dto.categoryId, id: { notIn: [...have, dto.excludeId] } },
-      });
-    }
-
+    const total = subTotal + catTotal;
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const safePage = Math.min(page, pageCount);
-    const paged = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+    const start = (safePage - 1) * pageSize;
+    const end = safePage * pageSize;
+
+    // برش صفحه از دو پارهٔ مرتب: اول هم‌زیردسته، بعد گسترش هم‌دستهٔ پدر
+    const subStart = Math.min(start, subTotal);
+    const subEnd = Math.min(end, subTotal);
+    let rows =
+      subEnd > subStart
+        ? await this.prisma.product.findMany({
+            where: subWhere,
+            orderBy: ORDER,
+            skip: subStart,
+            take: subEnd - subStart,
+          })
+        : [];
+    if (catWhere && end > subTotal && rows.length < pageSize) {
+      const catRows = await this.prisma.product.findMany({
+        where: catWhere,
+        orderBy: ORDER,
+        skip: Math.max(0, start - subTotal),
+        take: pageSize - rows.length,
+      });
+      rows = [...rows, ...catRows];
+    }
+
     const [gallery, names] = await Promise.all([
-      this.uploads.galleryMap(paged.map((r) => r.id)),
-      this.hydrateNames(paged),
+      this.uploads.galleryMap(rows.map((r) => r.id)),
+      this.hydrateNames(rows),
     ]);
     return {
-      items: paged.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
+      items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
       total,
       page: safePage,
       pageCount,
