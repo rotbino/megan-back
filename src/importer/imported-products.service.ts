@@ -17,6 +17,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { mongoDateRange } from './date-range.util';
 import type { ImportedListingsQueryDto, ProductImagesQueryDto } from './dto';
 
 // ─── قرارداد API (آینهٔ فرانت: lib/importer/client.ts) ──────────────────────
@@ -97,7 +98,15 @@ export interface ProductImageRow {
   originalUrl: string | null;
   /** آخرین تعویض توسط ادمین (metadata.replacedAt) */
   replacedAt: string | null;
-  product: { id: number; name: string; slug: string; status: string } | null;
+  product: {
+    id: number;
+    name: string;
+    slug: string;
+    status: string;
+    /** تاریخ ثبت/آپدیت خودِ آگهی (باسکول) — معنادار برای شکار واترمارک */
+    createdAt: string;
+    updatedAt: string;
+  } | null;
   owner: { id: string; userName: string; name: string; phone: string; bUserName: string | null } | null;
 }
 
@@ -166,6 +175,12 @@ export class ImportedProductsService {
     // ── فیلتر پایه روی خود آگهی ──
     const base: Record<string, unknown> = {};
     if (query.status && query.status !== 'all') base.status = query.status;
+
+    // بازهٔ تاریخ ثبت/آپدیت (خواستهٔ مالک ۱۵-۱۱) — EJSON {$date}
+    const createdRange = mongoDateRange(query.createdFrom, query.createdTo);
+    if (createdRange) base.created_at = createdRange;
+    const updatedRange = mongoDateRange(query.updatedFrom, query.updatedTo);
+    if (updatedRange) base.updated_at = updatedRange;
 
     // ── فیلترهای سمت فروشنده + جستجو — بعد از lookup مالک اعمال می‌شوند ──
     const ownerMatch: Record<string, unknown> = {};
@@ -407,8 +422,33 @@ export class ImportedProductsService {
 
   async listImages(query: ProductImagesQueryDto): Promise<ProductImagesList> {
     const page = Math.max(1, query.page ?? 1);
-    const pageSize = Math.min(60, Math.max(4, query.pageSize ?? 20));
-    const dir = query.sort === 'oldest' ? 1 : -1;
+    // پیش‌فرض ۵۰ (خواستهٔ مالک ۱۵-۱۱: ۵۰ رکورد در هر صفحه)
+    const pageSize = Math.min(100, Math.max(4, query.pageSize ?? 50));
+
+    // ── سورت (خواستهٔ مالک ۱۵-۱۱): پیش‌فرض آخرین آپدیتِ آگهی، بعد ثبت آگهی ──
+    // ⚠️ تاریخ‌های خودِ فایل (created_at/updated_at) همگی «زمان ایمپورت»‌اند و
+    // برای شکار واترمارک بی‌معنا هستند — تاریخ‌های معنا‌دار روی خودِ آگهی‌اند
+    // (باسکول: ثبت/آپدیت). پس سورت‌های اصلی روی تاریخ آگهی‌اند.
+    const legacy = query.sort === 'newest' || query.sort === 'oldest';
+    const sortName = legacy ? 'createdAt' : (query.sort ?? 'productUpdated');
+    const dir =
+      query.dir === 'asc' ? 1 : query.dir === 'desc' ? -1 : legacy && query.sort === 'oldest' ? 1 : -1;
+
+    // سورت‌های مستقیم روی فایل — بقیه (تاریخ آگهی) با رتبهٔ تزریق‌شده
+    const fileSortKey: Record<string, string> = {
+      createdAt: 'created_at', // زمان ایمپورت تصویر
+      updatedAt: 'updated_at', // آخرین تغییر/تعویض تصویر
+      productId: '_pid', // related_id عددی — با $convert قبل از $sort
+      size: 'size',
+    };
+    const productDateSort: Record<string, ['createdAt' | 'updatedAt', 'createdAt' | 'updatedAt']> = {
+      // [تاریخ اصلی، تاریخ ثانویه] روی خودِ آگهی — نام فیلدهای Prisma
+      productUpdated: ['updatedAt', 'createdAt'],
+      productCreated: ['createdAt', 'updatedAt'],
+    };
+    const isProductDateSort = sortName in productDateSort;
+    const fileSortField = !isProductDateSort ? (fileSortKey[sortName] ?? 'updated_at') : null;
+
     const q = query.q?.trim();
 
     const filter: Record<string, unknown> = {
@@ -420,6 +460,39 @@ export class ImportedProductsService {
     else if (query.source === 'native') filter['metadata.importedFrom'] = { $ne: 'buskool' };
     if (query.replaced === 'yes') filter['metadata.replacedAt'] = { $ne: null };
     else if (query.replaced === 'no') filter['metadata.replacedAt'] = null;
+
+    // ── بازهٔ تاریخِ خودِ آگهی (خواستهٔ مالک ۱۵-۱۱: «آگهی‌ها رو در بازه بر حسب
+    // ثبت و آپدیت فیلتر کن تا تصاویر واترمارک‌دار پیدا شوند») — کلکشن آگهی
+    // کوچک است؛ idهای در بازه از قبل خوانده و با $in به فایل‌ها اعمال می‌شود.
+    const productCreatedRange = mongoDateRange(query.createdFrom, query.createdTo);
+    const productUpdatedRange = mongoDateRange(query.updatedFrom, query.updatedTo);
+    let rangeProductIds: string[] | null = null;
+    if (productCreatedRange || productUpdatedRange) {
+      /** شرط بازهٔ نیمه‌باز — gte/lte فقط وقتی طرفش ست شده */
+      const between = (from?: string, to?: string) => ({
+        ...(from ? { gte: new Date(from) } : {}),
+        ...(to ? { lte: new Date(to) } : {}),
+      });
+      const inRange = await this.prisma.product.findMany({
+        where: {
+          ...(productCreatedRange ? { createdAt: between(query.createdFrom, query.createdTo) } : {}),
+          ...(productUpdatedRange ? { updatedAt: between(query.updatedFrom, query.updatedTo) } : {}),
+        },
+        select: { id: true },
+        take: 50_000,
+      });
+      rangeProductIds = inRange.map((p) => String(p.id));
+      if (rangeProductIds.length === 0) {
+        return {
+          rows: [],
+          total: 0,
+          page,
+          pageSize,
+          pageCount: 1,
+          summary: await this.imagesSummary(),
+        };
+      }
+    }
 
     // جستجو → مجموعهٔ id آگهی‌های منطبق (نام/شناسهٔ آگهی یا نام/شماره/یوزرنیم
     // فروشنده) — قبل از pipeline تا آلبوم بدون lookup سراسری صفحه‌بندی شود
@@ -462,7 +535,55 @@ export class ImportedProductsService {
           summary: await this.imagesSummary(),
         };
       }
-      filter.related_id = { $in: [...ids].map(String) };
+      // تلاقی جستجو با بازهٔ تاریخ آگهی (هر دو روی related_id اند)
+      const qIds = [...ids].map(String);
+      filter.related_id =
+        rangeProductIds != null ? { $in: qIds.filter((x) => rangeProductIds.includes(x)) } : { $in: qIds };
+      if (rangeProductIds != null && (filter.related_id as { $in: string[] }).$in.length === 0) {
+        return {
+          rows: [],
+          total: 0,
+          page,
+          pageSize,
+          pageCount: 1,
+          summary: await this.imagesSummary(),
+        };
+      }
+    } else if (rangeProductIds != null) {
+      filter.related_id = { $in: rangeProductIds };
+    }
+
+    // ── سورت بر اساس تاریخ آگهی: آرایهٔ idهای مرتب از قبل ساخته می‌شود و
+    // رتبه در pipeline با $indexOfArray تزریق می‌شود (کلکشن آگهی کوچک است؛
+    // ترتیب آرایه خودِ جهت سورت را می‌دهد → همیشه _prio صعودی مرتب می‌شود).
+    // ثانویه (همان‌طور که مالک خواست: «اول آپدیت، بعد ثبت») داخل ترتیب
+    // آرایه است؛ فایل‌های بدون آگهی با رتبهٔ بزرگ آخر می‌روند.
+    let rankProductIds: string[] | null = null;
+    if (isProductDateSort) {
+      const [primaryDate, secondaryDate] = productDateSort[sortName];
+      type RankRow = { id: number; createdAt: Date; updatedAt: Date };
+      const dateOf = (row: RankRow, key: 'createdAt' | 'updatedAt'): number =>
+        new Date(row[key]).getTime() || 0;
+      const productsForRank = await this.prisma.product.findMany({
+        where:
+          rangeProductIds != null
+            ? { id: { in: rangeProductIds.map(Number) } }
+            : q
+              ? { id: { in: (filter.related_id as { $in: string[] }).$in.map(Number) } }
+              : undefined,
+        select: { id: true, createdAt: true, updatedAt: true },
+        take: 50_000,
+      });
+      productsForRank.sort((a, b) => {
+        const pa = dateOf(a, primaryDate);
+        const pb = dateOf(b, primaryDate);
+        if (pa !== pb) return dir === 1 ? pa - pb : pb - pa;
+        const sa = dateOf(a, secondaryDate);
+        const sb = dateOf(b, secondaryDate);
+        if (sa !== sb) return dir === 1 ? sa - sb : sb - sa;
+        return dir === 1 ? a.id - b.id : b.id - a.id;
+      });
+      rankProductIds = productsForRank.map((p) => String(p.id));
     }
 
     const [totalAgg, rowsAgg] = await Promise.all([
@@ -475,7 +596,47 @@ export class ImportedProductsService {
         aggregate: 'File',
         pipeline: [
           { $match: filter },
-          { $sort: { created_at: dir, _id: dir } },
+          // سورت تاریخ آگهی — رتبهٔ تزریق‌شده از آرایهٔ مرتب
+          ...(rankProductIds
+            ? [
+                {
+                  $addFields: {
+                    // $let: یک بار $indexOfArray محاسبه می‌شود (نه دوبار در $cond)
+                    _prio: {
+                      $let: {
+                        vars: { r: { $indexOfArray: [rankProductIds, '$related_id'] } },
+                        in: {
+                          $cond: [
+                            // -1 = فایل بدون آگهی (حذف‌شده) → همیشه آخر
+                            { $eq: ['$$r', -1] },
+                            Number.MAX_SAFE_INTEGER,
+                            '$$r',
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+                { $sort: { _prio: 1, _id: 1 } },
+              ]
+            : []),
+          // سورت بر اساس شناسهٔ آگهی: related_id رشته است → تبدیل عددی قبل از $sort
+          ...(fileSortField === '_pid'
+            ? [
+                {
+                  $addFields: {
+                    _pid: {
+                      $convert: { input: '$related_id', to: 'long', onError: null, onNull: null },
+                    },
+                  },
+                },
+              ]
+            : []),
+          // سورت مستقیم روی فایل — ثانویه = تاریخ ثبت فایل، tertiary = _id
+          ...(fileSortField && fileSortField !== '_pid'
+            ? [{ $sort: { [fileSortField]: dir, created_at: dir, _id: dir } }]
+            : []),
+          ...(fileSortField === '_pid' ? [{ $sort: { _pid: dir, created_at: dir, _id: dir } } ] : []),
           { $skip: (page - 1) * pageSize },
           { $limit: pageSize },
           // آگهیِ صاحب عکس — مقایسهٔ رشته‌ای امن (related_id رشته است، _id عدد)
@@ -499,7 +660,7 @@ export class ImportedProductsService {
               created_at: 1,
               updated_at: 1,
               metadata: 1,
-              product: { _id: 1, product_name: 1, slug: 1, status: 1 },
+              product: { _id: 1, product_name: 1, slug: 1, status: 1, created_at: 1, updated_at: 1 },
               ownerUser: { _id: 1, phone: 1, user_name: 1, b_user_name: 1, first_name: 1, last_name: 1 },
             },
           },
@@ -538,6 +699,9 @@ export class ImportedProductsService {
               name: String(product.product_name ?? ''),
               slug: String(product.slug ?? ''),
               status: String(product.status ?? ''),
+              // تاریخ‌های خودِ آگهی (باسکول) — مبنای سورت/فیلتر شکار واترمارک
+              createdAt: toIso(product.created_at) ?? '',
+              updatedAt: toIso(product.updated_at) ?? '',
             }
           : null,
         owner: owner

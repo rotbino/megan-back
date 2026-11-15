@@ -1,7 +1,7 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString } from 'class-validator';
+import { IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { LocationsService } from './locations.service';
 import { ok } from '../common/api-response';
@@ -16,6 +16,15 @@ class ProvinceDto {
 class ParentDto {
   @IsString()
   parent_id: string; // کلید ترکیبی درخت: «province:4» | «city:230» | …
+}
+
+class TopCitiesDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }
 
 @ApiTags('locations')
@@ -44,5 +53,13 @@ export class LocationsController {
   })
   async getLocationsByParent(@Body() dto: ParentDto) {
     return ok(await this.locations.getLocationsByParent(dto.parent_id));
+  }
+
+  @Post('getTopCities')
+  @ApiOperation({
+    summary: 'شهرهای پربازار به تعداد آگهی عمومی (نزولی) — باکس «بازار عمده شهرها» صفحهٔ اول',
+  })
+  async getTopCities(@Body() dto: TopCitiesDto) {
+    return ok(await this.locations.getTopCities(dto.limit ?? 50));
   }
 }

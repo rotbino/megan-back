@@ -8,6 +8,7 @@ import {
   CleanupDto,
   ListImportDto,
   MigrateBDto,
+  PauseJobDto,
   SingleImportDto,
   StopJobDto,
 } from './dto';
@@ -87,9 +88,24 @@ export class ImporterController {
   }
 
   @Post('jobs/:id/stop')
-  @ApiOperation({ summary: 'توقف جاب در حال اجرا' })
+  @ApiOperation({
+    summary:
+      'توقف جاب — بار اول: دلسوله (بین درخواست‌ها)؛ دوبار: فوری؛ جاب تمام‌شده: پاسخ وضعیت',
+  })
   stopJob(@Param('id') id: string, @Body() dto: StopJobDto) {
     return ok(this.importer.stopJob(id, dto.adminPhone));
+  }
+
+  @Post('jobs/:id/pause')
+  @ApiOperation({ summary: 'توقف موقت جاب — در نخستین ایستگاه امن می‌ایستد و منتظر ادامه می‌ماند' })
+  pauseJob(@Param('id') id: string, @Body() dto: PauseJobDto) {
+    return ok(this.importer.pauseJob(id, dto.adminPhone));
+  }
+
+  @Post('jobs/:id/resume')
+  @ApiOperation({ summary: 'ادامهٔ جاب بعد از توقف موقت — از همان ایستگاه' })
+  resumeJob(@Param('id') id: string, @Body() dto: PauseJobDto) {
+    return ok(this.importer.resumeJob(id, dto.adminPhone));
   }
 
   @Get('preview/:userName')

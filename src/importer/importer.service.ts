@@ -45,6 +45,11 @@
  *     429/403 — buskool.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
  *     همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
  *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
+ *   • سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر کاربر (مثل حساب
+ *     پاک‌شدهٔ باسکول) جاب را نمی‌اندازد — با دلیلش روی خود رکورد ذخیره
+ *     می‌شود و بقیهٔ کاربران ادامه می‌یابند؛ قطعی اینترنت فقط وقفه است
+ *     (net-watch) و تنها تکرار پیاپیِ همین خطا (پیش‌فرض ۱۰ بار) نشانهٔ
+ *     مشکل سیستمی است و جاب را می‌بُرد.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
@@ -118,10 +123,19 @@ export interface ImportJob {
   netWaiting?: boolean;
   /** از چه لحظه‌ای منتظر شبکه مانده (مهر یونیکس ms) */
   netWaitSince?: number | null;
+  /** (۱۶-۱۱) توقف موقت دلسوله: درخواست pause ثبت شده و در نزدیک‌ترین
+   *  ایستگاه امن، حلقهٔ اجرا منتظر ادامه می‌ماند — جاب «در حال اجرا» است
+   *  ولی هیچ درخواستی به باسکول/دیتابیس زده نمی‌شود */
+  paused?: boolean;
+  /** (۱۶-۱۱) درخواست توقف ثبت شده — بین درخواست‌ها اعمال می‌شود؛ دوبار زدن
+   *  دکمهٔ توقف = توقف فوری (قطع همین‌جا). برای نمایش «توقف فوری» در پنل */
+  stopRequested?: boolean;
 }
 
 interface JobInternal extends ImportJob {
   stopRequested: boolean;
+  /** (۱۶-۱۱) درخواست توقف موقت — در ایستگاه‌های امن برسی می‌شود */
+  pauseRequested: boolean;
   buskoolRequests: number;
 }
 
@@ -142,6 +156,49 @@ const MAX_PHOTOS_PER_PRODUCT = 4;
 const MAX_RELATEDS_PER_USER = 8;
 /** آپ‌سرت‌های مستقل DB در هر دستهٔ موازی کوچک */
 const DB_CHUNK = 8;
+
+// ─── سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱) ────────────────────────────────
+//
+// «وقتی خطا خوردی ببین چی هست: اگر مالِ همین رکورد است متوقف نشو — ذخیره‌اش
+// کن برای رسیدگی بعدی و برو سراغ رکورد بعدی. قطعی اینترنت که درست کار
+// می‌کند (نگهبان شبکه). فقط اگر همین خطا ۱۰ بار پشت‌سرهم تکرار شد
+// شک کن و ببُر.» — اجرای سیاست در runList؛ امضای خطا همین‌جا ساخته می‌شود.
+
+/** عدد صحیح مثبت از env با پیش‌فرض */
+function envInt(name: string, def: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : def;
+}
+
+/**
+ * امضای خطا — «نوعِ» خطا بدون جزئیات رکورد (یوزرنیم/عدد/نقل‌قول) تا
+ * خطاهای یکسانِ رکوردهای مختلف هم‌امضا دیده شوند و قانون «تکرار پیاپی
+ * همین خطا» کار کند: کاربر پاک‌شدهٔ باسکول → user-not-found، هر ۴۰۴ →
+ * http-404، پاسخ HTML نیازمند کوکی → html-cookie، خطای Prisma → prisma-P2xxx.
+ */
+export function importErrorSignature(err: unknown): string {
+  const msg = String((err as Error)?.message ?? err);
+  if (msg.includes('کاربر باسکول') && msg.includes('پیدا نشد')) return 'user-not-found';
+  const http = msg.match(/HTTP (\d{3})/);
+  if (http) return `http-${http[1]}`;
+  if (msg.includes('پاسخ HTML')) return 'html-cookie';
+  const code = (err as { code?: unknown })?.code;
+  if (typeof code === 'string' && /^P\d{4}$/.test(code)) return `prisma-${code}`;
+  const prismaCode = msg.match(/\bP\d{4}\b/);
+  if (prismaCode) return `prisma-${prismaCode[0]}`;
+  return (
+    msg
+      .replace(/@[^\s،)]+/g, '@user')
+      .replace(/https?:\/\/\S+/g, 'url')
+      .replace(/\/[a-zA-Z0-9_.\-]+(?:\/[a-zA-Z0-9_.\-]+)*/g, 'path')
+      .replace(/["'«»][^"'«»]*["'«»]/g, '…')
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .slice(0, 90) || 'unknown'
+  );
+}
 
 @Injectable()
 export class ImporterService {
@@ -501,13 +558,85 @@ export class ImporterService {
     return job ?? null;
   }
 
-  stopJob(id: string, adminPhone: string): { stopped: boolean } {
+  /**
+   * توقف جاب (خواستهٔ مالک ۱۶-۱۱: «هر موقع خواستم استاپ کنم — حتی وقتی
+   * خطا خورده»):
+   *  · در حال اجرا → توقف دلسوله: بین درخواست‌های بعدی قطع می‌شود؛
+   *  · دوبار زدن (stopRequested از قبل true) → توقف فوری: وضعیت همین
+   *    لحظه «stopped» می‌شود — برای جاب گیرکرده (مثلاً فریز سرورلس)؛
+   *    حلقهٔ زنده در نخستین ایستگاه failJob را با status≠running رد می‌کند؛
+   *  · جاب تمام‌شده (done/failed/stopped) → پاسخ صریح با وضعیت نهایی —
+   *    دکمهٔ توقف همیشه کار می‌کند و پنل منسجم می‌ماند.
+   */
+  stopJob(id: string, adminPhone: string): { stopped: boolean; status: string; mode?: 'graceful' | 'forced' | 'already-finished' } {
     this.assertAdmin(adminPhone);
     const job = this.jobs.get(id);
-    if (!job || job.status !== 'running') return { stopped: false };
+    if (!job) return { stopped: false, status: 'not-found' };
+    if (job.status !== 'running') {
+      return { stopped: true, status: job.status, mode: 'already-finished' };
+    }
+    if (job.stopRequested) {
+      // توقف فوری — دکمهٔ دوم: جاب همین‌جا قطع می‌شود (جاب گیرکرده/فریزشده)
+      job.status = 'stopped';
+      job.paused = false;
+      job.pauseRequested = false;
+      job.netWaiting = false;
+      job.netWaitSince = null;
+      job.finishedAt = Date.now();
+      job.counters['buskoolRequests'] = job.buskoolRequests;
+      this.log(job, 'warn', 'توقف فوری — جاب همین‌جا قطع شد (داده‌های ثبت‌شده حفظ شدند)');
+      return { stopped: true, status: job.status, mode: 'forced' };
+    }
     job.stopRequested = true;
-    this.log(job, 'info', 'درخواست توقف ثبت شد — بین درخواست‌های بعدی متوقف می‌شود');
-    return { stopped: true };
+    this.log(job, 'info', 'درخواست توقف ثبت شد — بین درخواست‌های بعدی متوقف می‌شود (دوباره بزنید = توقف فوری)');
+    return { stopped: true, status: job.status, mode: 'graceful' };
+  }
+
+  /** توقف موقت (۱۶-۱۱) — جاب در نخستین ایستگاه امن می‌ایستد و منتظر ادامه می‌ماند */
+  pauseJob(id: string, adminPhone: string): { paused: boolean; status: string } {
+    this.assertAdmin(adminPhone);
+    const job = this.jobs.get(id);
+    if (!job) return { paused: false, status: 'not-found' };
+    if (job.status !== 'running') return { paused: false, status: job.status };
+    if (!job.paused && !job.pauseRequested) {
+      job.pauseRequested = true;
+      this.log(job, 'info', '⏸ درخواست توقف موقت ثبت شد — در نخستین ایستگاه امن می‌ایستد');
+    }
+    return { paused: true, status: job.status };
+  }
+
+  /** ادامه بعد از توقف موقت (۱۶-۱۱) — از همان ایستگاه ادامه می‌یابد */
+  resumeJob(id: string, adminPhone: string): { resumed: boolean; status: string } {
+    this.assertAdmin(adminPhone);
+    const job = this.jobs.get(id);
+    if (!job) return { resumed: false, status: 'not-found' };
+    if (job.status !== 'running') return { resumed: false, status: job.status };
+    if (job.paused || job.pauseRequested) {
+      job.pauseRequested = false;
+      job.paused = false;
+      this.log(job, 'success', '▶ ادامهٔ ایمپورت از همان‌جا');
+    }
+    return { resumed: true, status: job.status };
+  }
+
+  /**
+   * ایستگاه امن توقف موقت (۱۶-۱۱) — در هر مرز عملیات (کاربر/صفحهٔ آگهی/
+   * عکس/قطعهٔ لیست) صدا زده می‌شود: اگر pause درخواست شده، جاب همین‌جا
+   * می‌ایستد (بدون هیچ تماس با باسکول/دیتابیس) تا resume یا stop بیاید.
+   * stop در حین مکث هم فوراً جواب می‌گیرد (JOB_STOPPED پرتاب می‌شود).
+   */
+  private async waitWhilePaused(job: JobInternal): Promise<void> {
+    if (!job.pauseRequested && !job.paused) return;
+    if (!job.paused) {
+      job.paused = true;
+      this.log(job, 'info', '⏸ ایمپورت موقتاً متوقف شد — با «ادامه» از همین‌جا برمی‌گردد');
+    }
+    while (job.paused && !job.stopRequested) {
+      await sleep(400);
+    }
+    // استاپ در حین مکث — همین‌جا و بی‌درنگ قطع کن (ایستگاه امنیم)
+    if (job.stopRequested) throw new Error('JOB_STOPPED');
+    job.paused = false; // ادامه داده شد — پرچم نمایشی پایین بیاید
   }
 
   startSingle(input: { adminPhone: string; userName: string; phone?: string; maxProducts?: number }) {
@@ -542,6 +671,8 @@ export class ImporterService {
       counters: {},
       startedAt: Date.now(),
       stopRequested: false,
+      pauseRequested: false,
+      paused: false,
       buskoolRequests: 0,
     };
     this.jobs.set(id, job);
@@ -572,6 +703,7 @@ export class ImporterService {
     if (job.status !== 'running') return;
     job.netWaiting = false;
     job.netWaitSince = null;
+    job.paused = false; // پرچم نمایشی توقف موقت دیگر معنا ندارد
     const msg = (err as Error)?.message ?? String(err);
     if (msg === 'JOB_STOPPED') {
       job.status = 'stopped';
@@ -615,6 +747,7 @@ export class ImporterService {
 
   private async runSingle(job: JobInternal, input: { userName: string; phone?: string; maxProducts?: number }) {
     const bk = new BuskoolClient(() => job.stopRequested);
+    await this.waitWhilePaused(job);
     const user = await this.netRetry(job, () =>
       this.importOneUser(job, bk, input.userName, input.phone, input.maxProducts ?? 0),
     );
@@ -651,13 +784,22 @@ export class ImporterService {
     );
 
     const bk = new BuskoolClient(() => job.stopRequested);
-    let consecutiveFails = 0;
+    // سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر رکورد جاب را
+    // نمی‌اندازد — ذخیره و رد می‌شود؛ فقط تکرار پیاپیِ «همین خطا» (یا
+    // موج پیاپی خطاهای گوناگون) مشکل سیستمی تلقی می‌شود و جاب را
+    // می‌بُرد. سقف‌ها با env قابل تنظیم‌اند.
+    const maxRepeatFails = envInt('IMPORTER_MAX_REPEAT_FAILS', 10);
+    const maxConsecFails = envInt('IMPORTER_MAX_CONSECUTIVE_FAILS', 15);
+    let consecutiveFails = 0; // هر خطایی پیاپی (پشتیبان خطاهای گوناگون)
+    let failStreakSig = ''; // امضای خطای متوالی جاری
+    let failStreakCount = 0; // چند بار پیاپی همین امضا
     let cursor = offset; // کرسر خواندن منبع
     let consumed = 0; // سندهای خوانده‌شده (شامل ردّشده‌ها) — سقفِ limit
     let chunkNo = 0;
 
     while (consumed < limit) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
+      await this.waitWhilePaused(job);
       const take = Math.min(CHUNK, limit - consumed);
       const { rows, rawCount } = await this.netRetry(job, () => this.sourceRead(cursor, take));
       if (rawCount === 0) {
@@ -675,6 +817,7 @@ export class ImporterService {
 
       for (const [i, row] of rows.entries()) {
         if (job.stopRequested) throw new Error('JOB_STOPPED');
+        await this.waitWhilePaused(job);
         job.currentUserIndex = consumed + i + 1;
         job.currentUser = row.userName;
         // هر کاربر جاب نمایشی خودش را دارد ولی steps مشترک ریست می‌شود
@@ -721,6 +864,8 @@ export class ImporterService {
           );
           job.usersDone = (job.usersDone ?? 0) + 1;
           consecutiveFails = 0;
+          failStreakSig = '';
+          failStreakCount = 0;
           job.buskoolRequests = bk.requests;
           this.log(
             job,
@@ -730,16 +875,37 @@ export class ImporterService {
         } catch (err) {
           if ((err as Error).message === 'JOB_STOPPED') throw err;
           job.usersFailed = (job.usersFailed ?? 0) + 1;
-          this.log(job, 'error', `✖ ${row.userName}: ${(err as Error).message}`);
-          // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
-          await this.markFailedImport(row.userName).catch(() => undefined);
+          const reason = String((err as Error).message ?? err);
+          const sig = importErrorSignature(err);
+          // خطای این رکورد ذخیره می‌شود و می‌رویم سراغ رکورد بعدی
+          // (خواستهٔ مالک ۱۵-۱۱): رکوردِ خراب ≠ جابِ خراب
+          this.log(
+            job,
+            'error',
+            `✖ ${row.userName}: ${reason} — برای رسیدگی بعدی ذخیره شد، ادامه با کاربر بعدی`,
+          );
+          await this.markFailedImport(row.userName, reason, sig).catch(() => undefined);
           consecutiveFails++;
-          // ۳ شکست پیاپی = مشکل سیستمی (بلاک شدن باسکول/خطای سمت سرور) —
-          // قطعی اینترنت دیگر به اینجا نمی‌رسد (نگهبان شبکه همان‌جا منتظر
-          // می‌ماند و بعد از وصل شدن ادامه می‌دهد — net-watch.ts)
-          if (consecutiveFails >= 3) {
+          if (sig === failStreakSig) failStreakCount++;
+          else {
+            failStreakSig = sig;
+            failStreakCount = 1;
+          }
+          // فقط تکرار پیاپیِ «همین خطا» نشانهٔ مشکل سیستمی است (بلاک شدن
+          // باسکول/تغییر API) — قطعی اینترنت اصلاً به اینجا نمی‌رسد
+          // (نگهبان شبکه همان‌جا منتظر می‌ماند — net-watch.ts)
+          if (failStreakCount >= maxRepeatFails) {
             throw new Error(
-              `${consecutiveFails} شکست پیاپی — احتمالاً بلاک شدن باسکول یا خطای سیستمی؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
+              `${failStreakCount.toLocaleString('fa-IR')} شکست پیاپی با خطای یکسان (${sig} — «${reason.slice(0, 140)}») — ` +
+                'احتمالاً مشکل سیستمی (بلاک/تغییر API)؛ جاب متوقف شد. خطاها ذخیره شده‌اند؛ ' +
+                'پس از رفع مشکل با دکمهٔ «ایمپورت‌نشدهٔ بعدی» ادامه دهید',
+            );
+          }
+          if (consecutiveFails >= maxConsecFails) {
+            throw new Error(
+              `${consecutiveFails.toLocaleString('fa-IR')} شکست پیاپی با خطاهای گوناگون — ` +
+                'احتمالاً مشکل سیستمی؛ جاب متوقف شد. خطاها ذخیره شده‌اند؛ ' +
+                'پس از رفع مشکل با دکمهٔ «ایمپورت‌نشدهٔ بعدی» ادامه دهید',
             );
           }
         }
@@ -771,6 +937,7 @@ export class ImporterService {
     maxProducts: number,
   ) {
     // ── ۱. پروفایل ──
+    await this.waitWhilePaused(job);
     this.step(job, 'profile', 'active');
     this.log(job, 'info', `دریافت پروفایل @${userName} از باسکول…`);
     const profile: BkProfileResp = await bk.call('/load_profile_by_user_name', { user_name: userName });
@@ -1066,6 +1233,7 @@ export class ImporterService {
 
     // ── ۴. کامنت‌ها (قبل از تصاویر — پاسخ باسکول از ابتدای جاب آماده بوده و
     //    ثبت DB سبک است؛ اگر وسط تصاویر جاب متوقف شود، این داده از قبل ثبت شده است) ──
+    await this.waitWhilePaused(job);
     // (خواستهٔ مالک ۱۳-۱۱) نویسندگان کامنت‌های باسکول کاربر واقعی ایمچ نیستند —
     // دیگر برایشان User با شمارهٔ موبایل ساختگی ساخته نمی‌شود (اشغال شمارهٔ
     // واقعی + پر شدن جدول کاربران از کاربران الکی). نام/شهرشان در جدول
@@ -1208,6 +1376,7 @@ export class ImporterService {
     this.log(job, 'success', `${list.length} کامنت در جدول b_comment ثبت شد (لیستی، بدون ساخت کاربر)`);
 
     // ── ۵. تصاویر — آواتار + کسب‌وکار + عکس‌های آگهی‌ها، یک استخر موازی مشترک ──
+    await this.waitWhilePaused(job);
     this.step(job, 'relateds', 'active');
     this.step(job, 'images', 'active');
 
@@ -1276,6 +1445,7 @@ export class ImporterService {
     let relatedDone = 0;
     const imgWorker = async (t: ImgTask): Promise<void> => {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
+      await this.waitWhilePaused(job);
       const img = await fetchImage(t.url, () => job.stopRequested);
       const norm = img ? await normalizeImage(img.buf, img.mime) : null;
       if (!norm) {
@@ -1435,6 +1605,7 @@ export class ImporterService {
 
     let done = 0;
     await runPool(todo, imagePoolSize(), () => job.stopRequested, async (t) => {
+      await this.waitWhilePaused(job);
       const img = await fetchImage(t.url, () => job.stopRequested);
       const norm = img ? await normalizeImage(img.buf, img.mime) : null;
       if (!norm) {
@@ -1484,6 +1655,7 @@ export class ImporterService {
   ): Promise<BkProductItem[]> {
     const items: BkProductItem[] = [];
     for (let from = 0; ; from += PAGE) {
+      await this.waitWhilePaused(job);
       const resp: BkProductListResp = await bk.call('/get_product_list_by_user_name', {
         user_name: userName,
         status: 2,
@@ -1644,15 +1816,31 @@ export class ImporterService {
    * failedImport می‌ماند تا بعداً رسیدگی شود؛ ایمپورت‌های بعدی هم از او رد
    * می‌شوند تا دادهٔ تکراری نسازد.
    */
-  private async markFailedImport(userName: string) {
+  private async markFailedImport(userName: string, reason?: string, sig?: string) {
+    // دلیل شکست روی خود رکورد ذخیره می‌شود (خواستهٔ مالک ۱۵-۱۱: «جایی
+    // ذخیره کن که بعداً رسیدگی کنیم») — صفحهٔ «کاربران ایمپورت‌شده» با
+    // فیلتر «ناقص/شکست‌خورده» نشانش می‌دهد
+    const errDoc = reason
+      ? {
+          message: reason.slice(0, 600),
+          sig: sig ?? importErrorSignature(reason),
+          at: new Date().toISOString(),
+        }
+      : null;
     const existing = await this.prisma.user.findFirst({
       where: { OR: [{ bUserName: userName }, { userName }] },
-      select: { id: true },
+      select: { id: true, profile: true },
     });
     if (existing) {
       await this.prisma.user.update({
         where: { id: existing.id },
-        data: { failedImport: true, bUserName: userName },
+        data: {
+          failedImport: true,
+          bUserName: userName,
+          ...(errDoc
+            ? { profile: { ...((existing.profile ?? {}) as object), bImportError: errDoc } as object }
+            : {}),
+        },
       });
       return;
     }
@@ -1675,6 +1863,7 @@ export class ImporterService {
               bStub: true,
               importedFrom: 'buskool-failed',
               importedAt: new Date().toISOString(),
+              ...(errDoc ? { bImportError: errDoc } : {}),
             } as object,
           },
         });

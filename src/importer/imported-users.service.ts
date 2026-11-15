@@ -28,6 +28,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { buildStorage } from '../uploads/storage';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
+import { mongoDateRange } from './date-range.util';
 import { importerAdminPhone } from './dto';
 
 // ─── قرارداد API (آینهٔ فرانت: lib/importer/client.ts) ──────────────────────
@@ -45,6 +46,9 @@ export interface ImportedUserRow {
   isActive: boolean;
   isVerified: boolean;
   failedImport: boolean;
+  /** دلیل آخرین شکست ایمپورت (خواستهٔ مالک ۱۵-۱۱) — از profile.bImportError؛
+   *  null یعنی شکست قدیمی بدون ثبت دلیل یا ایمپورت سالم */
+  importError: { message: string; sig: string; at: string } | null;
   /** کاربر کمکی نویسندهٔ کامنت باسکول (bk-c*) — برای تفکیک آمار منبع */
   isStub: boolean;
   hasBusinessDesc: boolean;
@@ -99,6 +103,9 @@ export interface ImportedUsersQuery {
   contacted?: 'yes' | 'no';
   failed?: 'yes' | 'no';
   staleDays?: number;
+  /** بازهٔ تاریخ ثبت‌نام — ISO میلادی (خواستهٔ مالک ۱۵-۱۱) */
+  createdFrom?: string;
+  createdTo?: string;
   sort?: 'lastLogin' | 'createdAt' | 'products' | 'buskoolCreated' | 'imported' | 'contacted';
   dir?: 'asc' | 'desc';
   page?: number;
@@ -143,6 +150,21 @@ function toId(v: unknown): string {
     if (typeof oid === 'string') return oid;
   }
   return String(v);
+}
+
+/**
+ * دلیل شکست ایمپورت از profile.bImportError (خواستهٔ مالک ۱۵-۱۱) —
+ * نرمال‌سازی امن سند خام؛ خالی/خراب → null (شکست قدیمی بدون ثبت دلیل)
+ */
+function normalizeImportError(raw: unknown): { message: string; sig: string; at: string } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = raw as { message?: unknown; sig?: unknown; at?: unknown };
+  if (typeof e.message !== 'string' || !e.message) return null;
+  return {
+    message: e.message,
+    sig: typeof e.sig === 'string' ? e.sig : '',
+    at: typeof e.at === 'string' ? e.at : '',
+  };
 }
 
 @Injectable()
@@ -237,6 +259,16 @@ export class ImportedUsersService {
       ];
     }
 
+    // بازهٔ تاریخ ثبت‌نام (خواستهٔ مالک ۱۵-۱۱): «در هر بازه چند نفر ثبت‌نام
+    // کرده‌اند» — created_at BSON Date است → EJSON {$date} (date-range.util)
+    const createdRange = mongoDateRange(query.createdFrom, query.createdTo);
+    if (createdRange) {
+      filter.$and = [
+        ...(filter.$and as unknown[] ?? []),
+        { created_at: createdRange },
+      ];
+    }
+
     // ── سورت (نام فیلد خام بر اساس کلید فرانت) ──
     const sortKey: Record<string, string> = {
       lastLogin: 'last_login_at',
@@ -281,6 +313,7 @@ export class ImportedUsersService {
                 is_active: 1,
                 is_verified: 1,
                 failed_import: 1,
+                import_error: '$profile.bImportError',
                 is_stub: { $eq: ['$profile.bStub', true] },
                 business_desc: 1,
                 province_id: 1,
@@ -342,6 +375,7 @@ export class ImportedUsersService {
         isActive: r.is_active !== false,
         isVerified: r.is_verified === true,
         failedImport: r.failed_import === true,
+        importError: normalizeImportError(r.import_error),
         isStub: r.is_stub === true,
         hasBusinessDesc: Boolean((r.business_desc as string | null)?.trim()),
         provinceId: (r.province_id as number) ?? null,

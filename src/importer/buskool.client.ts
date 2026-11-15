@@ -177,8 +177,16 @@ const gate = new PaceGate();
 /** پنجرهٔ «آنلاین-ولی-باسکول-جواب-نمی‌دهد» برای هر تماس API — در قطعی
  *  واقعی مصرف نمی‌شود (سنجش شبکه خودش می‌ایستد)؛ اگر باسکول پس از این
  *  مدت هنوز خطای شبکه‌ای بدهد، خطا به لایهٔ کاربر می‌رود که خودش بازتلاش
- *  می‌کند (withNetRetry) و در نهایت قانون ۳ شکست پیاپی تصمیم می‌گیرد. */
+ *  می‌کند (withNetRetry) و در نهایت سیاست خطای رکورد (importer.service) تصمیم می‌گیرد. */
 const CALL_NET_WINDOW_MS = 10 * 60_000;
+
+/** خطای «قطعی همین تماس» — تکرار همان درخواست با همان بدنه جواب نمی‌دهد:
+ *  ۴xx رکوردی (400/404/… — جز 429/403 که علامت محدودیت‌اند و عقب‌نشینی می‌گیرند)
+ *  یا پاسخ HTML نیازمند کوکی. سیاست خطای رکورد در importer.service این‌ها را
+ *  ذخیره و رد می‌کند؛ بازتلاش بی‌فایده فقط وقت جاب را می‌سوزاند. */
+function fatalCallError(message: string): Error {
+  return Object.assign(new Error(message), { fatalCall: true });
+}
 
 export class BuskoolClient {
   /** آخرین مهر یک درخواست موفق — برای گزارش تعداد تماس با باسکول */
@@ -192,9 +200,10 @@ export class BuskoolClient {
   /** درخواست با گیت نرخ — پیش از هر تلاش توقف جاب بررسی و فاصلهٔ ادب رعایت می‌شود.
    *
    * قطعی اینترنت (۱۵-۱۱ شب): خطای شبکه‌ای (DNS/سوکت/تایم‌اوت) جزو شکست‌های
-   * ۳تایی نیست — درخواست همان‌جا نگه داشته می‌شود، هر ۵ ثانیه اتصال سنجیده
-   * می‌شود و به‌محض وصل شدن همان درخواست ادامه می‌یابد. فقط خطاهای HTTP
-   *  واقعی (بلاک/خطای سرور) بودجهٔ ۳ تلاش را می‌سوزانند. */
+   * حساب‌شده نیست — درخواست همان‌جا نگه داشته می‌شود، هر ۵ ثانیه اتصال سنجیده
+   *  می‌شود و به‌محض وصل شدن همان درخواست ادامه می‌یابد. خطاهای گذرا (5xx و
+   *  محدودیت 429/403) با backoff تا ۳ بار تلاش می‌شوند؛ 4xx رکوردی و پاسخ HTML
+   *  همان‌جا تمام می‌شوند (fatalCall) تا سیاست خطای رکورد درباره‌شان تصمیم بگیرد. */
   async call<T>(path: string, body: Record<string, unknown>): Promise<T> {
     let lastErr: unknown;
     let hardFails = 0; // شکست‌های غیرشبکه‌ای (HTTP 4xx/5xx، HTML، …)
@@ -229,12 +238,18 @@ export class BuskoolClient {
           pacePenalty = Math.min(pacePenalty * 2, PENALTY_MAX);
           throw new Error(`HTTP ${res.status} on ${path} (backoff ×${Math.round(pacePenalty)})`);
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+        if (!res.ok) {
+          // 5xx گذراست (سرور لحظه‌ای خوابیده) → تلاش مجدد؛ بقیهٔ 4xx مالِ همین
+          // رکورد/درخواست‌اند — تکرارشان بی‌فایده است، همان‌جا تمام می‌شود
+          if (res.status >= 500) throw new Error(`HTTP ${res.status} on ${path}`);
+          throw fatalCallError(`HTTP ${res.status} on ${path}`);
+        }
         const ctype = (res.headers.get('content-type') ?? '').split(';')[0];
         if (ctype.includes('text/html')) {
           // باسکول برای اندپوینت‌های لاگین‌دار (مثل عکس پروفایل) بدون کوکی
-          // به /login ریدایرکت می‌کند — پیام روشن بده نه خطای JSON parse
-          throw new Error('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
+          // به /login ریدایرکت می‌کند — پیام روشن بده نه خطای JSON parse.
+          // کوکی که نیست نیست؛ تکرارش هم چیزی عوض نمی‌کند → fatalCall
+          throw fatalCallError('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
         }
         this.requests++;
         // پاسخ سالم — آرام به سرعت عادی برگرد
@@ -248,6 +263,8 @@ export class BuskoolClient {
           if (!firstNetErrAt) firstNetErrAt = Date.now();
           else if (Date.now() - firstNetErrAt > CALL_NET_WINDOW_MS) break;
         } else {
+          // ۴xx رکوردی یک‌باره تمام است؛ گذراها (5xx/429/403) تا ۳ تلاش
+          if ((err as { fatalCall?: boolean }).fatalCall) break;
           hardFails++;
           if (hardFails >= 3) break;
         }

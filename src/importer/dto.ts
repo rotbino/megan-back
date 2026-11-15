@@ -5,6 +5,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsISO8601,
   IsMongoId,
   IsOptional,
   IsString,
@@ -80,6 +81,13 @@ export class StopJobDto {
   adminPhone!: string;
 }
 
+/** POST /importer/jobs/:id/pause و :id/resume — توقف موقت/ادامهٔ جاب
+ *  (خواستهٔ مالک ۱۶-۱۱: «هر موقع خواستم پالز کنم یا پلی کنم») */
+export class PauseJobDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+}
+
 // ─── مدیریت کاربران ایمپورت‌شده (بخش «دیتا ایمپورت») ────────────────────────────
 
 /** GET /importer/users — فیلتر/سورت/صفحه‌بندی جدول مدیریت */
@@ -126,6 +134,15 @@ export class ImportedUsersQueryDto {
   @Min(1)
   @Max(3650)
   staleDays?: number;
+
+  /** بازهٔ تاریخ ثبت‌نام (created_at) — ISO میلادی؛ هر طرف مستقل اختیاری */
+  @IsOptional()
+  @IsISO8601()
+  createdFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  createdTo?: string;
 
   @IsOptional()
   @IsIn(['lastLogin', 'createdAt', 'products', 'buskoolCreated', 'imported', 'contacted'])
@@ -209,6 +226,24 @@ export class ImportedListingsQueryDto {
   @IsIn(['yes', 'no'])
   hasPhotos?: 'yes' | 'no';
 
+  /** بازهٔ تاریخ ثبت آگهی (created_at) — ISO میلادی */
+  @IsOptional()
+  @IsISO8601()
+  createdFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  createdTo?: string;
+
+  /** بازهٔ تاریخ آخرین تغییر آگهی (updated_at) — ISO میلادی */
+  @IsOptional()
+  @IsISO8601()
+  updatedFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  updatedTo?: string;
+
   @IsOptional()
   @IsIn(['createdAt', 'updatedAt', 'priceUpdatedAt', 'views', 'name'])
   sort?: 'createdAt' | 'updatedAt' | 'priceUpdatedAt' | 'views' | 'name';
@@ -250,9 +285,54 @@ export class ProductImagesQueryDto {
   @IsIn(['yes', 'no'])
   replaced?: 'yes' | 'no';
 
+  /**
+   * فیلد سورت (خواستهٔ مالک ۱۵-۱۱: آخرین آپدیت‌ها اول لیست، بعد ثبت).
+   * ⚠️ تاریخ‌های فایل همگی زمان ایمپورت‌اند؛ سورت‌های معنادار روی تاریخِ
+   * خودِ آگهی‌اند (productUpdated پیش‌فرض). legacy: newest/oldest → ایمپورت.
+   */
   @IsOptional()
-  @IsIn(['newest', 'oldest'])
-  sort?: 'newest' | 'oldest';
+  @IsIn([
+    'productUpdated',
+    'productCreated',
+    'productId',
+    'size',
+    'createdAt',
+    'updatedAt',
+    'newest',
+    'oldest',
+  ])
+  sort?:
+    | 'productUpdated'
+    | 'productCreated'
+    | 'productId'
+    | 'size'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'newest'
+    | 'oldest';
+
+  /** جهت سورت — پیش‌فرض نزولی (جدید→قدیم) */
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  dir?: 'asc' | 'desc';
+
+  /** بازهٔ تاریخ ثبتِ خودِ آگهی (Product.created_at) — ISO میلادی */
+  @IsOptional()
+  @IsISO8601()
+  createdFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  createdTo?: string;
+
+  /** بازهٔ تاریخ آخرین تغییرِ خودِ آگهی (Product.updated_at) — ISO میلادی */
+  @IsOptional()
+  @IsISO8601()
+  updatedFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  updatedTo?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -261,11 +341,11 @@ export class ProductImagesQueryDto {
   @Max(10_000)
   page?: number;
 
-  /** پیش‌فرض ۲۰ — آلبوم اسکن سریع چشم (خواستهٔ مالک) */
+  /** پیش‌فرض ۵۰ (خواستهٔ مالک ۱۵-۱۱: ۵۰ رکورد در هر صفحه) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(4)
-  @Max(60)
+  @Max(100)
   pageSize?: number;
 }
