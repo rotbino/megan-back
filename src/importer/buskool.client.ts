@@ -28,6 +28,8 @@
  *     پذیرفته می‌شود ولی چیزی باز نمی‌کند (GET /api/user → 401).
  */
 
+import { isNetworkError, waitForOnline } from './net-watch';
+
 const API = 'https://www.buskool.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
@@ -172,6 +174,12 @@ class PaceGate {
 /** گیت مشترک همهٔ جاب‌ها — ایمپورتر تک‌جاب است، پس یک صف واحد کافی است */
 const gate = new PaceGate();
 
+/** پنجرهٔ «آنلاین-ولی-باسکول-جواب-نمی‌دهد» برای هر تماس API — در قطعی
+ *  واقعی مصرف نمی‌شود (سنجش شبکه خودش می‌ایستد)؛ اگر باسکول پس از این
+ *  مدت هنوز خطای شبکه‌ای بدهد، خطا به لایهٔ کاربر می‌رود که خودش بازتلاش
+ *  می‌کند (withNetRetry) و در نهایت قانون ۳ شکست پیاپی تصمیم می‌گیرد. */
+const CALL_NET_WINDOW_MS = 10 * 60_000;
+
 export class BuskoolClient {
   /** آخرین مهر یک درخواست موفق — برای گزارش تعداد تماس با باسکول */
   public requests = 0;
@@ -181,14 +189,22 @@ export class BuskoolClient {
     this.stop = stop;
   }
 
-  /** درخواست با گیت نرخ — پیش از هر تلاش توقف جاب بررسی و فاصلهٔ ادب رعایت می‌شود */
+  /** درخواست با گیت نرخ — پیش از هر تلاش توقف جاب بررسی و فاصلهٔ ادب رعایت می‌شود.
+   *
+   * قطعی اینترنت (۱۵-۱۱ شب): خطای شبکه‌ای (DNS/سوکت/تایم‌اوت) جزو شکست‌های
+   * ۳تایی نیست — درخواست همان‌جا نگه داشته می‌شود، هر ۵ ثانیه اتصال سنجیده
+   * می‌شود و به‌محض وصل شدن همان درخواست ادامه می‌یابد. فقط خطاهای HTTP
+   *  واقعی (بلاک/خطای سرور) بودجهٔ ۳ تلاش را می‌سوزانند. */
   async call<T>(path: string, body: Record<string, unknown>): Promise<T> {
     let lastErr: unknown;
+    let hardFails = 0; // شکست‌های غیرشبکه‌ای (HTTP 4xx/5xx، HTML، …)
+    let firstNetErrAt = 0; // شروع پنجرهٔ شبکه‌ای همین تماس
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (;;) {
       if (this.stop()) throw new Error('JOB_STOPPED');
       await gate.acquire();
       let released = false;
+      let netErr = false;
       try {
         const { cookie } = buskoolConfig();
         const headers: Record<string, string> = {
@@ -226,12 +242,31 @@ export class BuskoolClient {
         return (await res.json()) as T;
       } catch (err) {
         lastErr = err;
-        gate.release();
-        released = true;
-        if (this.stop()) throw new Error('JOB_STOPPED');
-        if (attempt < 3) await sleep(1500 * attempt * Math.min(pacePenalty, 4));
+        netErr = isNetworkError(err);
+        if (netErr) {
+          // قطعی اینترنت — پنجرهٔ «آنلاین-ولی-بی‌پاسخ» را فقط همین‌ها می‌سوزانند
+          if (!firstNetErrAt) firstNetErrAt = Date.now();
+          else if (Date.now() - firstNetErrAt > CALL_NET_WINDOW_MS) break;
+        } else {
+          hardFails++;
+          if (hardFails >= 3) break;
+        }
       } finally {
-        if (!released) gate.release();
+        if (!released) {
+          released = true;
+          gate.release();
+        }
+      }
+
+      if (this.stop()) throw new Error('JOB_STOPPED');
+      if (netErr) {
+        // بایست تا شبکه برگردد — در قطعی واقعی بی‌پایان صبور است و گیت
+        // نرخ را هم در دست نمی‌گیریم (release شده) تا بقیهٔ صف قفل نشوند
+        await waitForOnline(this.stop);
+        await sleep(1000); // نفس کوتاه بعد از وصل شدن
+      } else {
+        // خطای HTTP واقعی — همان backoff خطی قبلی (۳ تلاش)
+        await sleep(1500 * hardFails * Math.min(pacePenalty, 4));
       }
     }
     throw new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`);

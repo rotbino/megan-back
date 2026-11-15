@@ -70,6 +70,14 @@ import {
 import { importerAdminPhone } from './dto';
 import { descToText } from './desc-text';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
+import {
+  isNetworkError,
+  netWaitingNow,
+  netWaitSince,
+  onNetTransition,
+  waitForOnline,
+  withNetRetry,
+} from './net-watch';
 
 // ─── تایپ‌های جاب (قرارداد فرانت) ───────────────────────────────────────────
 
@@ -105,6 +113,11 @@ export interface ImportJob {
   error?: string;
   startedAt: number;
   finishedAt?: number;
+  /** (۱۵-۱۱ شب) نگهبان شبکه: همین حالا در انتظار بازگشت اینترنت است —
+   *  جاب متوقف نشده، فقط نگه داشته شده و بعد از وصل شدن از همان‌جا ادامه می‌یابد */
+  netWaiting?: boolean;
+  /** از چه لحظه‌ای منتظر شبکه مانده (مهر یونیکس ms) */
+  netWaitSince?: number | null;
 }
 
 interface JobInternal extends ImportJob {
@@ -123,6 +136,7 @@ const STEP_DEFS: { key: string; label: string }[] = [
 
 const MAX_JOBS = 50;
 const PAGE = 20; // اندازهٔ صفحهٔ لیست آگهی‌های باسکول
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const MAX_PHOTOS_PER_PRODUCT = 4;
 /** سقف تصاویر کسب‌وکار هر کاربر — همان سقف گالری فرم ویرایش پروفایل (۸) */
 const MAX_RELATEDS_PER_USER = 8;
@@ -144,7 +158,23 @@ export class ImporterService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly uploads: UploadsService,
-  ) {}
+  ) {
+    // نگهبان شبکه (۱۵-۱۱ شب): گذار قطع/وصل روی جابِ در حال اجرا لاگ و فیلد
+    // می‌شود تا پنل زنده نشان دهد «ایمپورت متوقف نشده — فقط منتظر اینترنت است»
+    onNetTransition((waiting, since) => {
+      const job = [...this.jobs.values()].find((j) => j.status === 'running');
+      if (!job) return;
+      job.netWaiting = waiting;
+      job.netWaitSince = waiting ? since : null;
+      this.log(
+        job,
+        waiting ? 'warn' : 'success',
+        waiting
+          ? '⏳ اتصال شبکه قطع شد — ایمپورت همین‌جا نگه داشته شد و بعد از وصل شدن اینترنت از همان‌جا ادامه می‌یابد…'
+          : '✓ شبکه برگشت — ادامهٔ ایمپورت از همان‌جا',
+      );
+    });
+  }
 
   // ═══════════════════════════ وضعیت ‌و آمار ═══════════════════════════
 
@@ -160,6 +190,10 @@ export class ImporterService {
       // (null = بدون کوکی/خطای شبکه؛ یک تماس در عمر پروسه، کش‌شده).
       cookieLoggedIn: await buskoolSessionLoggedIn(),
       adminPhone: importerAdminPhone(),
+      // نگهبان شبکه (۱۵-۱۱ شب): آیا همین حالا منتظر بازگشت اینترنت هستیم؟
+      // فقط وقتی جابی در حال اجراست معنادار است (کسی سنجش نمی‌کند تا وقتی
+      // عملی منتظر بماند) — برای نشان‌دادن «توقف موقت» در نوار وضعیت پنل
+      netWaiting: netWaitingNow(),
       // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های باسکول دقیقاً
       // در همان جا (users/{userId}/…) می‌نشینند. فرانت نشان می‌دهد.
       storageDriver: storage.DRIVER,
@@ -457,7 +491,14 @@ export class ImporterService {
   // ═══════════════════════════ جاب‌ها ═══════════════════════════
 
   getJob(id: string): ImportJob | null {
-    return this.jobs.get(id) ?? null;
+    const job = this.jobs.get(id);
+    if (job && job.status === 'running') {
+      // وضعیت زندهٔ نگهبان شبکه — بدون این، جابِ منتظر پس از اولین پاسخ
+      // stale می‌شد (فقط گذارها از listener می‌رسند؛ سنجش همیشه به‌روز است)
+      job.netWaiting = netWaitingNow();
+      job.netWaitSince = netWaitSince();
+    }
+    return job ?? null;
   }
 
   stopJob(id: string, adminPhone: string): { stopped: boolean } {
@@ -529,6 +570,8 @@ export class ImporterService {
 
   private failJob(job: JobInternal, err: unknown) {
     if (job.status !== 'running') return;
+    job.netWaiting = false;
+    job.netWaitSince = null;
     const msg = (err as Error)?.message ?? String(err);
     if (msg === 'JOB_STOPPED') {
       job.status = 'stopped';
@@ -546,16 +589,35 @@ export class ImporterService {
 
   private finishJob(job: JobInternal) {
     job.status = 'done';
+    job.netWaiting = false;
+    job.netWaitSince = null;
     job.finishedAt = Date.now();
     job.counters['buskoolRequests'] = job.buskoolRequests;
     this.log(job, 'success', 'ایمپورت کامل شد ✓');
+  }
+
+  /** مقاوم‌سازی در برابر قطعی اینترنت (خواستهٔ مالک ۱۵-۱۱ شب): خطای شبکه‌ای
+   *  = توقف موقت و بازتلاش همان عملیات بعد از وصل شدن — نه شکستِ کاربر و نه
+   *  سوزاندن قانون ۳ شکست پیاپی. عملیات‌های ایمپورتر idempotent هستند. */
+  private netRetry<T>(job: JobInternal, fn: () => Promise<T>): Promise<T> {
+    return withNetRetry(fn, {
+      stop: () => job.stopRequested,
+      onWait: (err) =>
+        this.log(
+          job,
+          'warn',
+          `⏳ شبکه قطع است (${String((err as Error)?.message ?? err).slice(0, 90)}) — منتظر وصل شدن برای ادامه از همین‌جا…`,
+        ),
+    });
   }
 
   // ═══════════════════════════ اجرا ═══════════════════════════
 
   private async runSingle(job: JobInternal, input: { userName: string; phone?: string; maxProducts?: number }) {
     const bk = new BuskoolClient(() => job.stopRequested);
-    const user = await this.importOneUser(job, bk, input.userName, input.phone, input.maxProducts ?? 0);
+    const user = await this.netRetry(job, () =>
+      this.importOneUser(job, bk, input.userName, input.phone, input.maxProducts ?? 0),
+    );
     job.buskoolRequests = bk.requests;
     if (job.stopRequested) throw new Error('JOB_STOPPED');
     job.result = { userName: user.userName, userId: user.id, phone: user.phone };
@@ -578,7 +640,7 @@ export class ImporterService {
 
     // نوار پیشرفت: کلِ درخواستی، مشخّص به باقی‌ماندهٔ واقعی منبع — منبع که
     // زودتر تمام شود همان عددِ کوچکتر ملاک است (شمارش، یک کوئری سبک)
-    const sourceTotal = await this.sourceCount().catch(() => 0);
+    const sourceTotal = await this.netRetry(job, () => this.sourceCount()).catch(() => 0);
     job.totalUsers = Math.max(1, Math.min(limit, Math.max(0, sourceTotal - offset) || limit));
     job.usersDone = 0;
     job.usersFailed = 0;
@@ -597,7 +659,7 @@ export class ImporterService {
     while (consumed < limit) {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
       const take = Math.min(CHUNK, limit - consumed);
-      const { rows, rawCount } = await this.sourceRead(cursor, take);
+      const { rows, rawCount } = await this.netRetry(job, () => this.sourceRead(cursor, take));
       if (rawCount === 0) {
         if (consumed === 0) {
           throw new Error(await this.sourceEmptyError(offset, take));
@@ -619,10 +681,12 @@ export class ImporterService {
         job.steps.forEach((s) => (s.status = 'pending'));
 
         // ── ضدتکرار (خواستهٔ مالک): کاربر ایمپورت‌شده — موفق یا ناقص — رد می‌شود ──
-        const existing = await this.prisma.user.findFirst({
-          where: { bUserName: row.userName },
-          select: { id: true, failedImport: true, b: true },
-        });
+        const existing = await this.netRetry(job, () =>
+          this.prisma.user.findFirst({
+            where: { bUserName: row.userName },
+            select: { id: true, failedImport: true, b: true },
+          }),
+        );
         if (existing) {
           this.bump(job, 'usersSkipped');
           this.log(
@@ -652,7 +716,9 @@ export class ImporterService {
         }
 
         try {
-          await this.importOneUser(job, bk, row.userName, row.phone ?? undefined, input.maxProductsPerUser ?? 0);
+          await this.netRetry(job, () =>
+            this.importOneUser(job, bk, row.userName, row.phone ?? undefined, input.maxProductsPerUser ?? 0),
+          );
           job.usersDone = (job.usersDone ?? 0) + 1;
           consecutiveFails = 0;
           job.buskoolRequests = bk.requests;
@@ -668,10 +734,12 @@ export class ImporterService {
           // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
           await this.markFailedImport(row.userName).catch(() => undefined);
           consecutiveFails++;
-          // ۳ شکست پیاپی = مشکل سیستمی (قطعی/بلاک) — ادامه بی‌فایده و خطرناک است
+          // ۳ شکست پیاپی = مشکل سیستمی (بلاک شدن باسکول/خطای سمت سرور) —
+          // قطعی اینترنت دیگر به اینجا نمی‌رسد (نگهبان شبکه همان‌جا منتظر
+          // می‌ماند و بعد از وصل شدن ادامه می‌دهد — net-watch.ts)
           if (consecutiveFails >= 3) {
             throw new Error(
-              `${consecutiveFails} شکست پیاپی — احتمالاً قطعی اینترنت یا بلاک شدن باسکول؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
+              `${consecutiveFails} شکست پیاپی — احتمالاً بلاک شدن باسکول یا خطای سیستمی؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
             );
           }
         }
@@ -1208,7 +1276,7 @@ export class ImporterService {
     let relatedDone = 0;
     const imgWorker = async (t: ImgTask): Promise<void> => {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
-      const img = await fetchImage(t.url);
+      const img = await fetchImage(t.url, () => job.stopRequested);
       const norm = img ? await normalizeImage(img.buf, img.mime) : null;
       if (!norm) {
         if (t.kind === 'avatar') {
@@ -1225,17 +1293,19 @@ export class ImporterService {
         if (t.kind === 'avatar') {
           // همان مسیر/پردازش آپلود عادی پروفایل: users/{userId}/avatars/avatar/…
           // (خواستهٔ مالک ۱۳-۱۱) — انگار که کاربر خودش عکس پروفایل را گذاشته
-          const res = await this.uploads.ingestExternal({
-            ownerId: user.id,
-            model: 'User',
-            modelId: user.id,
-            fieldKey: 'avatar',
-            buffer: norm.buf,
-            mimetype: norm.mime,
-            filename: t.url.split('/').pop() || `buskool-avatar-${userName}`,
-            replace: true, // اسلات تک‌فایلی — عین پنل کاربر
-            metadata: { importedFrom: 'buskool', originalUrl: t.url },
-          });
+          const res = await this.netRetry(job, () =>
+            this.uploads.ingestExternal({
+              ownerId: user.id,
+              model: 'User',
+              modelId: user.id,
+              fieldKey: 'avatar',
+              buffer: norm.buf,
+              mimetype: norm.mime,
+              filename: t.url.split('/').pop() || `buskool-avatar-${userName}`,
+              replace: true, // اسلات تک‌فایلی — عین پنل کاربر
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+            }),
+          );
           if (res.ok) {
             await this.prisma.user.update({ where: { id: user.id }, data: { avatarUrl: res.file.url } });
             this.step(job, 'avatar', 'done');
@@ -1248,17 +1318,19 @@ export class ImporterService {
         } else if (t.kind === 'related') {
           // همان مسیر/پردازش آپلود عادی تصاویر کسب‌وکار:
           // users/{userId}/avatars/gallery/… با تامبنیل و بدون واترمارک
-          const res = await this.uploads.ingestExternal({
-            ownerId: user.id,
-            model: 'User',
-            modelId: user.id,
-            fieldKey: 'gallery',
-            buffer: norm.buf,
-            mimetype: norm.mime,
-            filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
-            replace: false, // گالری چندفایلی
-            metadata: { importedFrom: 'buskool', originalUrl: t.url },
-          });
+          const res = await this.netRetry(job, () =>
+            this.uploads.ingestExternal({
+              ownerId: user.id,
+              model: 'User',
+              modelId: user.id,
+              fieldKey: 'gallery',
+              buffer: norm.buf,
+              mimetype: norm.mime,
+              filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
+              replace: false, // گالری چندفایلی
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+            }),
+          );
           if (res.ok) {
             relatedDone++;
             this.bump(job, 'relatedsDownloaded');
@@ -1270,17 +1342,19 @@ export class ImporterService {
           // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
           // users/{userId}/products/{pid}/gallery/… با واترمارک و تامبنیل —
           // «انگار که آگهی توسط کاربر ایجاد شده»؛ ردیف File با storageKey کامل.
-          const res = await this.uploads.ingestExternal({
-            ownerId: user.id,
-            model: 'Product',
-            modelId: String(t.pid),
-            fieldKey: 'gallery',
-            buffer: norm.buf,
-            mimetype: norm.mime,
-            filename: t.url.split('/').pop() || `buskool-${t.pid}-${t.i}`,
-            replace: false, // گالری چندفایلی
-            metadata: { importedFrom: 'buskool', originalUrl: t.url },
-          });
+          const res = await this.netRetry(job, () =>
+            this.uploads.ingestExternal({
+              ownerId: user.id,
+              model: 'Product',
+              modelId: String(t.pid),
+              fieldKey: 'gallery',
+              buffer: norm.buf,
+              mimetype: norm.mime,
+              filename: t.url.split('/').pop() || `buskool-${t.pid}-${t.i}`,
+              replace: false, // گالری چندفایلی
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+            }),
+          );
           if (res.ok) {
             this.bump(job, 'imagesDownloaded');
           } else {
@@ -1361,7 +1435,7 @@ export class ImporterService {
 
     let done = 0;
     await runPool(todo, imagePoolSize(), () => job.stopRequested, async (t) => {
-      const img = await fetchImage(t.url);
+      const img = await fetchImage(t.url, () => job.stopRequested);
       const norm = img ? await normalizeImage(img.buf, img.mime) : null;
       if (!norm) {
         this.bump(job, 'relatedsFailed');
@@ -1370,17 +1444,19 @@ export class ImporterService {
       try {
         // همان مسیر/پردازش آپلود عادی تصاویر کسب‌وکار:
         // users/{userId}/avatars/gallery/… با تامبنیل و بدون واترمارک
-        const res = await this.uploads.ingestExternal({
-          ownerId: userId,
-          model: 'User',
-          modelId: userId,
-          fieldKey: 'gallery',
-          buffer: norm.buf,
-          mimetype: norm.mime,
-          filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
-          replace: false, // گالری چندفایلی
-          metadata: { importedFrom: 'buskool', originalUrl: t.url },
-        });
+        const res = await this.netRetry(job, () =>
+          this.uploads.ingestExternal({
+            ownerId: userId,
+            model: 'User',
+            modelId: userId,
+            fieldKey: 'gallery',
+            buffer: norm.buf,
+            mimetype: norm.mime,
+            filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
+            replace: false, // گالری چندفایلی
+            metadata: { importedFrom: 'buskool', originalUrl: t.url },
+          }),
+        );
         if (res.ok) {
           done++;
           this.bump(job, 'relatedsDownloaded');
@@ -1993,15 +2069,33 @@ function newObjectId(): string {
   return randomBytes(12).toString('hex');
 }
 
-/** دانلود تصویر با دو تلاش — CDN گاهی یک‌باره قطع می‌کند؛ تلاش دوم نرخ
- *  موفقیت را در شبکهٔ لرزان بالا می‌برد (خطای هر عکس مستقل است). */
-async function fetchImage(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const r = await fetchImageOnce(rawUrl);
+/** دانلود تصویر — مقاوم در برابر قطعی اینترنت (۱۵-۱۱ شب):
+ *  خطای شبکه‌ای (DNS/سوکت/تایم‌اوت) عکس را «ردشده» نمی‌کند؛ تا برگشتن شبکه
+ *  همان عکس نگه داشته می‌شود و بعد ادامه می‌یابد. فقط ردّهای محتوایی
+ *  (فایل خراب/mime غیرواقعی/بیش از ۸MB) پس از دو تلاش عکس را می‌اندازند. */
+async function fetchImage(
+  rawUrl: string,
+  stop?: () => boolean,
+): Promise<{ buf: Buffer; mime: string } | null> {
+  let contentFails = 0; // ردّهای محتوایی — دو تلاش و رد شدن
+  let firstNetErrAt = 0; // پنجرهٔ «آنلاین-ولی-CDN-جواب-نمی‌دهد» (۱۰ دقیقه)
+  for (;;) {
+    let r: { buf: Buffer; mime: string } | null;
+    try {
+      r = await fetchImageOnce(rawUrl);
+    } catch (err) {
+      // قطع شبکه — مثل API باسکول بایست تا وصل شود و همان عکس ادامه یابد
+      if (!firstNetErrAt) firstNetErrAt = Date.now();
+      else if (Date.now() - firstNetErrAt > 10 * 60_000) return null;
+      await waitForOnline(stop);
+      await sleep(800);
+      continue;
+    }
     if (r) return r;
-    if (attempt < 2) await new Promise<void>((res) => setTimeout(res, 700));
+    contentFails++;
+    if (contentFails >= 2) return null; // مشکل خود فایل — دو تلاش کافی
+    await sleep(700);
   }
-  return null;
 }
 
 async function fetchImageOnce(rawUrl: string): Promise<{ buf: Buffer; mime: string } | null> {
@@ -2010,17 +2104,24 @@ async function fetchImageOnce(rawUrl: string): Promise<{ buf: Buffer; mime: stri
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
     const host = u.hostname.toLowerCase();
     if (host === 'localhost' || /^127\.|^10\.|^192\.168\.|^169\.254\./.test(host)) return null;
-    const res = await fetch(u.toString(), {
-      signal: AbortSignal.timeout(20_000),
-      // هدرهای مرورگرگونه — CDN آروان با آن‌ها پایدارتر پاسخ می‌دهد
-      headers: {
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        referer: 'https://www.buskool.com/',
-      },
-      redirect: 'follow',
-    });
+    let res: Response;
+    try {
+      res = await fetch(u.toString(), {
+        signal: AbortSignal.timeout(20_000),
+        // هدرهای مرورگرگونه — CDN آروان با آن‌ها پایدارتر پاسخ می‌دهد
+        headers: {
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          referer: 'https://www.buskool.com/',
+        },
+        redirect: 'follow',
+      });
+    } catch (err) {
+      // خطای شبکه‌ای را از ردّهای محتوایی جدا کن — نگهبان شبکه باید ببیندش
+      if (isNetworkError(err)) throw err;
+      return null;
+    }
     if (!res.ok) return null;
     const mime = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     if (!mime.startsWith('image/') && !mime.startsWith('binary/') && !mime.startsWith('application/octet-stream')) {
