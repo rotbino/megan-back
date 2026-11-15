@@ -45,6 +45,11 @@
  *     429/403 — buskool.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
  *     همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
  *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
+ *   • سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر کاربر (مثل حساب
+ *     پاک‌شدهٔ باسکول) جاب را نمی‌اندازد — با دلیلش روی خود رکورد ذخیره
+ *     می‌شود و بقیهٔ کاربران ادامه می‌یابند؛ قطعی اینترنت فقط وقفه است
+ *     (net-watch) و تنها تکرار پیاپیِ همین خطا (پیش‌فرض ۱۰ بار) نشانهٔ
+ *     مشکل سیستمی است و جاب را می‌بُرد.
  */
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
@@ -142,6 +147,49 @@ const MAX_PHOTOS_PER_PRODUCT = 4;
 const MAX_RELATEDS_PER_USER = 8;
 /** آپ‌سرت‌های مستقل DB در هر دستهٔ موازی کوچک */
 const DB_CHUNK = 8;
+
+// ─── سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱) ────────────────────────────────
+//
+// «وقتی خطا خوردی ببین چی هست: اگر مالِ همین رکورد است متوقف نشو — ذخیره‌اش
+// کن برای رسیدگی بعدی و برو سراغ رکورد بعدی. قطعی اینترنت که درست کار
+// می‌کند (نگهبان شبکه). فقط اگر همین خطا ۱۰ بار پشت‌سرهم تکرار شد
+// شک کن و ببُر.» — اجرای سیاست در runList؛ امضای خطا همین‌جا ساخته می‌شود.
+
+/** عدد صحیح مثبت از env با پیش‌فرض */
+function envInt(name: string, def: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : def;
+}
+
+/**
+ * امضای خطا — «نوعِ» خطا بدون جزئیات رکورد (یوزرنیم/عدد/نقل‌قول) تا
+ * خطاهای یکسانِ رکوردهای مختلف هم‌امضا دیده شوند و قانون «تکرار پیاپی
+ * همین خطا» کار کند: کاربر پاک‌شدهٔ باسکول → user-not-found، هر ۴۰۴ →
+ * http-404، پاسخ HTML نیازمند کوکی → html-cookie، خطای Prisma → prisma-P2xxx.
+ */
+export function importErrorSignature(err: unknown): string {
+  const msg = String((err as Error)?.message ?? err);
+  if (msg.includes('کاربر باسکول') && msg.includes('پیدا نشد')) return 'user-not-found';
+  const http = msg.match(/HTTP (\d{3})/);
+  if (http) return `http-${http[1]}`;
+  if (msg.includes('پاسخ HTML')) return 'html-cookie';
+  const code = (err as { code?: unknown })?.code;
+  if (typeof code === 'string' && /^P\d{4}$/.test(code)) return `prisma-${code}`;
+  const prismaCode = msg.match(/\bP\d{4}\b/);
+  if (prismaCode) return `prisma-${prismaCode[0]}`;
+  return (
+    msg
+      .replace(/@[^\s،)]+/g, '@user')
+      .replace(/https?:\/\/\S+/g, 'url')
+      .replace(/\/[a-zA-Z0-9_.\-]+(?:\/[a-zA-Z0-9_.\-]+)*/g, 'path')
+      .replace(/["'«»][^"'«»]*["'«»]/g, '…')
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .slice(0, 90) || 'unknown'
+  );
+}
 
 @Injectable()
 export class ImporterService {
@@ -651,7 +699,15 @@ export class ImporterService {
     );
 
     const bk = new BuskoolClient(() => job.stopRequested);
-    let consecutiveFails = 0;
+    // سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر رکورد جاب را
+    // نمی‌اندازد — ذخیره و رد می‌شود؛ فقط تکرار پیاپیِ «همین خطا» (یا
+    // موج پیاپی خطاهای گوناگون) مشکل سیستمی تلقی می‌شود و جاب را
+    // می‌بُرد. سقف‌ها با env قابل تنظیم‌اند.
+    const maxRepeatFails = envInt('IMPORTER_MAX_REPEAT_FAILS', 10);
+    const maxConsecFails = envInt('IMPORTER_MAX_CONSECUTIVE_FAILS', 15);
+    let consecutiveFails = 0; // هر خطایی پیاپی (پشتیبان خطاهای گوناگون)
+    let failStreakSig = ''; // امضای خطای متوالی جاری
+    let failStreakCount = 0; // چند بار پیاپی همین امضا
     let cursor = offset; // کرسر خواندن منبع
     let consumed = 0; // سندهای خوانده‌شده (شامل ردّشده‌ها) — سقفِ limit
     let chunkNo = 0;
@@ -721,6 +777,8 @@ export class ImporterService {
           );
           job.usersDone = (job.usersDone ?? 0) + 1;
           consecutiveFails = 0;
+          failStreakSig = '';
+          failStreakCount = 0;
           job.buskoolRequests = bk.requests;
           this.log(
             job,
@@ -730,16 +788,37 @@ export class ImporterService {
         } catch (err) {
           if ((err as Error).message === 'JOB_STOPPED') throw err;
           job.usersFailed = (job.usersFailed ?? 0) + 1;
-          this.log(job, 'error', `✖ ${row.userName}: ${(err as Error).message}`);
-          // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
-          await this.markFailedImport(row.userName).catch(() => undefined);
+          const reason = String((err as Error).message ?? err);
+          const sig = importErrorSignature(err);
+          // خطای این رکورد ذخیره می‌شود و می‌رویم سراغ رکورد بعدی
+          // (خواستهٔ مالک ۱۵-۱۱): رکوردِ خراب ≠ جابِ خراب
+          this.log(
+            job,
+            'error',
+            `✖ ${row.userName}: ${reason} — برای رسیدگی بعدی ذخیره شد، ادامه با کاربر بعدی`,
+          );
+          await this.markFailedImport(row.userName, reason, sig).catch(() => undefined);
           consecutiveFails++;
-          // ۳ شکست پیاپی = مشکل سیستمی (بلاک شدن باسکول/خطای سمت سرور) —
-          // قطعی اینترنت دیگر به اینجا نمی‌رسد (نگهبان شبکه همان‌جا منتظر
-          // می‌ماند و بعد از وصل شدن ادامه می‌دهد — net-watch.ts)
-          if (consecutiveFails >= 3) {
+          if (sig === failStreakSig) failStreakCount++;
+          else {
+            failStreakSig = sig;
+            failStreakCount = 1;
+          }
+          // فقط تکرار پیاپیِ «همین خطا» نشانهٔ مشکل سیستمی است (بلاک شدن
+          // باسکول/تغییر API) — قطعی اینترنت اصلاً به اینجا نمی‌رسد
+          // (نگهبان شبکه همان‌جا منتظر می‌ماند — net-watch.ts)
+          if (failStreakCount >= maxRepeatFails) {
             throw new Error(
-              `${consecutiveFails} شکست پیاپی — احتمالاً بلاک شدن باسکول یا خطای سیستمی؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
+              `${failStreakCount.toLocaleString('fa-IR')} شکست پیاپی با خطای یکسان (${sig} — «${reason.slice(0, 140)}») — ` +
+                'احتمالاً مشکل سیستمی (بلاک/تغییر API)؛ جاب متوقف شد. خطاها ذخیره شده‌اند؛ ' +
+                'پس از رفع مشکل با دکمهٔ «ایمپورت‌نشدهٔ بعدی» ادامه دهید',
+            );
+          }
+          if (consecutiveFails >= maxConsecFails) {
+            throw new Error(
+              `${consecutiveFails.toLocaleString('fa-IR')} شکست پیاپی با خطاهای گوناگون — ` +
+                'احتمالاً مشکل سیستمی؛ جاب متوقف شد. خطاها ذخیره شده‌اند؛ ' +
+                'پس از رفع مشکل با دکمهٔ «ایمپورت‌نشدهٔ بعدی» ادامه دهید',
             );
           }
         }
@@ -1644,15 +1723,31 @@ export class ImporterService {
    * failedImport می‌ماند تا بعداً رسیدگی شود؛ ایمپورت‌های بعدی هم از او رد
    * می‌شوند تا دادهٔ تکراری نسازد.
    */
-  private async markFailedImport(userName: string) {
+  private async markFailedImport(userName: string, reason?: string, sig?: string) {
+    // دلیل شکست روی خود رکورد ذخیره می‌شود (خواستهٔ مالک ۱۵-۱۱: «جایی
+    // ذخیره کن که بعداً رسیدگی کنیم») — صفحهٔ «کاربران ایمپورت‌شده» با
+    // فیلتر «ناقص/شکست‌خورده» نشانش می‌دهد
+    const errDoc = reason
+      ? {
+          message: reason.slice(0, 600),
+          sig: sig ?? importErrorSignature(reason),
+          at: new Date().toISOString(),
+        }
+      : null;
     const existing = await this.prisma.user.findFirst({
       where: { OR: [{ bUserName: userName }, { userName }] },
-      select: { id: true },
+      select: { id: true, profile: true },
     });
     if (existing) {
       await this.prisma.user.update({
         where: { id: existing.id },
-        data: { failedImport: true, bUserName: userName },
+        data: {
+          failedImport: true,
+          bUserName: userName,
+          ...(errDoc
+            ? { profile: { ...((existing.profile ?? {}) as object), bImportError: errDoc } as object }
+            : {}),
+        },
       });
       return;
     }
@@ -1675,6 +1770,7 @@ export class ImporterService {
               bStub: true,
               importedFrom: 'buskool-failed',
               importedAt: new Date().toISOString(),
+              ...(errDoc ? { bImportError: errDoc } : {}),
             } as object,
           },
         });
