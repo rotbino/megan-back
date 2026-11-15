@@ -569,78 +569,119 @@ export class ImporterService {
     // خواندن لیست از کالکشن user-buskool — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 5;
-    const { rows } = await this.sourceRead(offset, limit);
-    if (!rows.length) {
-      throw new Error(await this.sourceEmptyError(offset, limit));
-    }
 
-    job.totalUsers = rows.length;
+    // قطعه‌بندی خودکار (خواستهٔ مالک ۱۵-۱۱: «۱۰۰۰ و ۱۰۰۰۰ هم قبول کن؛ خودش
+    // ۲۰۰تای اول را که تمام کرد بره ۲۰۰تای بعدی») — منبع در قطعه‌های ۲۰۰تایی
+    // خوانده می‌شود (حافظهٔ ثابت، نوار پیشرفت روان) و همه در «یک جاب» دنباله‌دنباله
+    // اجرا می‌شود. سقف ۲۰۰ قبلی از DTO هم برداشته شد.
+    const CHUNK = 200;
+
+    // نوار پیشرفت: کلِ درخواستی، مشخّص به باقی‌ماندهٔ واقعی منبع — منبع که
+    // زودتر تمام شود همان عددِ کوچکتر ملاک است (شمارش، یک کوئری سبک)
+    const sourceTotal = await this.sourceCount().catch(() => 0);
+    job.totalUsers = Math.max(1, Math.min(limit, Math.max(0, sourceTotal - offset) || limit));
     job.usersDone = 0;
     job.usersFailed = 0;
-    this.log(job, 'info', `${rows.length} کاربر از ردیف ${offset} کالکشن ${this.sourceTable()} خوانده شد`);
+    this.log(
+      job,
+      'info',
+      `ایمپورت ${job.totalUsers.toLocaleString('fa-IR')} کاربر از ردیف ${offset} کالکشن ${this.sourceTable()} — در قطعه‌های ${CHUNK}تایی`,
+    );
 
     const bk = new BuskoolClient(() => job.stopRequested);
     let consecutiveFails = 0;
-    for (const [i, row] of rows.entries()) {
-      if (job.stopRequested) throw new Error('JOB_STOPPED');
-      job.currentUserIndex = i + 1;
-      job.currentUser = row.userName;
-      // هر کاربر جاب نمایشی خودش را دارد ولی steps مشترک ریست می‌شود
-      job.steps.forEach((s) => (s.status = 'pending'));
+    let cursor = offset; // کرسر خواندن منبع
+    let consumed = 0; // سندهای خوانده‌شده (شامل ردّشده‌ها) — سقفِ limit
+    let chunkNo = 0;
 
-      // ── ضدتکرار (خواستهٔ مالک): کاربر ایمپورت‌شده — موفق یا ناقص — رد می‌شود ──
-      const existing = await this.prisma.user.findFirst({
-        where: { bUserName: row.userName },
-        select: { id: true, failedImport: true, b: true },
-      });
-      if (existing) {
-        this.bump(job, 'usersSkipped');
-        this.log(
-          job,
-          'warn',
-          `↷ ${row.userName} رد شد — ${existing.failedImport ? 'ایمپورت ناقص قبلی (failedImport)' : 'قبلاً ایمپورت شده'}`,
-        );
-        // بازآوری تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): کاربرانِ ایمپورت‌شدهٔ
-        // قدیمی عکس‌های مربوطهٔ باسکول را فقط به‌صورت URL خام در b.relateds
-        // دارند — بدون تماس جدیدی با باسکول، از همان URLهای آرشیوشده در
-        // گالری‌شان rehost می‌شوند؛ idempotent است و در اجرای بعدی رد می‌شود.
-        if (!existing.failedImport) {
-          const b = asBUserData(existing.b);
-          if (b?.relateds?.length) {
-            try {
-              const { done } = await this.ingestUserRelateds(job, existing.id, b.relateds);
-              if (done > 0) {
-                this.log(job, 'success', `  ↳ ${done} تصویر کسب‌وکار باسکول به گالری‌اش اضافه شد`);
+    while (consumed < limit) {
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
+      const take = Math.min(CHUNK, limit - consumed);
+      const { rows, rawCount } = await this.sourceRead(cursor, take);
+      if (rawCount === 0) {
+        if (consumed === 0) {
+          throw new Error(await this.sourceEmptyError(offset, take));
+        }
+        this.log(job, 'warn', `منبع در ردیف ${cursor} تمام شد — ${consumed.toLocaleString('fa-IR')} کاربر پردازش شد`);
+        job.totalUsers = consumed;
+        break;
+      }
+      chunkNo++;
+      if (chunkNo > 1) {
+        this.log(job, 'info', `قطعهٔ ${chunkNo.toLocaleString('fa-IR')}: ${rows.length} کاربر از ردیف ${cursor.toLocaleString('fa-IR')}`);
+      }
+
+      for (const [i, row] of rows.entries()) {
+        if (job.stopRequested) throw new Error('JOB_STOPPED');
+        job.currentUserIndex = consumed + i + 1;
+        job.currentUser = row.userName;
+        // هر کاربر جاب نمایشی خودش را دارد ولی steps مشترک ریست می‌شود
+        job.steps.forEach((s) => (s.status = 'pending'));
+
+        // ── ضدتکرار (خواستهٔ مالک): کاربر ایمپورت‌شده — موفق یا ناقص — رد می‌شود ──
+        const existing = await this.prisma.user.findFirst({
+          where: { bUserName: row.userName },
+          select: { id: true, failedImport: true, b: true },
+        });
+        if (existing) {
+          this.bump(job, 'usersSkipped');
+          this.log(
+            job,
+            'warn',
+            `↷ ${row.userName} رد شد — ${existing.failedImport ? 'ایمپورت ناقص قبلی (failedImport)' : 'قبلاً ایمپورت شده'}`,
+          );
+          // بازآوری تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): کاربرانِ ایمپورت‌شدهٔ
+          // قدیمی عکس‌های مربوطهٔ باسکول را فقط به‌صورت URL خام در b.relateds
+          // دارند — بدون تماس جدیدی با باسکول، از همان URLهای آرشیوشده در
+          // گالری‌شان rehost می‌شوند؛ idempotent است و در اجرای بعدی رد می‌شود.
+          if (!existing.failedImport) {
+            const b = asBUserData(existing.b);
+            if (b?.relateds?.length) {
+              try {
+                const { done } = await this.ingestUserRelateds(job, existing.id, b.relateds);
+                if (done > 0) {
+                  this.log(job, 'success', `  ↳ ${done} تصویر کسب‌وکار باسکول به گالری‌اش اضافه شد`);
+                }
+              } catch (err) {
+                if ((err as Error).message === 'JOB_STOPPED') throw err;
+                this.log(job, 'warn', `  ↳ بازآوری تصاویر کسب‌وکار ناموفق: ${(err as Error).message}`);
               }
-            } catch (err) {
-              if ((err as Error).message === 'JOB_STOPPED') throw err;
-              this.log(job, 'warn', `  ↳ بازآوری تصاویر کسب‌وکار ناموفق: ${(err as Error).message}`);
             }
           }
+          continue;
         }
-        continue;
+
+        try {
+          await this.importOneUser(job, bk, row.userName, row.phone ?? undefined, input.maxProductsPerUser ?? 0);
+          job.usersDone = (job.usersDone ?? 0) + 1;
+          consecutiveFails = 0;
+          job.buskoolRequests = bk.requests;
+          this.log(
+            job,
+            'success',
+            `✔ ${row.userName} (${(consumed + i + 1).toLocaleString('fa-IR')}/${job.totalUsers.toLocaleString('fa-IR')})`,
+          );
+        } catch (err) {
+          if ((err as Error).message === 'JOB_STOPPED') throw err;
+          job.usersFailed = (job.usersFailed ?? 0) + 1;
+          this.log(job, 'error', `✖ ${row.userName}: ${(err as Error).message}`);
+          // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
+          await this.markFailedImport(row.userName).catch(() => undefined);
+          consecutiveFails++;
+          // ۳ شکست پیاپی = مشکل سیستمی (قطعی/بلاک) — ادامه بی‌فایده و خطرناک است
+          if (consecutiveFails >= 3) {
+            throw new Error(
+              `${consecutiveFails} شکست پیاپی — احتمالاً قطعی اینترنت یا بلاک شدن باسکول؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
+            );
+          }
+        }
       }
 
-      try {
-        await this.importOneUser(job, bk, row.userName, row.phone ?? undefined, input.maxProductsPerUser ?? 0);
-        job.usersDone = (job.usersDone ?? 0) + 1;
-        consecutiveFails = 0;
-        job.buskoolRequests = bk.requests;
-        this.log(job, 'success', `✔ ${row.userName} (${i + 1}/${rows.length})`);
-      } catch (err) {
-        if ((err as Error).message === 'JOB_STOPPED') throw err;
-        job.usersFailed = (job.usersFailed ?? 0) + 1;
-        this.log(job, 'error', `✖ ${row.userName}: ${(err as Error).message}`);
-        // رکورد ناقص با پرچم failedImport می‌ماند — بعداً رسیدگی می‌شود
-        await this.markFailedImport(row.userName).catch(() => undefined);
-        consecutiveFails++;
-        // ۳ شکست پیاپی = مشکل سیستمی (قطعی/بلاک) — ادامه بی‌فایده و خطرناک است
-        if (consecutiveFails >= 3) {
-          throw new Error(
-            `${consecutiveFails} شکست پیاپی — احتمالاً قطعی اینترنت یا بلاک شدن باسکول؛ جاب متوقف شد (بعداً از @${row.userName} ادامه دهید)`,
-          );
-        }
-      }
+      cursor += rawCount;
+      consumed += rawCount;
+      job.buskoolRequests = bk.requests;
+      // نوار پیشرفت با واقعیت هم‌قدم بماند (آخرین قطعه ممکن است ناقص باشد)
+      if (consumed > job.totalUsers) job.totalUsers = consumed;
     }
     this.finishJob(job);
   }
