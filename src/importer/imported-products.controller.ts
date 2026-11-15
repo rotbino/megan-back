@@ -43,7 +43,7 @@ export class ImportedProductsController {
   }
 
   @Get('product-images')
-  @ApiOperation({ summary: 'آلبوم تصاویر آگهی‌ها — ۲۰تایی، فیلتر منبع/تعویض + جستجو' })
+  @ApiOperation({ summary: 'آلبوم تصاویر آگهی‌ها — ۵۰تایی، سورت (آپدیت/ثبت/آید آگهی/حجم) + بازهٔ تاریخ + فیلتر منبع/تعویض + جستجو' })
   async images(@Query() dto: ProductImagesQueryDto) {
     return ok(await this.listings.listImages(dto));
   }

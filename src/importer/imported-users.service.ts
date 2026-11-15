@@ -28,6 +28,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { buildStorage } from '../uploads/storage';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
+import { mongoDateRange } from './date-range.util';
 import { importerAdminPhone } from './dto';
 
 // ─── قرارداد API (آینهٔ فرانت: lib/importer/client.ts) ──────────────────────
@@ -102,6 +103,9 @@ export interface ImportedUsersQuery {
   contacted?: 'yes' | 'no';
   failed?: 'yes' | 'no';
   staleDays?: number;
+  /** بازهٔ تاریخ ثبت‌نام — ISO میلادی (خواستهٔ مالک ۱۵-۱۱) */
+  createdFrom?: string;
+  createdTo?: string;
   sort?: 'lastLogin' | 'createdAt' | 'products' | 'buskoolCreated' | 'imported' | 'contacted';
   dir?: 'asc' | 'desc';
   page?: number;
@@ -252,6 +256,16 @@ export class ImportedUsersService {
         ...(filter.$and as unknown[] ?? []),
         { last_login_at: null },
         { 'b.importedAt': { $lt: cutoff } },
+      ];
+    }
+
+    // بازهٔ تاریخ ثبت‌نام (خواستهٔ مالک ۱۵-۱۱): «در هر بازه چند نفر ثبت‌نام
+    // کرده‌اند» — created_at BSON Date است → EJSON {$date} (date-range.util)
+    const createdRange = mongoDateRange(query.createdFrom, query.createdTo);
+    if (createdRange) {
+      filter.$and = [
+        ...(filter.$and as unknown[] ?? []),
+        { created_at: createdRange },
       ];
     }
 
