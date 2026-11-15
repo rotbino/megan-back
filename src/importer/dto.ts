@@ -286,6 +286,15 @@ export class ProductImagesQueryDto {
   replaced?: 'yes' | 'no';
 
   /**
+   * حالت نمایش (خواستهٔ مالک ۱۶-۱۱ عصر): group=product → هر آگهی یک ردیف با
+   * «همهٔ» عکس‌هایش (۳۰۰×۳۰۰) — واترمارک هیچ عکسی از قلم نمی‌افتد؛
+   * پیش‌فرض تخت (یک ردیف به‌ازای هر فایل) برای سازگاری.
+   */
+  @IsOptional()
+  @IsIn(['product'])
+  group?: 'product';
+
+  /**
    * فیلد سورت (خواستهٔ مالک ۱۵-۱۱: آخرین آپدیت‌ها اول لیست، بعد ثبت).
    * ⚠️ تاریخ‌های فایل همگی زمان ایمپورت‌اند؛ سورت‌های معنادار روی تاریخِ
    * خودِ آگهی‌اند (productUpdated پیش‌فرض). legacy: newest/oldest → ایمپورت.
@@ -296,6 +305,7 @@ export class ProductImagesQueryDto {
     'productCreated',
     'productId',
     'size',
+    'photoCount',
     'createdAt',
     'updatedAt',
     'newest',
@@ -306,6 +316,7 @@ export class ProductImagesQueryDto {
     | 'productCreated'
     | 'productId'
     | 'size'
+    | 'photoCount'
     | 'createdAt'
     | 'updatedAt'
     | 'newest'
