@@ -26,7 +26,10 @@ export class CategoriesService {
   async getAllCategories(): Promise<CategoryNode[]> {
     return this.cache.wrap(
       'categories:tree',
-      { ttlMs: 10 * TTL.MINUTE, tags: ['base', 'categories'] },
+      // یک ساعت — درخت باسکول ۶۹۵تایی تقریباً هرگز عوض نمی‌شود؛ خواندن سرد
+      // روی Atlas ~۷ بچ getMore می‌خورد (~۰.۹ ثانیه) و نباید به کاربر برسد.
+      // بوت درخت را گرم می‌کند (main.ts) و تغییر واقعی تگ categories را می‌بزد.
+      { ttlMs: 60 * TTL.MINUTE, tags: ['base', 'categories'] },
       async () => {
         const all = await this.prisma.category.findMany({
           orderBy: { score: 'desc' },
@@ -51,7 +54,7 @@ export class CategoriesService {
   async getCategoriesByParent(parentId: number | null): Promise<CategoryNode[]> {
     return this.cache.wrap(
       `categories:children:${parentId}`,
-      { ttlMs: 10 * TTL.MINUTE, tags: ['base', 'categories'] },
+      { ttlMs: 60 * TTL.MINUTE, tags: ['base', 'categories'] },
       async () => {
         const list = await this.prisma.category.findMany({
           where: { parentId: parentId ?? null },

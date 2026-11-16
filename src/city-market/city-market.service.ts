@@ -5,6 +5,7 @@ import { CacheService, TTL } from '../common/cache/cache.module';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { ActiveUsersService } from '../common/active-users/active-users.module';
 import type { ProductDto } from '../products/products.service';
 import type { GetCityMarketProductsDto } from './dto';
 
@@ -58,6 +59,7 @@ export class CityMarketService {
     private readonly categories: CategoriesService,
     private readonly locations: LocationsService,
     private readonly uploads: UploadsService,
+    private readonly activeUsers: ActiveUsersService,
   ) {}
 
   /** POST /cityMarket/getProducts — لیست چندشهری بازار شهری (فقط confirmed) */
@@ -73,7 +75,7 @@ export class CityMarketService {
       async () => {
         const where: Prisma.ProductWhereInput = {
           status: 'confirmed',
-          user: { isActive: true },
+          ...(await this.activeUsers.activeUserWhere()),
           // عضویت چندشهری — عین تک‌شهری روی ایندکس city_id (O(1) هر ردیف)
           cityId: { in: [...new Set(dto.cityIds)] },
         };

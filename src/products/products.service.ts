@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ActiveUsersService } from '../common/active-users/active-users.module';
 import { Prisma, type Product } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService, TTL } from '../common/cache/cache.module';
@@ -160,6 +161,7 @@ export class ProductsService {
     private readonly calls: CallsService,
     private readonly presence: PresenceService,
     private readonly security: SecurityService,
+    private readonly activeUsers: ActiveUsersService,
   ) {}
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
@@ -184,9 +186,16 @@ export class ProductsService {
 
     return this.cache.wrap(
       `products:list:${JSON.stringify(dto)}`,
-      { ttlMs: TTL.SHORT, tags: ['products'] },
+      // ۶۰ثانیه — این داده‌ها آینهٔ ایمپورت‌اند؛ ویرایش واقعی کاربر تگ products را
+      // بیات می‌کند و همان لحظه بازخوانی می‌شود (رفع کندی ۱۷-۱۱)
+      { ttlMs: 2 * TTL.SHORT, tags: ['products'] },
       async () => {
-        const where: Prisma.ProductWhereInput = { status: 'confirmed', user: { isActive: true } };
+        // فیلتر فروشندهٔ فعال بدون join پریسما — id غیرفعال‌ها کش ۶۰ثانیه‌ای
+        // (relation-filter «user: { isActive: true }» روی Atlas ۲-۴ ثانیه بود)
+        const where: Prisma.ProductWhereInput = {
+          status: 'confirmed',
+          ...(await this.activeUsers.activeUserWhere()),
+        };
 
         // فیلتر دسته — خودش + درخت فرزندان
         if (dto.categorySlug) {
@@ -257,8 +266,11 @@ export class ProductsService {
         }
 
         const pageCount = Math.max(1, Math.ceil(total / pageSize));
-        const gallery = await this.uploads.galleryMap(rows.map((r) => r.id));
-        const names = await this.hydrateNames(rows);
+        // گالری + نام‌ها موازی — هر دو فقط به ردیف‌های همین صفحه نیاز دارند
+        const [gallery, names] = await Promise.all([
+          this.uploads.galleryMap(rows.map((r) => r.id)),
+          this.hydrateNames(rows),
+        ]);
         return {
           items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
           total,
@@ -316,7 +328,7 @@ export class ProductsService {
       { ttlMs: TTL.MINUTE, tags: ['products', `product:${id}`] },
       async () => {
         const p = await this.prisma.product.findFirst({
-          where: { id, status: 'confirmed', user: { isActive: true } },
+          where: { id, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
         });
         if (!p) {
           throw AppError.notFound('محصول یافت نشد.');
@@ -337,7 +349,7 @@ export class ProductsService {
     const baseWhere = {
       status: 'confirmed' as const,
       id: { not: dto.excludeId },
-      user: { isActive: true },
+      ...(await this.activeUsers.activeUserWhere()),
       // نردبان منقضی عملاً غیرفعال است
       OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }],
     };
@@ -437,7 +449,7 @@ export class ProductsService {
   async getProductsByIds(ids: number[]): Promise<ProductDto[]> {
     if (ids.length === 0) return [];
     const rows = await this.prisma.product.findMany({
-      where: { id: { in: ids }, status: 'confirmed', user: { isActive: true } },
+      where: { id: { in: ids }, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
     const ordered = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
@@ -551,7 +563,7 @@ export class ProductsService {
     dto: { id: number; sessionId?: string },
   ) {
     const p = await this.prisma.product.findFirst({
-      where: { id: dto.id, status: 'confirmed', user: { isActive: true } },
+      where: { id: dto.id, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
       select: { id: true, userId: true },
     });
     if (!p) return { counted: false as const };
@@ -1368,7 +1380,7 @@ export class ProductsService {
     const [cats, prods] = await Promise.all([
       this.categories.getAllCategories(), // کش‌شده
       this.prisma.product.findMany({
-        where: { status: 'confirmed', productName: { contains: q }, user: { isActive: true } },
+        where: { status: 'confirmed', productName: { contains: q }, ...(await this.activeUsers.activeUserWhere()) },
         select: { productName: true, viewCount: true },
         orderBy: { viewCount: 'desc' },
         take: 8,

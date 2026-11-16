@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { CommonModule } from './common/common.module';
+import { ActiveUsersModule } from './common/active-users/active-users.module';
 import { HealthController } from './health.controller';
 import { SecurityModule } from './security/security.module';
 import { SecurityGuard } from './security/security.guard';
@@ -46,6 +47,7 @@ import { CatalogV2Module } from './catalog-v2/catalog-v2.module';
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     CommonModule,
+    ActiveUsersModule,
     SecurityModule, // امنیت داده‌های تماس — بلاک خودکار کاربر/IP سوءاستفاده‌گر
     AuthModule,
     UsersModule,

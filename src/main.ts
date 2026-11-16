@@ -18,6 +18,9 @@ import { PresenceService } from './presence/presence.service';
 import { env, isProd, isLocalProfile, profile, storage } from './common/config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { setIo, onUserDepart } from './chat/io-holder';
+import { CategoriesModule } from './categories/categories.module';
+import { CategoriesService } from './categories/categories.service';
+import { ActiveUsersService } from './common/active-users/active-users.module';
 
 const API_PREFIX = 'api/v1';
 
@@ -122,6 +125,22 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.listen({ port: env.PORT, host: env.HOST });
+
+  // ── گرم‌کردن کش‌های پرترافیک (رفع کندی ۱۷-۱۱) ──────────────────────────────
+  // درخت دسته‌ها (خواندن سرد روی Atlas ~۰.۹ ثانیه ≈ ۷ بچ getMore) و فهرست
+  // کاربران غیرفعال — بعد از listen و در پس‌زمینه، تا اولین کاربر هیچ‌وقت
+  // هزینهٔ سرد نپردازد. خطا بی‌صدا بلعیده می‌شود (بوت نباید بشکند).
+  void (async () => {
+    try {
+      const t0 = Date.now();
+      const categories = app.select(CategoriesModule).get(CategoriesService, { strict: false });
+      const activeUsers = app.get(ActiveUsersService, { strict: false });
+      await Promise.all([categories.getAllCategories(), activeUsers.inactiveUserIds()]);
+      console.log(`warm cache (tree + inactive users) in ${Date.now() - t0}ms`);
+    } catch {
+      /* دیتابیس موقتاً پایین — درخواست اول خودش دوباره می‌سازد */
+    }
+  })();
 
   // اتصال io به نگهدارنده + منطق handshake — بعد از listen (سرور آماده است)
   // (fastify-socket.io نمونه io را روی instance تزئین می‌کند — typing ندارد)

@@ -8,6 +8,7 @@ import { CallsService, dailyCallLimit } from '../calls/calls.service';
 import { SecurityService } from '../security/security.service';
 import { effectivePakageType } from '../packages/packages.service';
 import { volumeScore } from '../common/matching/match-score';
+import { ActiveUsersService } from '../common/active-users/active-users.module';
 import type { AuthUser } from '../common/guards';
 import {
   CreateBuyRequestDto,
@@ -104,6 +105,7 @@ export class BuyRequestsService {
     private readonly locations: LocationsService,
     private readonly calls: CallsService,
     private readonly security: SecurityService,
+    private readonly activeUsers: ActiveUsersService,
   ) {}
 
   // ─── ثبت درخواست ───────────────────────────────────────────────────────────
@@ -209,7 +211,10 @@ export class BuyRequestsService {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? BUY_REQUEST_PAGE));
 
-    const where: Record<string, unknown> = { status: 'confirmed', user: { isActive: true } };
+    const where: Record<string, unknown> = {
+      status: 'confirmed',
+      ...(await this.activeUsers.activeUserWhere()),
+    };
     if (dto.s?.trim()) {
       // جستجو در «نوع کالا» + نام دسته (resolve از درخت کش‌شده — بدون ستون denorm)
       const q = dto.s.trim();
@@ -248,7 +253,7 @@ export class BuyRequestsService {
   /** POST /buy-requests/getLatestBuyRequests — سکشن صفحه اول (۴ تایی عین باسکول) */
   async getLatestBuyRequests(limit = 4) {
     const rows = await this.prisma.buyRequest.findMany({
-      where: { status: 'confirmed', user: { isActive: true } },
+      where: { status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
       orderBy: { createdAt: 'desc' },
       take: Math.min(12, Math.max(1, limit)),
     });
@@ -484,7 +489,7 @@ export class BuyRequestsService {
     });
 
     const requests = await this.prisma.buyRequest.findMany({
-      where: { status: 'confirmed', user: { isActive: true } },
+      where: { status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
