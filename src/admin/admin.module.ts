@@ -22,6 +22,7 @@ import { AdminSupportModule } from './admin-support/admin-support.module';
 import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
 import { AdminActivitiesModule } from './admin-activities/admin-activities.module';
 import { AdminSettingsModule } from './admin-settings/admin-settings.module';
+import { AdsReportModule } from './ads-report/ads-report.module';
 
 /**
  * ریشه پنل ادمین — تمام کد ادمین بک‌اند فقط در همین فولدر زندگی می‌کند
@@ -54,6 +55,7 @@ import { AdminSettingsModule } from './admin-settings/admin-settings.module';
     AdminReviewsModule,
     AdminActivitiesModule, // فعالیت کاربران — جستجو/دسته/صفحه
     AdminSettingsModule, // تنظیمات کیف شارژ و مصرف شارژ (پویا — ۳۱-۱۰)
+    AdsReportModule, // گزارش آگهی‌ها روی تاکسونومی v2 — صفحهٔ مهاجرت موازی (۱۶-۱۱)
   ],
   providers: [
     // ثبت خودکار لاگ عملیات ادمین — سراسری ولی فقط برای درخواست‌های ادمین

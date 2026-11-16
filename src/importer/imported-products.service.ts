@@ -15,7 +15,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Product } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { mongoDateRange } from './date-range.util';
 import type { ImportedListingsQueryDto, ProductImagesQueryDto } from './dto';
@@ -121,6 +121,31 @@ export interface ProductImagesSummary {
 
 export interface ProductImagesList {
   rows: ProductImageRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  summary: ProductImagesSummary;
+}
+
+/** عکس داخل کارت گروهی — بدون تکرار محصول/مالک (روی ردیف گروه هست) */
+export type ProductImageGroupPhoto = Omit<ProductImageRow, 'product' | 'owner'>;
+
+/** ردیف گروهی (خواستهٔ مالک ۱۶-۱۱ عصر): هر آگهی یک کارت با «همهٔ» عکس‌هایش —
+ *  چیدمان تخت قبلی هر عکس را ردیف جدا می‌داد و آگهی چندعکسه چندبار تکرار می‌شد؛
+ *  حالا همهٔ عکس‌های یک آگهی کنار هم‌اند تا واترمارک باسکول روی هیچ‌کدام از قلم نیفتد */
+export interface ProductImageGroupRow {
+  product: NonNullable<ProductImageRow['product']>;
+  owner: ProductImageRow['owner'];
+  /** همهٔ عکس‌های گالری آگهی — مرتب با ترتیب گالری (ثبت فایل صعودی) */
+  photos: ProductImageGroupPhoto[];
+  photoCount: number;
+  totalSize: number;
+}
+
+export interface ProductImagesGroupedList {
+  rows: ProductImageGroupRow[];
+  /** تعداد آگهی‌های منطبق (صفحه‌بندی بر آگهی، نه بر فایل) */
   total: number;
   page: number;
   pageSize: number;
@@ -420,7 +445,11 @@ export class ImportedProductsService {
 
   // ═══════════════════════════ تصاویر آگهی‌ها: آلبوم ═══════════════════════════
 
-  async listImages(query: ProductImagesQueryDto): Promise<ProductImagesList> {
+  async listImages(query: ProductImagesQueryDto): Promise<ProductImagesList | ProductImagesGroupedList> {
+    // حالت گروهی (خواستهٔ مالک ۱۶-۱۱ عصر): هر آگهی یک کارت با همهٔ عکس‌هایش
+    if (query.group === 'product') {
+      return this.listImagesGrouped(query);
+    }
     const page = Math.max(1, query.page ?? 1);
     // پیش‌فرض ۵۰ (خواستهٔ مالک ۱۵-۱۱: ۵۰ رکورد در هر صفحه)
     const pageSize = Math.min(100, Math.max(4, query.pageSize ?? 50));
@@ -724,6 +753,304 @@ export class ImportedProductsService {
       pageCount: Math.max(1, Math.ceil(total / pageSize)),
       summary: await this.imagesSummary(),
     };
+  }
+
+  // ═══════════════ تصاویر آگهی‌ها: گروهی (هر آگهی یک کارت) ═══════════════
+
+  /**
+   * آلبوم گروهی (خواستهٔ مالک ۱۶-۱۱ عصر): هر آگهی یک ردیف با «همهٔ» عکس‌هایش.
+   * صفحه‌بندی بر آگهی (نه بر فایل) — عکس‌های یک آگهی هرگز بین دو صفحه نمی‌شکافند.
+   * سورت‌ها: تاریخ آگهی (پرایسما، سبک) / تعداد عکس و حجم کل (اگریگیت روی File).
+   */
+  private async listImagesGrouped(query: ProductImagesQueryDto): Promise<ProductImagesGroupedList> {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(100, Math.max(4, query.pageSize ?? 50));
+    const dir = query.dir === 'asc' ? 1 : -1;
+    const prismaDir = query.dir === 'asc' ? ('asc' as const) : ('desc' as const);
+    const summary = this.imagesSummary();
+
+    const empty = async (): Promise<ProductImagesGroupedList> => ({
+      rows: [],
+      total: 0,
+      page,
+      pageSize,
+      pageCount: 1,
+      summary: await summary,
+    });
+
+    // ── ۱) آگهی‌های منطبق با جستجو/بازهٔ تاریخ (همان منطق حالت تخت) ──
+    const textIds = await this.productIdsFromTextFilters(query);
+    if (textIds !== null && textIds.length === 0) return empty();
+
+    // ── ۲) فیلترهای فایلی (منبع/وضعیت تعویض) → آگهیِ دارای فایل منطبق ──
+    //  'no' = هنوز عکس تعویض‌نشده دارد (کار باقی‌مانده) / 'yes' = حداقل یک عکس تعویض‌شده
+    const fileFilterNeeded =
+      query.source === 'buskool' || query.source === 'native' || query.replaced === 'yes' || query.replaced === 'no';
+    let fileIds: string[] | null = null;
+    if (fileFilterNeeded) {
+      const fileMatch: Record<string, unknown> = {
+        related_model: 'Product',
+        field_key: 'gallery',
+        related_id: { $ne: null },
+      };
+      if (query.source === 'buskool') fileMatch['metadata.importedFrom'] = 'buskool';
+      else if (query.source === 'native') fileMatch['metadata.importedFrom'] = { $ne: 'buskool' };
+      if (query.replaced === 'yes') fileMatch['metadata.replacedAt'] = { $ne: null };
+      else if (query.replaced === 'no') fileMatch['metadata.replacedAt'] = null;
+      const agg = (await this.prisma.$runCommandRaw({
+        aggregate: 'File',
+        pipeline: [
+          { $match: fileMatch },
+          { $group: { _id: '$related_id' } },
+          { $limit: 50_000 },
+        ] as unknown as Prisma.InputJsonObject[],
+        cursor: {},
+      })) as unknown as { cursor?: { firstBatch?: { _id: string }[] } };
+      fileIds = (agg?.cursor?.firstBatch ?? []).map((r) => String(r._id));
+      if (fileIds.length === 0) return empty();
+    }
+
+    // تلاقی دو مجموعه
+    let matchedIds: number[] | null = null;
+    if (textIds != null || fileIds != null) {
+      if (textIds != null && fileIds != null) {
+        const fileSet = new Set(fileIds);
+        matchedIds = textIds.filter((x) => fileSet.has(x)).map(Number);
+      } else {
+        matchedIds = (textIds ?? fileIds!).map(Number);
+      }
+      if (matchedIds.length === 0) return empty();
+    }
+
+    // ── ۳) سورت + صفحه‌بندی بر آگهی ──
+    const sortName = query.sort ?? 'productUpdated';
+    let total = 0;
+    let pageProducts: Product[];
+
+    if (sortName === 'size' || sortName === 'photoCount') {
+      // سورت‌های فایلی — اگریگیت سبک (فقط size) روی کل مجموعهٔ منطبق
+      const primary = sortName === 'size' ? '_totalSize' : '_photoCount';
+      const secondary = sortName === 'size' ? '_photoCount' : '_totalSize';
+      const agg = (await this.prisma.$runCommandRaw({
+        aggregate: 'Product',
+        pipeline: [
+          ...(matchedIds ? [{ $match: { _id: { $in: matchedIds } } }] : []),
+          {
+            $lookup: {
+              from: 'File',
+              let: { pid: { $toString: '$_id' } },
+              pipeline: [
+                {
+                  $match: {
+                    related_model: 'Product',
+                    field_key: 'gallery',
+                    $expr: { $eq: ['$related_id', '$$pid'] },
+                  },
+                },
+                { $project: { size: 1 } },
+              ],
+              as: '_ph',
+            },
+          },
+          {
+            $addFields: {
+              _totalSize: { $sum: '$_ph.size' },
+              _photoCount: { $size: '$_ph' },
+            },
+          },
+          { $sort: { [primary]: dir, [secondary]: dir, _id: dir } },
+          {
+            $facet: {
+              total: [{ $count: 'n' }],
+              rows: [
+                { $skip: (page - 1) * pageSize },
+                { $limit: pageSize },
+                { $project: { _id: 1 } },
+              ],
+            },
+          },
+        ] as unknown as Prisma.InputJsonObject[],
+        cursor: {},
+      })) as unknown as {
+        cursor?: { firstBatch?: { total?: { n?: number }[]; rows?: { _id: number }[] }[] };
+      };
+      const facet = agg?.cursor?.firstBatch?.[0] ?? {};
+      total = Number(facet.total?.[0]?.n ?? 0);
+      const idsOnPage = (facet.rows ?? []).map((r) => Number(r._id));
+      pageProducts = idsOnPage.length
+        ? await this.prisma.product.findMany({
+            where: { id: { in: idsOnPage } },
+            // ترتیب اگریگیت حفظ شود
+          }).then((ps) => idsOnPage.map((id) => ps.find((p) => p.id === id)!).filter(Boolean))
+        : [];
+    } else {
+      // سورت‌های خودِ آگهی — مستقیم پرایسما (سبک و ایندکس‌دار)
+      const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+        sortName === 'productCreated'
+          ? [{ createdAt: prismaDir }, { updatedAt: prismaDir }, { id: prismaDir }]
+          : sortName === 'productId'
+            ? [{ id: prismaDir }]
+            : [{ updatedAt: prismaDir }, { createdAt: prismaDir }, { id: prismaDir }];
+      const where: Prisma.ProductWhereInput = matchedIds ? { id: { in: matchedIds } } : {};
+      total = await this.prisma.product.count({ where });
+      pageProducts = await this.prisma.product.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      });
+    }
+
+    if (pageProducts.length === 0) {
+      return { rows: [], total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)), summary: await summary };
+    }
+
+    // ── ۴) همهٔ فایل‌های گالریِ آگهی‌های همین صفحه (ترتیب گالری = ثبت فایل) ──
+    const pageIdStrings = pageProducts.map((p) => String(p.id));
+    const filesAgg = (await this.prisma.$runCommandRaw({
+      aggregate: 'File',
+      pipeline: [
+        { $match: { related_model: 'Product', field_key: 'gallery', related_id: { $in: pageIdStrings } } },
+        { $sort: { related_id: 1, created_at: 1, _id: 1 } },
+      ] as unknown as Prisma.InputJsonObject[],
+      cursor: {},
+    })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+    const filesByProduct = new Map<string, Record<string, unknown>[]>();
+    for (const f of filesAgg?.cursor?.firstBatch ?? []) {
+      const key = String(f.related_id ?? '');
+      const arr = filesByProduct.get(key) ?? [];
+      arr.push(f);
+      filesByProduct.set(key, arr);
+    }
+
+    // ── ۵) مالکان ──
+    const ownerIds = [...new Set(pageProducts.map((p) => p.userId).filter((u): u is string => !!u))];
+    const owners = ownerIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: ownerIds } } })
+      : [];
+    const ownerById = new Map(owners.map((o) => [o.id, o]));
+
+    const rows: ProductImageGroupRow[] = pageProducts.map((p) => {
+      const rawFiles = filesByProduct.get(String(p.id)) ?? [];
+      const photos: ProductImageGroupPhoto[] = rawFiles.map((r) => this.mapGalleryFile(r));
+      const owner = p.userId ? ownerById.get(p.userId) : undefined;
+      return {
+        product: {
+          id: p.id,
+          name: p.productName,
+          slug: p.slug,
+          status: p.status,
+          createdAt: toIso(p.createdAt) ?? '',
+          updatedAt: toIso(p.updatedAt) ?? '',
+        },
+        owner: owner
+          ? {
+              id: owner.id,
+              userName: owner.userName,
+              name: `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim(),
+              phone: owner.phone,
+              bUserName: owner.bUserName,
+            }
+          : null,
+        photos,
+        photoCount: photos.length,
+        totalSize: photos.reduce((s, ph) => s + ph.size, 0),
+      };
+    });
+
+    return {
+      rows,
+      total,
+      page,
+      pageSize,
+      pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      summary: await summary,
+    };
+  }
+
+  /** File خام گالری → DTO عکس (بدون محصول/مالک — در حالت گروهی روی ردیف هست) */
+  private mapGalleryFile(r: Record<string, unknown>): ProductImageGroupPhoto {
+    const meta = (r.metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: toId(r._id),
+      url: String(r.url ?? ''),
+      thumbUrl: (r.thumb_url as string) ?? null,
+      size: Number(r.size ?? 0),
+      mimeType: String(r.mime_type ?? ''),
+      name: String(r.name ?? ''),
+      createdAt: toIso(r.created_at) ?? '',
+      updatedAt: toIso(r.updated_at) ?? '',
+      width: num(meta.width),
+      height: num(meta.height),
+      source: meta.importedFrom === 'buskool' ? 'buskool' : 'native',
+      importedFrom: typeof meta.importedFrom === 'string' ? meta.importedFrom : null,
+      originalUrl: typeof meta.originalUrl === 'string' ? meta.originalUrl : null,
+      replacedAt: typeof meta.replacedAt === 'string' ? meta.replacedAt : null,
+    };
+  }
+
+  /**
+   * idهای آگهی‌های منطبق با جستجو + بازهٔ تاریخ — null یعنی بدون محدودیت.
+   * (همان منطق حالت تخت، جدا شد تا هر دو حالت از یک منبع بخرند)
+   */
+  private async productIdsFromTextFilters(query: ProductImagesQueryDto): Promise<string[] | null> {
+    const createdRange = mongoDateRange(query.createdFrom, query.createdTo);
+    const updatedRange = mongoDateRange(query.updatedFrom, query.updatedTo);
+    const q = query.q?.trim();
+    if (!createdRange && !updatedRange && !q) return null;
+
+    let rangeIds: string[] | null = null;
+    if (createdRange || updatedRange) {
+      const between = (from?: string, to?: string) => ({
+        ...(from ? { gte: new Date(from) } : {}),
+        ...(to ? { lte: new Date(to) } : {}),
+      });
+      const inRange = await this.prisma.product.findMany({
+        where: {
+          ...(createdRange ? { createdAt: between(query.createdFrom, query.createdTo) } : {}),
+          ...(updatedRange ? { updatedAt: between(query.updatedFrom, query.updatedTo) } : {}),
+        },
+        select: { id: true },
+        take: 50_000,
+      });
+      rangeIds = inRange.map((p) => String(p.id));
+      if (rangeIds.length === 0) return [];
+    }
+
+    if (q) {
+      const contains = { contains: q, mode: 'insensitive' as const };
+      const prodOr: Prisma.ProductWhereInput[] = [{ productName: contains }, { slug: contains }];
+      if (/^\d+$/.test(q)) prodOr.push({ id: Number(q) });
+      const [byName, owners] = await Promise.all([
+        this.prisma.product.findMany({ where: { OR: prodOr }, select: { id: true }, take: 5000 }),
+        this.prisma.user.findMany({
+          where: {
+            OR: [
+              { phone: contains },
+              { userName: contains },
+              { firstName: contains },
+              { lastName: contains },
+              { bUserName: contains },
+            ],
+          },
+          select: { id: true },
+          take: 2000,
+        }),
+      ]);
+      const ids = new Set(byName.map((p) => p.id));
+      if (owners.length > 0) {
+        const owned = await this.prisma.product.findMany({
+          where: { userId: { in: owners.map((u) => u.id) } },
+          select: { id: true },
+          take: 5000,
+        });
+        for (const p of owned) ids.add(p.id);
+      }
+      if (ids.size === 0) return [];
+      const qIds = [...ids].map(String);
+      return rangeIds != null ? qIds.filter((x) => rangeIds!.includes(x)) : qIds;
+    }
+    return rangeIds;
   }
 
   /** آمار کلی تصاویر — کارت‌های بالای آلبوم */
