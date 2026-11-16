@@ -15,7 +15,7 @@ import {
   type TaxonomyAttr,
   type TaxonomyNode,
 } from './taxonomy-v2';
-import type { GetAdsReportDto } from './dto';
+import type { GetAdsReportDto, GetCatalogListDto } from './dto';
 
 /** نود درخت پاسخ getTree — با شمار آگهی زیر همان گره */
 export interface TaxonomyCountNode {
@@ -50,6 +50,27 @@ export interface AdsReportRow {
   created_at: Date;
   updated_at: Date;
   /** اتریبیوت‌های استخراج‌شده از نام آزاد — فقط برای گره‌های دارای تعریف attrs */
+  resolved_attrs?: Record<string, string>;
+}
+
+/** ردیف عمومی کاتالوگ v2 — بدون تلفن/وضعیت ادمین (صفحهٔ /product-filter) */
+export interface PublicCatalogRow {
+  id: number;
+  product_name: string;
+  /** مسیر تاکسونومی v2 مثل ['کشاورزی و باغبانی','حبوبات','نخود'] */
+  v2_path: string[];
+  v2_key: string;
+  province_name: string;
+  city_name: string;
+  seller: { user_name: string; full_name: string; is_verified: boolean };
+  stock: number;
+  min_sale_amount: number;
+  min_sale_price: number;
+  unit: string;
+  is_ladder: boolean;
+  view_count: number;
+  photo: string | null;
+  updated_at: Date;
   resolved_attrs?: Record<string, string>;
 }
 
@@ -324,6 +345,92 @@ export class AdsReportService {
     };
   }
 
+  // ─── لیست عمومی کاتالوگ v2 — صفحهٔ /product-filter ─────────────────────────
+
+  /** POST /catalog/v2/getList — فقط confirmed، بدون تلفن، سورت جدیدترین/قیمت */
+  async getPublicList(dto: GetCatalogListDto) {
+    const page = Math.max(1, dto.page ?? 1);
+    const perPage = Math.min(48, Math.max(1, dto.perPage ?? 24));
+
+    // کلید v2 معتبر یا هیچ — «unmapped» ادمینی اینجا معنا ندارد
+    const nodeKey =
+      dto.nodeKey && dto.nodeKey !== 'all' && findTaxonomyNode(dto.nodeKey)
+        ? dto.nodeKey
+        : null;
+
+    const priceSort = dto.sort === 'price-asc' || dto.sort === 'price-desc';
+    const base: Prisma.ProductWhereInput[] = [
+      { status: 'confirmed' },
+      ...(priceSort ? [{ minSalePrice: { gt: 0 } }] : []),
+      ...(dto.provinceId ? [{ provinceId: dto.provinceId }] : []),
+      ...(dto.cityId ? [{ cityId: dto.cityId }] : []),
+    ];
+    const s = (dto.search ?? '').trim();
+    if (s) base.push({ productName: { contains: s } });
+
+    if (nodeKey) {
+      const ids = this.keyToBuskolIds.get(nodeKey) ?? [];
+      if (ids.length === 0) return this.emptyPublicList(page, perPage, []);
+      base.push({ OR: [{ subCategoryId: { in: ids } }, { categoryId: { in: ids } }] });
+    }
+
+    const attrs = nodeKey ? effectiveAttrs(nodeKey) : [];
+    const attrSelection = this.sanitizeAttrSelection(attrs, dto.attrs);
+    const attrActive = Object.keys(attrSelection).length > 0;
+
+    let total: number;
+    let rows: Awaited<ReturnType<PrismaService['product']['findMany']>>;
+
+    if (attrActive) {
+      // نام‌محور — مثل گزارش ادمین: نامزدها → تطبیق در حافظه → صفحه‌بندی
+      // (سورت قیمت در حالت اتریبیوتی فعال نیست؛ ترتیب = آخرین به‌روزرسانی)
+      const candidates = await this.prisma.product.findMany({
+        where: { AND: base },
+        select: { id: true, productName: true },
+      });
+      const matched = candidates.filter((c) =>
+        passesAttrFilter(c.productName, attrs, attrSelection),
+      );
+      total = matched.length;
+      const pageIds = matched
+        .slice((page - 1) * perPage, page * perPage)
+        .map((m) => m.id);
+      rows = pageIds.length
+        ? await this.prisma.product.findMany({ where: { id: { in: pageIds } } })
+        : [];
+      const order = new Map(pageIds.map((id, i) => [id, i]));
+      rows = rows
+        .slice()
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    } else {
+      const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+        dto.sort === 'price-asc'
+          ? [{ minSalePrice: 'asc' }, { updatedAt: 'desc' }]
+          : dto.sort === 'price-desc'
+            ? [{ minSalePrice: 'desc' }, { updatedAt: 'desc' }]
+            : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
+      const where: Prisma.ProductWhereInput = { AND: base };
+      [total, rows] = await Promise.all([
+        this.prisma.product.count({ where }),
+        this.prisma.product.findMany({
+          where,
+          orderBy,
+          skip: (page - 1) * perPage,
+          take: perPage,
+        }),
+      ]);
+    }
+
+    return {
+      total,
+      page,
+      perPage,
+      pageCount: Math.max(1, Math.ceil(total / perPage)),
+      attrs,
+      items: await this.toPublicRows(rows, attrs.length > 0),
+    };
+  }
+
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
   /** resolve یک دستهٔ باسکول → کلید v2 (id، بعد نام — مقاوم در برابر ایمپورت‌های تازه) */
@@ -367,6 +474,52 @@ export class AdsReportService {
       attrs,
       items: [] as AdsReportRow[],
     };
+  }
+
+  private emptyPublicList(page: number, perPage: number, attrs: TaxonomyAttr[]) {
+    return {
+      total: 0,
+      page,
+      perPage,
+      pageCount: 1,
+      attrs,
+      items: [] as PublicCatalogRow[],
+    };
+  }
+
+  /** نسخهٔ عمومی toRows — بدون تلفن/وضعیت/مسیر ادمینی */
+  private async toPublicRows(
+    rows: Array<{
+      id: number; productName: string; status: string; categoryId: number; subCategoryId: number;
+      provinceId: number; cityId: number; userId: string; stock: number; minSaleAmount: number;
+      minSalePrice: number; unit: string; isLadder: boolean; viewCount: number;
+      createdAt: Date; updatedAt: Date;
+    }>,
+    withAttrs: boolean,
+  ): Promise<PublicCatalogRow[]> {
+    const report = await this.toRows(rows, withAttrs);
+    return report.map((r) => ({
+      id: r.id,
+      product_name: r.product_name,
+      v2_path: r.v2_path ?? [],
+      v2_key: r.v2_key ?? '',
+      province_name: r.province_name,
+      city_name: r.city_name,
+      seller: {
+        user_name: r.seller.user_name,
+        full_name: r.seller.full_name,
+        is_verified: r.seller.is_verified,
+      },
+      stock: r.stock,
+      min_sale_amount: r.min_sale_amount,
+      min_sale_price: r.min_sale_price,
+      unit: r.unit,
+      is_ladder: r.is_ladder,
+      view_count: r.view_count,
+      photo: r.photo,
+      updated_at: r.updated_at,
+      ...(r.resolved_attrs ? { resolved_attrs: r.resolved_attrs } : {}),
+    }));
   }
 
   /** join نام‌ها + گالری + مسیر v2 — گروهی، نه به‌ازای هر ردیف */

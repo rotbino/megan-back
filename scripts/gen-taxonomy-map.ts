@@ -11,8 +11,10 @@
  *
  * قواعد به‌ترتیب اولویت:
  *   ۱) LEAF_OVERRIDES — استثناهای برگ (مثل: عسل → food.honey)
- *   ۲) L2_DEFAULTS    — پیش‌فرض هر زیرشاخهٔ باسکول
- *   ۳) L1_FALLBACK    — ریشهٔ باسکول (هرگز نباید فعال شود؛ فقط شبکهٔ ایمنی)
+ *   ۲) AUTO_NAME      — تطبیق خودکار نام برگ با گره‌های عمیق v2 (سطح ۳+،
+ *                      نام یکتا پس از نرمال‌سازی فارسی) — قاعدهٔ اصلی عمق
+ *   ۳) L2_DEFAULTS    — پیش‌فرض هر زیرشاخهٔ باسکول
+ *   ۴) L1_FALLBACK    — ریشهٔ باسکول (هرگز نباید فعال شود؛ فقط شبکهٔ ایمنی)
  *
  * پس از هر تغییر در تاکسونومی یا قواعد، دوباره اجرا شود — مولد اگر کلید
  * مقصدی در درخت v2 نباشد خطا می‌دهد (نگاشت معلق ممنوع).
@@ -27,126 +29,63 @@ const cats: Array<{ id: number; parent_id: number | null; category_name: string 
   readFileSync(join(__dirname, 'data', 'categories.json'), 'utf8'),
 );
 
-// ─── ۱) استثناهای برگ — «نام L2 باسکول / نام برگ» یا فقط «نام برگ» ──────────
-// کلید '*': در هر L2 (برگ با نام یکتا مثل «عسل»)
+// ─── ۱) استثناهای برگ — «نام L2 باسکول / نام برگ» ──────────────────────────
+// فقط مواردی که تطبیق خودکار نام (AUTO_NAME) نمی‌تواند مقصد درست را پیدا کند:
+// نام مقصد با نام باسکول فرق دارد یا مقصد خارج از شاخهٔ طبیعی است.
 const LEAF_OVERRIDES: Record<string, string> = {
   // ── کشاورزی › دامپروری — تقسیم سه‌گانه (زنده/خوراکی/نهاده) ──
   'دامپروری/عسل': 'food.honey',
-  'دامپروری/خوراک دام': 'inputs.feed',
-  'دامپروری/کاه': 'inputs.feed',
-  'دامپروری/یونجه': 'inputs.feed',
   'دامپروری/دام و طیور زنده': 'livestock.live',
   // ── کشاورزی › بذر و نهال ──
-  'بذر و نهال/نهال': 'inputs.seed',
-  'بذر و نهال/بذر': 'inputs.seed',
-  'بذر و نهال/گیاهان دارویی': 'agri.spices',
   'بذر و نهال/گل و گیاه': 'agri.flowers',
   // ── فلزات › مواد شیمیایی کشاورزی — خانهٔ واقعی نهاده‌ها ──
   'مواد شیمیایی کشاورزی/کود': 'inputs.fertilizer',
-  // ── فلزات › مواد معدنی — فلزی به فلزات، نسوز/عایق به ساختمان ──
-  'مواد معدنی/گندله آهن': 'metals.ore',
-  'مواد معدنی/سنگ آهن': 'metals.ore',
-  'مواد معدنی/سنگ مس': 'metals.ore',
-  'مواد معدنی/سنگ سرب': 'metals.ore',
-  'مواد معدنی/سنگ مگنتیت': 'metals.ore',
-  'مواد معدنی/سنگ کروم': 'metals.ore',
-  'مواد معدنی/سنگ مس اکسیدی': 'metals.ore',
-  'مواد معدنی/سنگ منگنز': 'metals.ore',
-  'مواد معدنی/سنگ کرومیت': 'metals.ore',
-  'مواد معدنی/عایق حرارت': 'construction.insulation',
-  'مواد معدنی/پشم سنگ': 'construction.insulation',
-  'مواد معدنی/ورق نسوز': 'construction.insulation',
+  'مواد شیمیایی کشاورزی/هورمون کشاورزی': 'inputs.pesticide.hormone',
+  // ── فلزات › مواد معدنی — مسیرهای خاص ──
+  'مواد معدنی/سنگ مس اکسیدی': 'metals.ore.copper',
   // ── فلزات › مواد اولیه — شوینده/دارویی شیمیایی صنعتی، شیشه جداست ──
   'مواد اولیه/مواد اولیه شوینده': 'chemicals.industrial',
   'مواد اولیه/مواد اولیه دارویی': 'chemicals.industrial',
   'مواد اولیه/مواد اولیه شیشه': 'chemicals.glass',
-  // ── فلزات › شیشه — پشم شیشه عایق، آزمایشگاهی ابزار ──
-  'شیشه/پشم شیشه': 'construction.insulation',
-  'شیشه/شیشه آزمایشگاهی': 'tools.lab',
-  // ── فلزات › پلاستیک — بسته‌بندی/کشاورزی از پلیمر صنعتی جداست ──
-  'پلاستیک/نایلون': 'packaging.film',
-  'پلاستیک/سلفون': 'packaging.film',
-  'پلاستیک/رول پلاستیک': 'packaging.film',
-  'پلاستیک/بطری پلاستیکی': 'packaging.materials',
-  'پلاستیک/پلاستیک بسته بندی': 'packaging.materials',
-  'پلاستیک/پالت': 'packaging.materials',
-  'پلاستیک/گونی': 'packaging.materials',
-  'پلاستیک/پلاستیک کشاورزی': 'inputs.supplies',
-  // ── فلزات › لاستیک — تایر خودروها به ریشهٔ خودرو ──
-  'لاستیک/لاستیک سواری': 'automotive.tires',
-  'لاستیک/لاستیک کامیون': 'automotive.tires',
-  'لاستیک/لاستیک دوچرخه': 'automotive.tires',
-  'لاستیک/لاستیک موتور سیکلت': 'automotive.tires',
-  'لاستیک/لاستیک لودر': 'automotive.tires',
-  'لاستیک/لاستیک لیفتراک': 'automotive.tires',
-  // ── ماشین‌آلات › تجهیزات بسته‌بندی — متریال از ماشین جدا ──
-  'تجهیزات بسته بندی/کارتن': 'packaging.materials',
-  'تجهیزات بسته بندی/سبد': 'packaging.materials',
-  'تجهیزات بسته بندی/بسته بندی پلاستیکی': 'packaging.materials',
-  'تجهیزات بسته بندی/جعبه': 'packaging.materials',
-  'تجهیزات بسته بندی/کاغذ': 'packaging.materials',
-  'تجهیزات بسته بندی/بطری': 'packaging.materials',
-  'تجهیزات بسته بندی/بشکه': 'packaging.materials',
-  'تجهیزات بسته بندی/جامبو بگ': 'packaging.materials',
-  'تجهیزات بسته بندی/بسته بندی فلزی': 'packaging.materials',
-  // ── ماشین‌آلات › ابزارآلات — ارتقا به ریشهٔ ابزار ──
-  'ابزارآلات/لوله و اتصالات': 'tools.fittings',
-  'ابزارآلات/پمپ': 'tools.pumps',
-  'ابزارآلات/ابزار جوش': 'tools.welding',
-  'ابزارآلات/یراق آلات': 'tools.fittings',
-  'ابزارآلات/شیرآلات صنعتی': 'tools.pumps',
-  // ── غذا › تنقلات — L3 پایلوت (نام‌ها مستقیم روی برگ‌های باسکول) + نان ──
-  'حبوبات/لوبیا': 'agri.pulses.beans',
-  'حبوبات/نخود': 'agri.pulses.chickpea',
-  'حبوبات/عدس': 'agri.pulses.lentil',
-  'حبوبات/سویا': 'agri.pulses.soy',
-  'حبوبات/لپه': 'agri.pulses.split',
-  'خشکبار/میوه خشک': 'agri.nuts.dried-fruit',
-  'خشکبار/پسته': 'agri.nuts.pistachio',
-  'خشکبار/کشمش': 'agri.nuts.raisin',
-  'خشکبار/بادام': 'agri.nuts.almond',
-  'خشکبار/تخمه آفتابگردان': 'agri.nuts.sunflower',
-  'خشکبار/گردو': 'agri.nuts.walnut',
-  'خشکبار/زرشک': 'agri.nuts.barberry',
-  'خشکبار/فندق': 'agri.nuts.hazelnut',
-  'خشکبار/سبزی خشک': 'agri.nuts.dried-herbs',
-  'تنقلات و شیرینی/پفک': 'food.snacks.puff',
-  'تنقلات و شیرینی/چیپس': 'food.snacks.chips',
-  'تنقلات و شیرینی/بیسکویت': 'food.snacks.biscuit',
-  'تنقلات و شیرینی/شکلات': 'food.snacks.chocolate',
-  'تنقلات و شیرینی/کیک و کلوچه': 'food.snacks.cake',
-  'تنقلات و شیرینی/آدامس': 'food.snacks.gum',
-  'تنقلات و شیرینی/پاستیل': 'food.snacks.pastille',
-  'تنقلات و شیرینی/لواشک': 'food.snacks.lavashak',
-  'تنقلات و شیرینی/نبات': 'food.snacks.nabat',
-  'تنقلات و شیرینی/نان': 'food.bakery',
-  'کنسانتره و کنسرو/ماکارونی': 'food.bakery',
-  // ── خانه و مصالح › مصالح — سنگ/کاشی/چوب/عایق خودشان L2 دارند ──
-  'مصالح ساختمانی/سنگ ساختمانی': 'construction.stone',
-  'مصالح ساختمانی/کاشی و سرامیک': 'construction.stone',
+  // ── غذا › نوشیدنی — گلاب کنار عرقیات ──
+  'نوشیدنی/گلاب': 'food.beverages.herbals',
+  // ── غذا › کنسرو — نام‌های کوتاه باسکول روی مقصد گویاتر ──
+  'کنسانتره و کنسرو/رب': 'food.canned.tomato-paste',
+  'کنسانتره و کنسرو/کنسانتره': 'food.canned.concentrate',
+  // ── خانه و مصالح › مصالح — چوب فقط L2 خودش را دارد (فرزندان خاص‌ترند) ──
   'مصالح ساختمانی/چوب': 'construction.wood',
-  'مصالح ساختمانی/عایق': 'construction.insulation',
-  // ── خانه و مصالح › تجهیزات ساختمانی ──
-  'تجهیزات ساختمانی/درب و پنجره': 'construction.openings',
-  'تجهیزات ساختمانی/شیرآلات': 'construction.mep',
-  'تجهیزات ساختمانی/روشویی و دستشویی': 'construction.mep',
-  'تجهیزات ساختمانی/سینک': 'construction.mep',
-  'تجهیزات ساختمانی/سیفون': 'construction.mep',
-  // ── خانه و مصالح › تجهیزات خانه — نظافت/پت/عمومی جدا ──
-  'تجهیزات خانه و آشپزخانه/مواد شوینده': 'home.cleaning',
-  'تجهیزات خانه و آشپزخانه/دستمال کاغذی': 'home.cleaning',
-  'تجهیزات خانه و آشپزخانه/لوازم شستشو و نظافت': 'home.cleaning',
-  'تجهیزات خانه و آشپزخانه/لوازم حیوانات خانگی': 'home.pet',
+  // ── خانه و مصالح › تجهیزات خانه — عمومی‌ها ──
   'تجهیزات خانه و آشپزخانه/سایر تجهیزات خانه': 'home.appliances',
-  // ── لوازم خانگی › دیجیتال — نظارتی تجاری به ابزار، ساز به سرگرمی ──
+  // ── لوازم خانگی › دیجیتال — نظارتی تجاری به ابزار ──
   'کالای دیجیتال/تجهیزات نظارتی': 'tools.surveillance',
-  // ── مد پوشاک — چرم و اکسسوری خودشان L2 دارند ──
+  // ── مد پوشاک — چرم خارج از شاخهٔ پارچه ──
   'نساجی، پارچه و چرم/چرم': 'apparel.leather',
-  // ── ورزشی — کوهنوردی L2 خودش ──
-  'لوازم ورزشی/تجهیزات کوهنوردی و کمپینگ': 'sports.outdoor',
-  // ── آرایشی — تجهیزات آرایشگاهی L2 خودش ──
-  'آرایشی و بهداشتی/تجهیزات آرایشگاهی': 'health.salon',
 };
+
+// ─── ۱٫۵) تطبیق خودکار نام — قاعدهٔ اصلی عمق ───────────────────────────────
+// ایندکس نام‌های یکتای همهٔ گره‌های عمیق v2 (سطح ۳ به بعد، زیر L2) پس از
+// نرمال‌سازی فارسی. برگ باسکول که نامش دقیقاً با یک گرهٔ عمیق یکتا یکی
+// باشد، همان‌جا می‌نشیند — سیب→agri.fruit.apple، تن ماهی→food.canned.tuna.
+// نام تکراری بین دو شاخه → از ایندکس حذف (برگ به L2 خودش برمی‌گردد).
+const normalizeName = (s: string): string =>
+  (s ?? '')
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/\u200c/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const deepByName = new Map<string, string>();
+const duplicateNames = new Set<string>();
+for (const n of flattenTaxonomy()) {
+  if (n.level < 3) continue;
+  const k = normalizeName(n.name);
+  if (!k) continue;
+  if (deepByName.has(k)) duplicateNames.add(k);
+  else deepByName.set(k, n.key);
+}
+for (const d of duplicateNames) deepByName.delete(d);
 
 // ─── ۲) پیش‌فرض هر L2 باسکول — «نام ریشه / نام L2» ──────────────────────────
 const L2_DEFAULTS: Record<string, string> = {
@@ -250,6 +189,7 @@ const idMap = new Map<number, string>();
 const nameMap = new Map<string, string>();
 const problems: string[] = [];
 let fallbackUsed = 0;
+let autoMatched = 0;
 
 for (const c of cats) {
   const leaf = (c.category_name ?? '').trim();
@@ -277,14 +217,17 @@ for (const c of cats) {
     // خودش L2 است
     target = L2_DEFAULTS[`${root}/${leaf}`] ?? L1_FALLBACK[root];
   } else {
-    // برگ L3+ — استثنا ← پیش‌فرض L2 ← شبکهٔ ایمنی ریشه
+    // برگ L3+ — استثنا ← تطبیق خودکار نام عمیق ← پیش‌فرض L2 ← شبکهٔ ایمنی ریشه
+    const autoKey = deepByName.get(normalizeName(leaf));
     target =
       LEAF_OVERRIDES[`${l2}/${leaf}`] ??
       LEAF_OVERRIDES[`${l2}/*`] ??
+      autoKey ??
       L2_DEFAULTS[`${root}/${l2}`] ??
       L1_FALLBACK[root];
     // فقط وقتی «واقعاً» روی ریشه افتاد (کلید بدون نقطه) بشماریم
     if (target && !target.includes('.')) fallbackUsed++;
+    if (autoKey) autoMatched++;
   }
   if (!target) {
     problems.push(`بدون مقصد: ${root}/${l2}/${leaf} (id=${c.id})`);
@@ -311,7 +254,7 @@ const sortedNames = [...nameMap.entries()].sort((a, b) => a[0].localeCompare(b[0
 const ts = `// ⚠️ تولیدشده توسط scripts/gen-taxonomy-map.ts — دست‌نویسی ممنوع.
 // بازتولید: bun scripts/gen-taxonomy-map.ts
 // منبع: scripts/data/categories.json (درخت باسکول) + قواعد مهاجرت v2.
-// پوشش: ${idMap.size} از ${cats.length} دستهٔ باسکول؛ شبکهٔ ایمنی L1: ${fallbackUsed} مورد.
+// پوشش: ${idMap.size} از ${cats.length} دستهٔ باسکول؛ تطبیق خودکار نام عمیق: ${autoMatched}؛ شبکهٔ ایمنی L1: ${fallbackUsed} مورد.
 
 /** id دستهٔ باسکول → کلید تاکسونومی v2 (کوچک‌ترین واحد مهاجرت آگهی‌ها) */
 export const BUSKOL_TO_V2: Readonly<Record<number, string>> = {
@@ -332,7 +275,8 @@ for (const [, key] of idMap) {
   const root = key.split('.')[0];
   perRoot.set(root, (perRoot.get(root) ?? 0) + 1);
 }
-console.log(`✅ ${idMap.size}/${cats.length} دسته نگاشت شد (fallback ریشه: ${fallbackUsed})`);
+console.log(`✅ ${idMap.size}/${cats.length} دسته نگاشت شد (تطبیق خودکار عمیق: ${autoMatched}، fallback ریشه: ${fallbackUsed})`);
+console.log(`گره‌های عمیق یکتا در ایندکس نام: ${deepByName.size}${duplicateNames.size ? ` (${duplicateNames.size} نام تکراری نادیده: ${[...duplicateNames].slice(0, 5).join('، ')})` : ''}`);
 console.log('توزیع مقصد بر اساس ریشهٔ v2:');
 for (const [root, count] of [...perRoot.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`   ${root.padEnd(12)} ${count}`);

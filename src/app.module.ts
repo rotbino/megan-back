@@ -35,6 +35,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { ServiceSignupsModule } from './service-signups/service-signups.module';
 import { ImporterModule } from './importer/importer.module';
 import { AdminModule } from './admin/admin.module';
+import { CatalogV2Module } from './catalog-v2/catalog-v2.module';
 
 /**
  * ریشه API مگان — فقط ماژول‌های ویژگی؛ زیرساخت مشترک در CommonModule
@@ -76,6 +77,7 @@ import { AdminModule } from './admin/admin.module';
     ServiceSignupsModule, // ثبت‌نام سرویس‌های تخصصی — ریتو/همخرید از /services (۱۱-۱۲)
     ImporterModule, // ایمپورتر باسکول — ابزار داخلی ادمین /api/v1/importer (۱۳-۱۱)
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
+    CatalogV2Module, // کاتالوگ عمومی v2 — صفحهٔ /product-filter (مهاجرت موازی ۱۶-۱۱)
   ],
   controllers: [HealthController],
   providers: [
