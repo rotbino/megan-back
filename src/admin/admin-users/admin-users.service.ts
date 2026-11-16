@@ -380,5 +380,7 @@ export class AdminUsersService {
   private invalidatePublicCaches(): void {
     this.cache.invalidateTag('products');
     this.cache.invalidateTag('buy-requests');
+    // فهرست id کاربران غیرفعال (فیلتر notIn لیست‌ها) هم بیات شود
+    this.cache.invalidateTag('users:active');
   }
 }

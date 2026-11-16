@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService, TTL } from '../common/cache/cache.module';
+import { ActiveUsersService } from '../common/active-users/active-users.module';
 
 /**
  * لوکیشن درختی واحد — یک کالکشن با type متمایز (province/city/region/…).
@@ -15,6 +16,7 @@ export class LocationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cache: CacheService,
+    private readonly activeUsers: ActiveUsersService,
   ) {}
 
   /** «4» → «province:4» */
@@ -129,7 +131,7 @@ export class LocationsService {
         const grouped = await this.prisma.product.groupBy({
           by: ['cityId'],
           // همان فیلتر عمومی لیست‌ها (city-market/products) — آگهی نامرئی شمرده نمی‌شود
-          where: { status: 'confirmed', user: { isActive: true } },
+          where: { status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
           _count: { _all: true },
         });
         // نزولی به تعداد آگهی، بعد برش به تعداد خواسته‌شده

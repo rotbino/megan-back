@@ -9,6 +9,7 @@ import { effectivePakageType } from '../packages/packages.service';
 import { PushService } from '../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../chat/io-holder';
 import { BuyerBookService } from '../buyer-book/buyer-book.service';
+import { ActiveUsersService } from '../common/active-users/active-users.module';
 import {
   BUYER_BOOK_MAX,
   BUYER_PERIODS,
@@ -110,6 +111,7 @@ export class BuyersService {
     private readonly settings: SiteSettingsService,
     private readonly push: PushService,
     private readonly books: BuyerBookService,
+    private readonly activeUsers: ActiveUsersService,
   ) {}
 
   // ─── دفتر خرید من ──────────────────────────────────────────────────────────
@@ -789,7 +791,7 @@ export class BuyersService {
       where: {
         ...(catFilter != null ? { categoryId: catFilter } : {}),
         status: 'confirmed',
-        user: { isActive: true },
+        ...(await this.activeUsers.activeUserWhere()),
       },
       orderBy: { createdAt: 'desc' },
       take: catFilter != null ? 300 : 500,
