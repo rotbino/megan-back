@@ -1530,13 +1530,20 @@ model ServiceSignup {
   user   User   @relation("ServiceSignupOwner", fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id") @db.ObjectId
 
-  /// شناسهٔ سرویس — ritu | hamkharid (لیست سفید در dto ماژول service-signups)
+  /// شناسهٔ سرویس — maidan-yar | factory-buy | pakhshyar | hamkharid
+  /// (لیست سفید در dto ماژول service-signups — ۱۷-۱۱)
   serviceId String @map("service_id")
 
-  /// صنف — متن آزاد (مثلاً لبنیات)
+  /// نقش ثبت‌نام: buyer | seller | both (هر دو دکمه) — اختیاری چون ردیف‌های
+  /// قدیمیِ پیش از نقش، آن را ندارند (همه فروشنده بودند)؛ خواندن: null → seller.
+  /// ایندکس/کلید یگانه تغییر نکرده (هر کاربر در هر سرویس یک رکورد) تا کد
+  /// مستقر قبلی هم بی‌وقفه کار کند — «both» یعنی با هر دو نقش اعلام علاقه کرده.
+  role String? @map("role")
+
+  /// صنف — متن آزاد (مثلاً تولیدکنندهٔ لبنیات)
   guild String
-  /// نام کسب‌وکار
-  businessName String @map("business_name")
+  /// نام کسب‌وکار — اختیاری از ۱۷-۱۱ (فرم سریع فقط صنف را الزامی می‌دارد)
+  businessName String @default("") @map("business_name")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
