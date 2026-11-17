@@ -28,3 +28,6 @@ backups/
 package-lock.json
 .vercel
 .serverless/
+
+# توکن گیت — هرگز وارد ریپو نمی‌شود (ذخیره در سندباکس بیرونی)
+.git-credentials

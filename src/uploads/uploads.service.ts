@@ -859,22 +859,30 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
   // ─── تعویض درجا (دیتا ایمپورت → تصاویر آگهی‌ها) ─────────────────────────────
 
   /**
-   * تعویض بایت‌های یک تصویر آگهی «در همان کلید ذخیره‌سازی» (خواستهٔ مالک ۱۳-۱۱):
+   * تعویض تصویر آگهی با «کلید نسخه‌دار تازه» (خواستهٔ مالک ۱۳-۱۱؛ رفع کش ۱۷-۱۱):
    * پاک‌کردن واترمارک باسکول از تصاویر ایمپورت‌شده. گردش‌کار مالک: فایل اصلی را
    * ذخیره می‌کند → در Paint واترمارک باسکول را پاک می‌کند → با دکمهٔ «ویرایش
-   * عکس» همین‌جا آپلود می‌کند؛ نتیجه باید «همان فایل» باشد: همان نام، همان مسیر،
-   * همان URL و همان ردیف File — فقط بایت‌ها عوض شوند و تامبنیل از روی تصویر
-   * تازه در همان کلید تامبنیل بازساخته شود.
+   * عکس» همین‌جا آپلود می‌کند.
+   *
+   * چرا کلید تازه، نه بازنویسی همان کلید (درس ۱۷-۱۱ «سایت هنوز واترمارک
+   * دارد»): کلیدها با Cache-Control: immutable (یک‌ساله) سرو می‌شوند؛
+   * بازنویسی بایت‌ها روی همان کلید، پاسخ کش‌شدهٔ قدیمی را در مرورگر، CDN
+   * آروان و بهینه‌ساز next/image تا یک سال زنده نگه می‌داشت — هدر کوتاه‌تر
+   * روی PUT جدید هم چیزی را نمی‌شکست چون کلاینت اصلاً درخواست تازه نمی‌زد.
+   * حالا هر تعویض کلید تازه «name.r<epoch-ms>.ext» در همان پوشه می‌سازد:
+   * URL جدید ⇒ همهٔ کش‌ها همان لحظه می‌شکنند و هدر immutable یک‌ساله دوباره
+   * صادق است. تامبنیل هم در کلید تازه «name.r<epoch>.ext.thumb.jpg» بازساخته
+   * می‌شود؛ کلیدهای قدیمی (main+thumb) بعد از امن‌شدن بایت‌های تازه حذف و
+   * کلید قبلی در metadata.replacedFromKey یادآوری می‌شود. ردیف File همان
+   * می‌ماند — منبع حقیقت تغییر نمی‌کند.
    *
    * نکته‌ها:
    *   • سیاست ۱۴-۱۱: نسخهٔ ابری واترمارک آیمچ می‌گیرد و آینهٔ لوکال نسخهٔ
    *     تمیزِ ورودی را نگه می‌دارد — پس ورودی این مسیر باید «نسخهٔ تمیز» باشد
    *     (فایل آینهٔ لوکال را ویرایش کنید، نه خروجی واترمارک‌دار ابر را؛
    *     آپلود دوبارهٔ نسخهٔ واترمارک‌دار یعنی واترمارک دوبل).
-   *   • فرمت خروجی به پسوند کلید موجود قفل می‌شود تا نام/مسیر صادق بماند؛
+   *   • فرمت خروجی به پسوند کلید موجود قفل می‌شود تا پوشه/نام صادق بماند؛
    *     PNG شفاف روی کلید jpg با پس‌زمینهٔ سفید flatten می‌شود.
-   *   • هدر کش جایگزین «immutable یک‌ساله» نیست (۳۶۰۰ ثانیه) — بایت‌های این
-   *     کلید عوض شده‌اند و کلاینت‌های تازه باید نسخهٔ جدید را بگیرند.
    */
   async replaceInPlace(
     fileId: string,
@@ -903,7 +911,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw AppError.badRequest('این نوع فایل پشتیبانی نمی‌شود.', 'FILE_TYPE_NOT_ALLOWED');
     }
 
-    // فرمت خروجی = پسوند کلید موجود (نام/مسیر دست‌نخورده می‌ماند)
+    // فرمت خروجی = پسوند کلید موجود (پوشه/نام صادق می‌ماند)
     const keyExt = row.storageKey.split('.').pop()?.toLowerCase();
     const format: 'jpeg' | 'png' | 'webp' = keyExt === 'png' ? 'png' : keyExt === 'webp' ? 'webp' : 'jpeg';
     const processed = await this.processReplacement(file.buffer, format);
@@ -911,24 +919,23 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw AppError.badRequest(`عرض تصویر باید حداقل ${MIN_IMAGE_WIDTH} پیکسل باشد.`, 'IMAGE_TOO_SMALL');
     }
 
-    const replacedCache = 'public, max-age=3600';
-    // ابر = واترمارک‌دار · آینهٔ لوکال = تمیز (سیاست ۱۴-۱۱) — عین upload()
-    await this.driver.put(row.storageKey, processed.main, processed.mimeType, replacedCache, processed.mainClean);
+    // کلیدهای تازهٔ نسخه‌دار در همان پوشه — URL جدید، کش‌ها فوری می‌شکنند (۱۷-۱۱)
+    const oldMainKey = row.storageKey;
+    const oldThumbKey = row.thumbStorageKey;
+    const mainKey = this.versionedKey(oldMainKey);
+    const thumbKeyTarget = `${mainKey}.thumb.jpg`;
 
-    // تامبنیل از روی تصویر تازه، در همان کلید تامبنیل — اگر کلید تامبنیل نبود،
-    // ساخته می‌شود (بهبود خالص؛ URL اصلی دست نمی‌خورد)
-    let thumbUrl: string | null = row.thumbUrl;
-    let thumbKey: string | null = row.thumbStorageKey;
-    if (processed.thumb) {
-      const targetKey = row.thumbStorageKey ?? `${row.storageKey}.thumb.jpg`;
-      const putUrl = await this.driver
-        .put(targetKey, processed.thumb, 'image/jpeg', replacedCache, processed.thumbClean)
-        .catch(() => null);
-      if (putUrl) {
-        thumbKey = targetKey;
-        thumbUrl = putUrl;
-      }
-    }
+    // ابر = واترمارک‌دار · آینهٔ لوکال = تمیز (سیاست ۱۴-۱۱) — عین upload()؛
+    // هدر کش = پیش‌فرض immutable یک‌سالهٔ درایور، چون کلید تازه هرگز عوض نمی‌شود
+    const [url, thumbUrl] = await Promise.all([
+      this.driver.put(mainKey, processed.main, processed.mimeType, undefined, processed.mainClean),
+      processed.thumb
+        ? this.driver
+            .put(thumbKeyTarget, processed.thumb, 'image/jpeg', undefined, processed.thumbClean)
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const thumbKey = thumbUrl ? thumbKeyTarget : null;
 
     const now = new Date();
     const metadata = {
@@ -940,19 +947,47 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       replacedBy,
       // نسخهٔ ابری واترمارک دارد؟ (سیاست ۱۴-۱۱ — آینهٔ لوکال همیشه تمیز است)
       watermarked: processed.watermarked,
+      // کلید اصلیِ قبل از این تعویض — رد پای تاریخچه (رفع کش ۱۷-۱۱)
+      replacedFromKey: oldMainKey,
     };
     const updated = await this.prisma.file.update({
       where: { id: row.id },
       data: {
         size: processed.main.length,
         mimeType: processed.mimeType,
+        url,
+        storageKey: mainKey,
         thumbUrl,
         thumbStorageKey: thumbKey,
         metadata: metadata as unknown as object,
       },
     });
+
+    // بایت‌های تازه امن شدند (PUT + DB) — حالا کلیدهای قدیمی را بهترین‌حال حذف کن؛
+    // ردیف DB منبع حقیقت است و از این به بعد فقط کلید تازه را اشاره می‌کند
+    if (oldMainKey !== mainKey) {
+      await this.driver.delete(oldMainKey).catch(() => undefined);
+    }
+    if (oldThumbKey && oldThumbKey !== thumbKeyTarget) {
+      await this.driver.delete(oldThumbKey).catch(() => undefined);
+    }
+
     await this.bustCaches('Product', row.relatedId);
     return { ...this.toDto(updated), replacedAt: now.toISOString(), productId: row.relatedId };
+  }
+
+  /**
+   * کلید تازهٔ «نسخه‌دار» برای تعویض تصویر — name.r<epoch-ms>.ext در همان پوشه.
+   * کلیدهای قبلی immutable (یک‌ساله) کش شده‌اند؛ فقط کلید تازه/URL تازه است که
+   * کش مرورگر/CDN/بهینه‌ساز را همان لحظه می‌شکند (رفع ۱۷-۱۱).
+   */
+  private versionedKey(key: string): string {
+    const slash = key.lastIndexOf('/');
+    const dot = key.lastIndexOf('.');
+    if (dot > slash) {
+      return `${key.slice(0, dot)}.r${Date.now()}.${key.slice(dot + 1)}`;
+    }
+    return `${key}.r${Date.now()}`;
   }
 
   /**
@@ -1052,6 +1087,21 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     try {
       if (model === 'Product' && modelId) {
         this.cache.invalidateTag(`product:${modelId}`);
+        // گالری آگهی در پروفایل عمومی فروشنده هم دیده می‌شود (۱۷-۱۱) —
+        // کش seller:<userName> هم باید بشکند، نه فقط product:<id>
+        if (/^\d+$/.test(modelId)) {
+          const product = await this.prisma.product.findUnique({
+            where: { id: Number(modelId) },
+            select: { userId: true },
+          });
+          if (product) {
+            const owner = await this.prisma.user.findUnique({
+              where: { id: product.userId },
+              select: { userName: true },
+            });
+            if (owner?.userName) this.cache.invalidateTag(`seller:${owner.userName.trim()}`);
+          }
+        }
       }
       if (model === 'User' && modelId) {
         // آواتار/گالری/گواهی کاربر — کش پروفایل عمومی فروشنده هم بشکند
