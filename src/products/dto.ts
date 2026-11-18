@@ -209,7 +209,7 @@ export class CreateProductDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(365, { message: 'اعتبار قیمت حداکثر ۳۶۵ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 
   @IsString()
@@ -368,7 +368,7 @@ export class BulkPriceItemDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(365, { message: 'اعتبار قیمت حداکثر ۳۶۵ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 }
 
@@ -389,7 +389,7 @@ export class UpdateMyPriceDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(365, { message: 'اعتبار قیمت حداکثر ۳۶۵ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 }
 
