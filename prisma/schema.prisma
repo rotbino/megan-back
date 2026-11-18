@@ -527,9 +527,12 @@ model Product {
   favoriteProducts FavoriteProduct[] @relation("FavoriteProductProduct")
   productViews    ProductView[]     @relation("ProductViewProduct")
 
-  /// سورت «مرتبط‌ترین» = نردبان اول، بعد ویژه، بعد تازه‌ترین قیمت (خواسته مالک
-  /// ۱۵-۱۱: تاریخ مؤثر = مهر آپدیت قیمت — مهر updated_at با بک‌فیل‌ها آلوده می‌شود)
-  @@index([status, isLadder, isElevated, priceUpdatedAt(sort: Desc), updatedAt(sort: Desc)])
+  /// سورت «جدیدترین» = تاریخ ثبت (خواستهٔ مالک ۱۸-۱۱: آگهی چندسالهٔ
+  /// ری‌پرایس‌شدهٔ باسکولی نباید بالای جدیدترین بنشیند)؛ «مرتبط‌ترین» = نردبان
+  /// ← ویژه ← تازه‌ترین ثبت ← تازه‌ترین قیمت. مهر updated_at پایهٔ سورت نیست
+  /// — با بک‌فیل‌ها به «اکنون» آلوده می‌شود (گزارش مالک ۱۵-۱۱)
+  @@index([status, createdAt(sort: Desc), priceUpdatedAt(sort: Desc)])
+  @@index([status, isLadder, isElevated, createdAt(sort: Desc), priceUpdatedAt(sort: Desc)])
   @@index([subCategoryId, status])
   @@index([provinceId, cityId, status])
   /// جستجوی چندشهری بازار شهری (/cityMarket/getProducts — cityId IN (…))
