@@ -765,8 +765,10 @@ export class ProductsService {
     });
     const pakage = effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt);
     if (pakage === 0) {
+      // (۱۸-۱۱) آگهی‌های پنهان (ownerHidden) در ظرفیت حساب نمی‌شوند — کاربر
+      // که کالایش را نمی‌بیند نباید به‌خاطرشان از ثبت محصول جدید هم محروم شود
       const active = await this.prisma.product.count({
-        where: { userId: user.id, status: { in: ['pending', 'confirmed'] } },
+        where: { userId: user.id, status: { in: ['pending', 'confirmed'] }, ownerHidden: false },
       });
       if (active >= FREE_PRODUCT_CAPACITY) {
         throw AppError.badRequest(
@@ -1130,13 +1132,17 @@ export class ProductsService {
     };
   }
 
-  /** POST /products/getMyProducts — آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت */
+  /** POST /products/getMyProducts — آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت
+   *
+   *  (۱۸-۱۱) آگهی‌های ownerHidden — ایمپورت‌شده‌های پیشین که مالک هنوز با
+   *  «ثبت گروهی محصول» اجازه نداده — از پنل خودش پنهان می‌مانند (در سطح
+   *  عمومی سایت عادی‌اند)؛ با ایمپورت از وب آشکار و قیمتش‌ها تازه می‌شوند. */
   async getMyProducts(userId: string) {
     // همه وضعیت‌ها (حتی حذف‌شده) — تب «حذف شده» باید ردیف‌ها را هم نشان دهد،
     // نه فقط شمارنده را (باگ ۲۸-۱۰-۲۰۲۶: تب حذف‌شده همیشه خالی بود).
     // ظرفیت سمت کلاینت با فیلتر status !== 'deleted' محاسبه می‌شود.
     const rows = await this.prisma.product.findMany({
-      where: { userId },
+      where: { userId, ownerHidden: false },
       orderBy: { updatedAt: 'desc' },
     });
     const counts: Record<string, number> = { confirmed: 0, pending: 0, rejected: 0, deleted: 0 };

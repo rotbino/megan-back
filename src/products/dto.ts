@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** ویژگی مرحله «جزئیات نهایی» ویزارد */
@@ -411,4 +411,12 @@ export class ReviewProductDto {
   @IsString({ each: true })
   @MaxLength(200, { each: true })
   rejectionReasons?: string[];
+}
+
+/** POST /products/webImportStart (۱۸-۱۱) — شروع «ثبت گروهی محصول» از وب */
+export class WebImportStartDto {
+  /** full = ایمپورت کامل (کالای جدید + به‌روزرسانی + پروفایل)
+   *  prices = فقط به‌روزرسانی قیمت/موجودی/حداقل سفارش */
+  @IsIn(['full', 'prices'])
+  mode!: 'full' | 'prices';
 }
