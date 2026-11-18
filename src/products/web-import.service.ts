@@ -156,22 +156,31 @@ export class WebImportService {
   // ═══════════════════ وضعیت: آیا دکمه دیده شود؟ ═══════════════════
 
   /**
-   * POST /products/webImportStatus — واجد شرایط بودن کاربر برای «ثبت گروهی».
+   * POST /products/webImportStatus — واجد شرایط بودن کاربر برای «ایمپورت از وب».
    *
    * شرایط (خواستهٔ مالک): شمارهٔ موبایلی که در ایمچ ثبت‌نام کرده باید از
    * قبل و بدون اطلاع خودش در سیستم ثبت شده باشد — یعنی یا حسابش خودِ حساب
    * ایمپورت‌شده است (b_user_name دارد) یا شماره‌اش در کالکشن منبع هست.
-   * بقیهٔ کاربران دکمه را اصلاً نمی‌بینند.
+   * بقیهٔ کاربران اصلاً چنین امکانی ندارند.
+   *
+   * imported (۱۸-۱۱ دور ۲): کاربر واجد شرایط دست‌کم یک جلسهٔ ایمپورت را
+   * تا انتها برده (سند done). تا آن زمان «ثبت محصول جدید» برایش قفل است
+   * (خواستهٔ مالک: کاربر مجبور شود اول ایمپورت را بزند). جلسهٔ done مانع
+   * همگام‌سازی دوباره نیست؛ این فقط مهرِ «حل قفل» است.
    */
-  async status(user: AuthUser): Promise<{ eligible: boolean }> {
+  async status(user: AuthUser): Promise<{ eligible: boolean; imported: boolean }> {
     const me = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: { bUserName: true, phone: true },
     });
-    if (!me) return { eligible: false };
-    if (me.bUserName) return { eligible: true };
-    const source = await this.sourceUserNameByPhone(me.phone);
-    return { eligible: Boolean(source) };
+    if (!me) return { eligible: false, imported: false };
+    const eligible = me.bUserName ? true : Boolean(await this.sourceUserNameByPhone(me.phone));
+    if (!eligible) return { eligible: false, imported: false };
+    const doneSession = await this.prisma.webImportSession.findFirst({
+      where: { userId: user.id, status: 'done' },
+      select: { id: true },
+    });
+    return { eligible: true, imported: Boolean(doneSession) };
   }
 
   /** یوزرنیم منبع از روی شمارهٔ موبایل — جستجو در کالکشن منبع (دامپ) */
