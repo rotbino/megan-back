@@ -138,6 +138,8 @@ export interface ProductFileRow {
   url: string;
   thumbUrl: string | null;
   hasWatermark: boolean;
+  /** (۱۹-۱۱) زمان اصلاح واترمارک — غیرnull یعنی تمیز شده و در تب «اصلاح واترمارک» است */
+  fixedAt: string | null;
   /** id آگهیِ صاحب تصویر (رشته) — برای کار پاک‌سازی مرحلهٔ بعد */
   relatedId: string | null;
   size: number;
@@ -145,9 +147,12 @@ export interface ProductFileRow {
 }
 
 export interface ProductFilesSummary {
+  /** باقی‌مانده = همه به‌جز اصلاح‌شده‌ها (تب «همه» همین را نشان می‌دهد) */
   total: number;
   watermarked: number;
   clean: number;
+  /** اصلاح‌شده‌ها — تب «اصلاح واترمارک» */
+  fixed: number;
 }
 
 export interface ProductFilesListResult {
@@ -1163,6 +1168,11 @@ export class ImportedProductsService {
       field_key: 'gallery',
       related_id: { $ne: null },
       ...(query.productId != null ? { related_id: String(query.productId) } : {}),
+      // اصلاح‌شده‌ها فقط در تب خودشان می‌آیند؛ بقیهٔ تب‌ها (همه/بله/خیر)
+      // خلوت می‌مانند تا باقی‌مانده‌ها راحت‌تر پیدا شوند (خواستهٔ مالک ۱۹-۱۱)
+      ...(query.watermark === 'fixed'
+        ? { watermark_fixed_at: { $ne: null } }
+        : { watermark_fixed_at: null }),
       ...(query.watermark === 'yes'
         ? { has_watermark: true }
         : query.watermark === 'no'
@@ -1203,6 +1213,7 @@ export class ImportedProductsService {
               thumb_url: 1,
               size: 1,
               has_watermark: 1,
+              watermark_fixed_at: 1,
               related_id: 1,
               created_at: 1,
             },
@@ -1219,6 +1230,7 @@ export class ImportedProductsService {
       url: String(r.url ?? ''),
       thumbUrl: (r.thumb_url as string) ?? null,
       hasWatermark: r.has_watermark === true,
+      fixedAt: toIso(r.watermark_fixed_at) ?? null,
       relatedId: (r.related_id as string) ?? null,
       size: Number(r.size ?? 0),
       createdAt: toIso(r.created_at) ?? '',
@@ -1234,7 +1246,9 @@ export class ImportedProductsService {
     };
   }
 
-  /** آمار واترمارک تصاویر گالری — کل / علامت‌خورده / پاک */
+  /** آمار واترمارک تصاویر گالری — باقی‌مانده / علامت‌خورده / پاک / اصلاح‌شده.
+   *  اصلاح‌شده‌ها از «کل» کنار گذاشته می‌شوند تا شمارندهٔ تب «همه» با چیزی که
+   *  کاربر می‌بیند یکی باشد (خواستهٔ مالک ۱۹-۱۱: لیست باقی‌مانده خلوت بماند). */
   async productFilesSummary(): Promise<ProductFilesSummary> {
     const agg = (await this.prisma.$runCommandRaw({
       aggregate: 'File',
@@ -1242,8 +1256,9 @@ export class ImportedProductsService {
         { $match: { related_model: 'Product', field_key: 'gallery', related_id: { $ne: null } } },
         {
           $facet: {
-            total: [{ $count: 'n' }],
-            watermarked: [{ $match: { has_watermark: true } }, { $count: 'n' }],
+            total: [{ $match: { watermark_fixed_at: null } }, { $count: 'n' }],
+            watermarked: [{ $match: { watermark_fixed_at: null, has_watermark: true } }, { $count: 'n' }],
+            fixed: [{ $match: { watermark_fixed_at: { $ne: null } } }, { $count: 'n' }],
           },
         },
       ] as unknown as Prisma.InputJsonObject[],
@@ -1253,7 +1268,8 @@ export class ImportedProductsService {
     const cnt = (key: string): number => Number(((f[key] ?? []) as { n?: number }[])[0]?.n ?? 0);
     const total = cnt('total');
     const watermarked = cnt('watermarked');
-    return { total, watermarked, clean: total - watermarked };
+    const fixed = cnt('fixed');
+    return { total, watermarked, clean: total - watermarked, fixed };
   }
 
   /** POST /importer/product-files/:id/watermark — علامت/برداشتن واترمارک

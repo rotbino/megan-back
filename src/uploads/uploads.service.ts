@@ -960,6 +960,12 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         thumbUrl,
         thumbStorageKey: thumbKey,
         metadata: metadata as unknown as object,
+        // تعویض درجا = پاک‌سازی واترمارک (گردش‌کار رسمی همین صفحه): نسخهٔ
+        // تازه تمیز است → از صف شکار خارج و با مهر «اصلاح شد» به تب
+        // «اصلاح واترمارک» می‌رود (خواستهٔ مالک ۱۹-۱۱) — هم برای مسیر دستی
+        // (Paint) و هم ربات AI که همین اندپوینت/الگو را صدا می‌زند.
+        hasWatermark: false,
+        watermarkFixedAt: now,
       },
     });
 

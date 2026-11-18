@@ -449,6 +449,10 @@ model File {
   /// (۱۹-۱۱ «شکار واترمارک») علامت ادمین — این تصویر واترمارک منبع دارد؛
   /// مبنای فیلتر «تصاویر آگهی‌ها» برای کار پاک‌سازی واترمارک
   hasWatermark Boolean @default(false) @map("has_watermark")
+  /// (۱۹-۱۱) زمان اصلاح واترمارک — تصویر با موفقیت تمیز شده (AI یا دستی).
+  /// اصلاح‌شده‌ها از تب «همه» کنار گذاشته می‌شوند تا لیست باقی‌مانده خلوت
+  /// بماند و فقط در تب «اصلاح واترمارک» بیایند (خواستهٔ مالک)
+  watermarkFixedAt DateTime? @map("watermark_fixed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
