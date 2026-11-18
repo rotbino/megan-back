@@ -1122,41 +1122,110 @@ export class ImportedProductsService {
   /** GET /importer/product-files — «فقط تصاویر» بدون هیچ چیز دیگر (خواستهٔ
    *  مالک ۱۹-۱۱): هر کاش = خودِ تصویر + شناسهٔ فایل + سوییچ واترمارک.
    *  عنوان آگهی/فروشنده و بقیهٔ داده عمداً نیست؛ فیلتر واترمارک برای
-   *  جداکردن لیست علامت‌خورده‌ها (پایهٔ کار پاک‌سازی مرحلهٔ بعد). */
+   *  جداکردن لیست علامت‌خورده‌ها (پایهٔ کار پاک‌سازی مرحلهٔ بعد).
+   *
+   *  سورت (خواستهٔ مالک ۱۹-۱۱ عصر): باسکول ۱-۲ سال پیش واترمارک اضافه
+   *  کرده — تصاویر باید بر اساس تاریخ خودِ آگهی مرتب شوند تا با مقایسهٔ
+   *  آگهی‌های تازه‌ثبت‌شده و ویرایش‌شده معلوم شود کدام‌ها واترمارک دارند.
+   *  پیش‌فرض = زمان ثبت (productCreated)؛ گزینهٔ دوم = آخرین ویرایش
+   *  (productUpdated) — هر دو نزولی (جدیدترین بالاتر). تاریخ‌های خودِ فایل
+   *  همگی «زمان ایمپورت»‌اند و بی‌معنا؛ رتبه از آرایهٔ idهای مرتبِ آگهی با
+   *  $indexOfArray تزریق می‌شود (همان الگوی listImages) و فایلِ بدون آگهی
+   *  (حذف‌شده) با رتبهٔ بزرگ آخر می‌رود. */
   async listProductFiles(query: ProductFilesQueryDto): Promise<ProductFilesListResult> {
     const page = Math.max(1, query.page ?? 1);
-    const pageSize = Math.min(120, Math.max(12, query.pageSize ?? 60));
-    const where: Prisma.FileWhereInput = {
-      relatedModel: 'Product',
-      fieldKey: 'gallery',
-      relatedId: { not: null },
-      ...(query.productId != null ? { relatedId: String(query.productId) } : {}),
+    const pageSize = Math.min(120, Math.max(1, query.pageSize ?? 60));
+
+    // ── رتبهٔ آگهی‌ها: آرایهٔ id مرتب بر اساس تاریخ درخواستی ──
+    const primary: 'createdAt' | 'updatedAt' = query.sort === 'productUpdated' ? 'updatedAt' : 'createdAt';
+    const secondary: 'createdAt' | 'updatedAt' = primary === 'updatedAt' ? 'createdAt' : 'updatedAt';
+    type RankRow = { id: number; createdAt: Date; updatedAt: Date };
+    const dateOf = (row: RankRow, key: 'createdAt' | 'updatedAt'): number =>
+      new Date(row[key]).getTime() || 0;
+    const productsForRank = await this.prisma.product.findMany({
+      ...(query.productId != null ? { where: { id: query.productId } } : {}),
+      select: { id: true, createdAt: true, updatedAt: true },
+      take: 50_000,
+    });
+    productsForRank.sort((a, b) => {
+      const pa = dateOf(a, primary);
+      const pb = dateOf(b, primary);
+      if (pa !== pb) return pb - pa; // جدیدترین اول
+      const sa = dateOf(a, secondary);
+      const sb = dateOf(b, secondary);
+      if (sa !== sb) return sb - sa;
+      return b.id - a.id;
+    });
+    const rankProductIds = productsForRank.map((p) => String(p.id));
+
+    const filter: Record<string, unknown> = {
+      related_model: 'Product',
+      field_key: 'gallery',
+      related_id: { $ne: null },
+      ...(query.productId != null ? { related_id: String(query.productId) } : {}),
       ...(query.watermark === 'yes'
-        ? { hasWatermark: true }
+        ? { has_watermark: true }
         : query.watermark === 'no'
-          ? { hasWatermark: false }
+          ? { has_watermark: false }
           : {}),
     };
-    const [rows, total, summary] = await Promise.all([
-      this.prisma.file.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.file.count({ where }),
+
+    const [totalAgg, rowsAgg, summary] = await Promise.all([
+      this.prisma.$runCommandRaw({
+        aggregate: 'File',
+        pipeline: [{ $match: filter }, { $count: 'n' }] as unknown as Prisma.InputJsonObject[],
+        cursor: {},
+      }) as unknown as { cursor?: { firstBatch?: { n?: number }[] } },
+      this.prisma.$runCommandRaw({
+        aggregate: 'File',
+        pipeline: [
+          { $match: filter },
+          // رتبهٔ تزریق‌شده از آرایهٔ مرتب — همیشه _prio صعودی مرتب می‌شود
+          {
+            $addFields: {
+              _prio: {
+                $let: {
+                  vars: { r: { $indexOfArray: [rankProductIds, '$related_id'] } },
+                  in: {
+                    // -1 = فایل بدون آگهی (حذف‌شده) → همیشه آخر
+                    $cond: [{ $eq: ['$$r', -1] }, Number.MAX_SAFE_INTEGER, '$$r'],
+                  },
+                },
+              },
+            },
+          },
+          { $sort: { _prio: 1, _id: 1 } },
+          { $skip: (page - 1) * pageSize },
+          { $limit: pageSize },
+          {
+            $project: {
+              url: 1,
+              thumb_url: 1,
+              size: 1,
+              has_watermark: 1,
+              related_id: 1,
+              created_at: 1,
+            },
+          },
+        ] as unknown as Prisma.InputJsonObject[],
+        cursor: {},
+      }) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } },
       this.productFilesSummary(),
     ]);
+
+    const total = Number(totalAgg?.cursor?.firstBatch?.[0]?.n ?? 0);
+    const rows: ProductFileRow[] = (rowsAgg?.cursor?.firstBatch ?? []).map((r) => ({
+      id: toId(r._id),
+      url: String(r.url ?? ''),
+      thumbUrl: (r.thumb_url as string) ?? null,
+      hasWatermark: r.has_watermark === true,
+      relatedId: (r.related_id as string) ?? null,
+      size: Number(r.size ?? 0),
+      createdAt: toIso(r.created_at) ?? '',
+    }));
+
     return {
-      rows: rows.map((f) => ({
-        id: f.id,
-        url: f.url,
-        thumbUrl: f.thumbUrl,
-        hasWatermark: f.hasWatermark === true,
-        relatedId: f.relatedId,
-        size: f.size,
-        createdAt: f.createdAt.toISOString(),
-      })),
+      rows,
       total,
       page,
       pageSize,

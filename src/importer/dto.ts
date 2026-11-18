@@ -384,6 +384,15 @@ export class ProductFilesQueryDto {
   @Min(1)
   productId?: number;
 
+  /** سورت (خواستهٔ مالک ۱۹-۱۱ عصر): تاریخ‌های معنادارِ خودِ آگهی (باسکول) —
+   *  تاریخ‌های خودِ فایل همگی «زمان ایمپورت»‌اند و برای شکار واترمارک
+   *  بی‌معنا هستند. پیش‌فرض = زمان ثبت (مالک: «پیشفرض رو بزار بر حسب زمان
+   *  ثبت»)؛ productUpdated = آخرین ویرایش آگهی — برای بررسی اینکه آیا
+   *  آگهی‌های ویرایش‌شده هم واترمارک گرفته‌اند یا فقط تازه‌ثبت‌شده‌ها */
+  @IsOptional()
+  @IsIn(['productCreated', 'productUpdated'])
+  sort?: 'productCreated' | 'productUpdated';
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -391,11 +400,11 @@ export class ProductFilesQueryDto {
   @Max(10_000)
   page?: number;
 
-  /** پیش‌فرض ۶۰ — شبکهٔ کاشی */
+  /** پیش‌فرض ۶۰ — شبکهٔ کاشی؛ ۱۰ = پنجرهٔ اسکن دو ردیفهٔ ۵تایی (۱۹-۱۱ عصر) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(12)
+  @Min(1)
   @Max(120)
   pageSize?: number;
 }
