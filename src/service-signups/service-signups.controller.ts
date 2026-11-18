@@ -9,8 +9,9 @@ import { ServiceSignupsService } from './service-signups.service';
 import { SaveServiceSignupDto } from './dto';
 
 /**
- * ثبت‌نام فروشندگان در سرویس‌های تخصصی ارزش‌افزوده (خواستهٔ مالک ۱۱-۱۲) —
- * صفحهٔ عمومی /services؛ مهمان قبل از فرم از مودال ورود رد می‌شود (فرانت).
+ * ثبت‌نام در سرویس‌های تخصصی ایمچ برای فروش عمده (بازطراحی ۱۷-۱۱) —
+ * صفحهٔ عمومی /services؛ هر سرویس دو دکمهٔ خریدار/فروشنده دارد؛ مهمان
+ * قبل از فرم از مودال ورود رد می‌شود (فرانت).
  */
 @ApiTags('service-signups')
 @UseGuards(JwtAuthGuard)
@@ -28,7 +29,7 @@ export class ServiceSignupsController {
   /** فرم — حد نرخ پایین‌تر از پیش‌فرض (ارسال مکرر بی‌معنی) */
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('save')
-  @ApiOperation({ summary: 'ثبت/اصلاح ثبت‌نام در یک سرویس (صنف + نام کسب‌وکار) — upsert' })
+  @ApiOperation({ summary: 'ثبت/اصلاح ثبت‌نام در یک سرویس (نقش + صنف + کسب‌وکار اختیاری) — upsert' })
   async save(@CurrentUser() user: AuthUser, @Body() dto: SaveServiceSignupDto) {
     return ok(await this.signups.save(user.id, dto), 'ثبت‌نام شما دریافت شد.');
   }

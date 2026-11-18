@@ -57,17 +57,18 @@ export class ImportedProductsController {
   @Post('product-images/:id/replace')
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'تعویض بایت‌های تصویر آگهی در همان کلید ذخیره‌سازی (نام/مسیر/URL دست‌نخورده)',
+    summary: 'تعویض تصویر آگهی با کلید نسخه‌دار تازه — کش‌ها فوری می‌شکنند (۱۷-۱۱)',
     description:
       'گردش‌کار پاک‌کردن واترمارک باسکول: فایل اصلی را ذخیره کنید، در Paint واترمارک را پاک کنید و همین‌جا آپلود کنید. ' +
-      'فایل اصلی و تامبنیل در همان کلید قبلی بازنویسی می‌شوند؛ واترمارک آیمچِ داخل پیکسل‌ها حفظ و دوباره اعمال نمی‌شود.',
+      'بایت‌های تازه در کلید تازه «name.r<epoch>.ext» در همان پوشه می‌نشینند (URL جدید ⇒ مرورگر/CDN/بهینه‌ساز تصویر همان لحظه نسخهٔ تازه را می‌گیرند)، ' +
+      'تامبنیل در کلید تازه بازساخته و کلیدهای قدیمی حذف می‌شوند؛ ردیف File همان می‌ماند و کلید قبلی در metadata.replacedFromKey یادآوری می‌شود.',
   })
   async replace(@Param('id') id: string, @Req() req: FastifyRequest) {
     const { file } = await this.uploads.readMultipart(req);
     const adminReq = req as FastifyRequest & { adminUsername?: string };
     return ok(
       await this.uploads.replaceInPlace(id, file, adminReq.adminUsername ?? 'admin'),
-      'تصویر در همان نام و مسیر جایگزین شد؛ تامبنیل هم از روی تصویر تازه بازساخته شد.',
+      'تصویر جایگزین شد؛ کلید نسخه‌دار تازه ساخته شد و همهٔ کش‌ها فوری می‌شکنند.',
     );
   }
 }

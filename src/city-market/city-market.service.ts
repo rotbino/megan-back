@@ -115,12 +115,13 @@ export class CityMarketService {
           { OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }] },
         ];
 
-        // سورت طبیعی (همان getProductList): نردبان ← ویژه ← تازه‌ترین قیمت ←
-        // تازه‌ترین ویرایش — تاریخ مؤثر = مهر آپدیت قیمت که کارت هم نشان می‌دهد
+        // سورت طبیعی (همان getProductList): نردبان ← ویژه ← تازه‌ترین ثبت ←
+        // تازه‌ترین قیمت — «جدیدترین» = تاریخ ثبت آگهی (خواستهٔ مالک ۱۸-۱۱؛
+        // آگهی قدیمیِ ری‌پرایس‌شدهٔ باسکولی نباید بالای جدیدترین بنشیند)
         const orderBy: Prisma.ProductOrderByWithRelationInput[] =
           sort === 'newest'
-            ? [{ priceUpdatedAt: 'desc' }, { updatedAt: 'desc' }]
-            : [{ isLadder: 'desc' }, { isElevated: 'desc' }, { priceUpdatedAt: 'desc' }, { updatedAt: 'desc' }];
+            ? [{ createdAt: 'desc' }, { priceUpdatedAt: 'desc' }]
+            : [{ isLadder: 'desc' }, { isElevated: 'desc' }, { createdAt: 'desc' }, { priceUpdatedAt: 'desc' }];
 
         const [total, rows] = await Promise.all([
           this.prisma.product.count({ where }),

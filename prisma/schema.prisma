@@ -75,6 +75,17 @@ model User {
   /// پروفایل کسب‌وکار embedded — فیلدهای myuser_profiles باسکول
   profile    Json?
 
+  // ── بازاریابی افلیت (۱۷-۱۱) ──
+  /// هر کاربر یک کد رفرال عددی دارد که در انتهای لینک دعوتش می‌آید: /?ref=10234
+  referralCode String? @unique @map("referral_code")
+  /// دعوت‌کننده این کاربر — از کوکی imach_ref هنگام ثبت‌نام پر می‌شود
+  /// (کاربرِ لینکِ بازاریاب، به‌عنوان «دعوت‌شده» او ثبت می‌شود).
+  /// ⚠️ self-relation مونگو: referential actions باید NoAction باشند؛
+  /// حذف دعوت‌کننده پیش از جداسازی دعوت‌شده‌ها در لایه سرویس انجام می‌شود.
+  referredById String? @map("referred_by_id") @db.ObjectId
+  referredBy   User?   @relation("UserReferral", fields: [referredById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  referrals    User[]  @relation("UserReferral")
+
   /// یوزرنیم باسکول این کاربر (ایمپورتر) — کلید تشخیص «قبلاً از باسکول آمده»؛
   /// ایمپورت لیستی با همین فیلد از کاربران تکراری رد می‌شود و offset ادامه
   /// از اولین کاربرِ بدون این فیلد پیدا می‌شود (خواستهٔ مالک ۱۳-۱۱).
@@ -182,6 +193,10 @@ model User {
   savedBuyerBooks SavedBuyerBook[] @relation("SavedBuyerBookOwner")
   /// ثبت‌نام‌های این کاربر در سرویس‌های تخصصی ارزش‌افزوده (۱۱-۱۲)
   serviceSignups ServiceSignup[] @relation("ServiceSignupOwner")
+  /// پروفایل بازاریابی این کاربر (نقش سیستمی مستقل — افلیت ۱۷-۱۱)
+  affiliateProfile AffiliateProfile? @relation("AffiliateMarketer")
+  /// پرداخت‌هایی که این کاربر به‌عنوان مشتری انجام داده و کمیسیون تولید کرده
+  affiliatePaidEarnings AffiliateEarning[] @relation("AffiliatePayer")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -189,6 +204,8 @@ model User {
   @@index([lastSeenAt(sort: Desc)])
   /// جستجوی سریع «قبلاً ایمپورت شده؟» در ایمپورت لیستی (b_user_name)
   @@index([bUserName])
+  /// دعوت‌شده‌های هر دعوت‌کننده (پنل بازاریابی)
+  @@index([referredById])
 }
 
 /// درخواست احراز هویت اسناد — کارت ملی + سلفی؛ بررسی و تأیید توسط ادمین.
@@ -510,9 +527,12 @@ model Product {
   favoriteProducts FavoriteProduct[] @relation("FavoriteProductProduct")
   productViews    ProductView[]     @relation("ProductViewProduct")
 
-  /// سورت «مرتبط‌ترین» = نردبان اول، بعد ویژه، بعد تازه‌ترین قیمت (خواسته مالک
-  /// ۱۵-۱۱: تاریخ مؤثر = مهر آپدیت قیمت — مهر updated_at با بک‌فیل‌ها آلوده می‌شود)
-  @@index([status, isLadder, isElevated, priceUpdatedAt(sort: Desc), updatedAt(sort: Desc)])
+  /// سورت «جدیدترین» = تاریخ ثبت (خواستهٔ مالک ۱۸-۱۱: آگهی چندسالهٔ
+  /// ری‌پرایس‌شدهٔ باسکولی نباید بالای جدیدترین بنشیند)؛ «مرتبط‌ترین» = نردبان
+  /// ← ویژه ← تازه‌ترین ثبت ← تازه‌ترین قیمت. مهر updated_at پایهٔ سورت نیست
+  /// — با بک‌فیل‌ها به «اکنون» آلوده می‌شود (گزارش مالک ۱۵-۱۱)
+  @@index([status, createdAt(sort: Desc), priceUpdatedAt(sort: Desc)])
+  @@index([status, isLadder, isElevated, createdAt(sort: Desc), priceUpdatedAt(sort: Desc)])
   @@index([subCategoryId, status])
   @@index([provinceId, cityId, status])
   /// جستجوی چندشهری بازار شهری (/cityMarket/getProducts — cityId IN (…))
@@ -1513,13 +1533,20 @@ model ServiceSignup {
   user   User   @relation("ServiceSignupOwner", fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id") @db.ObjectId
 
-  /// شناسهٔ سرویس — ritu | hamkharid (لیست سفید در dto ماژول service-signups)
+  /// شناسهٔ سرویس — maidan-yar | factory-buy | pakhshyar | hamkharid
+  /// (لیست سفید در dto ماژول service-signups — ۱۷-۱۱)
   serviceId String @map("service_id")
 
-  /// صنف — متن آزاد (مثلاً لبنیات)
+  /// نقش ثبت‌نام: buyer | seller | both (هر دو دکمه) — اختیاری چون ردیف‌های
+  /// قدیمیِ پیش از نقش، آن را ندارند (همه فروشنده بودند)؛ خواندن: null → seller.
+  /// ایندکس/کلید یگانه تغییر نکرده (هر کاربر در هر سرویس یک رکورد) تا کد
+  /// مستقر قبلی هم بی‌وقفه کار کند — «both» یعنی با هر دو نقش اعلام علاقه کرده.
+  role String? @map("role")
+
+  /// صنف — متن آزاد (مثلاً تولیدکنندهٔ لبنیات)
   guild String
-  /// نام کسب‌وکار
-  businessName String @map("business_name")
+  /// نام کسب‌وکار — اختیاری از ۱۷-۱۱ (فرم سریع فقط صنف را الزامی می‌دارد)
+  businessName String @default("") @map("business_name")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1527,4 +1554,127 @@ model ServiceSignup {
   @@unique([userId, serviceId])
   /// شمار ثبت‌نام هر سرویس — آمار پنل ادمین
   @@index([serviceId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// بازاریابی افلیت (همکاری در فروش) — دومرحله‌ای (۱۷-۱۱)
+//
+// جریان:
+//  ۱. کاربر با لینک دعوت بازاریاب وارد می‌شود (?ref=کد) → کوکی ۹۰ روزه imach_ref
+//  ۲. هنگام ثبت‌نام، referredById روی کاربر جدید ثبت می‌شود (فیلدهای User)
+//  ۳. کاربر برای بازاریاب شدن باید قرارداد را بپذیرد؛ شرایط لحظه پذیرش
+//     به‌صورت snapshot روی AffiliateProfile ثبت می‌شود (تغییرات آتی ادمین
+//     بازاریاب‌های قدیمی را تحت تاثیر قرار نمی‌دهد)
+//  ۴. با تایید هر پرداخت دعوت‌شده (خرید بسته/شارژ کیف پول — ChargeOrder/
+//     PackageOrder)، level1Percent به کیف پول بازاریاب واریز می‌شود
+//  ۵. مدیر بازاریابی علاوه بر سهم مستقیم، level2Percent اضافه از فروش
+//     مشتریانِ بازاریابان زیرمجموعه خود می‌گیرد (پیش‌فرض ۵۰٪ + ۱۰٪ = ۶۰٪)
+// ─────────────────────────────────────────────────────────────
+
+/// پروفایل بازاریاب — نقشی سیستمی و مستقل از نقش کاربر در بازار.
+/// فیلدهای درصد/سال/منابع، snapshot شرایط قرارداد در لحظه پذیرش‌اند؛
+/// تغییر AffiliateSetting این مقادیر را برای بازاریاب‌های فعلی عوض نمی‌کند.
+model AffiliateProfile {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  myuserId String @unique @map("myuser_id") @db.ObjectId
+  myuser   User   @relation("AffiliateMarketer", fields: [myuserId], references: [id], onDelete: Cascade)
+
+  /// MARKETER (سهم level1 از مشتریان معرفی‌شده) | MANAGER (+ level2 از زیرمجموعه‌ها)
+  role String @default("MARKETER")
+
+  // ── snapshot قرارداد (تغییر تنظیمات ادمین این مقادیر را عوض نمی‌کند) ──
+  /// درصد سهم بازاریاب از پرداخت مستقیم دعوت‌شده‌ها (پیش‌فرض ۵۰)
+  level1Percent Int @default(50) @map("level1_percent")
+  /// درصد اضافه مدیر از فروش مشتریان زیرمجموعه‌ها (پیش‌فرض ۱۰)
+  level2Percent Int @default(10) @map("level2_percent")
+  /// تا چند سال از پرداخت هر مشتری سهم تعلق می‌گیرد
+  commissionYears Int @default(2) @map("commission_years")
+  /// تیک ادمین: خرید بسته مشمول کمیسیون است (پیش‌فرض روشن)
+  commissionOnPackage Boolean @default(true) @map("commission_on_package")
+  /// تیک ادمین: شارژ کیف پول مشمول کمیسیون است (پیش‌فرض خاموش)
+  commissionOnWalletCharge Boolean @default(false) @map("commission_on_wallet_charge")
+  contractAcceptedAt       DateTime @map("contract_accepted_at")
+
+  /// مدیرِ این بازاریاب (سطح ۲) — کاربری که با لینک مدیر ثبت‌نام و بازاریاب شده.
+  /// ⚠️ self-relation مونگو: NoAction الزامی است؛ جداسازی در لایه سرویس.
+  parentManagerId String?           @map("parent_manager_id") @db.ObjectId
+  parentManager   AffiliateProfile? @relation("AffiliateSubMarketers", fields: [parentManagerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subMarketers    AffiliateProfile[] @relation("AffiliateSubMarketers")
+
+  /// ادمین می‌تواند بازاریاب را غیرفعال کند (حذف نرم)
+  isActive  Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  earnings AffiliateEarning[] @relation("AffiliateEarnings")
+  messages AffiliateMessage[] @relation("AffiliateMessages")
+
+  @@index([parentManagerId])
+  @@index([role, isActive])
+}
+
+/// هر ردیف = یک کمیسیون — با «تایید پرداخت مشتری» به کیف پول واریز می‌شود
+/// (paidAt=null یعنی فیش هنوز تایید نشده؛ سهم در وضعیت «در انتظار» است)
+model AffiliateEarning {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  affiliateId String @map("affiliate_id") @db.ObjectId
+  affiliate   AffiliateProfile @relation("AffiliateEarnings", fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  /// مشتری که پرداخت را انجام داده (دعوت‌شده‌ی بازاریاب)
+  payerId String @map("payer_id") @db.ObjectId
+  payer   User   @relation("AffiliatePayer", fields: [payerId], references: [id], onDelete: Cascade)
+
+  /// PACKAGE (خرید بسته/ارتقا عضویت) | WALLET (شارژ کیف پول)
+  source String
+  /// «بسته ویژه — یک‌ماهه» / «شارژ کیف پول» — ادمین می‌بیند مشتری بابت چه چیزی پرداخته
+  sourceTitle  String @map("source_title")
+  /// مبلغ پرداخت مشتری (تومان)
+  paymentAmount Int   @map("payment_amount")
+  /// درصد اعمال‌شده از snapshot قرارداد بازاریاب
+  percent       Int
+  /// کمیسیون واریزی (paymentAmount × percent)
+  amount        Int
+  /// ۱ = مشتری مستقیم بازاریاب | ۲ = مشتریِ بازاریاب زیرمجموعه (سهم مدیر)
+  tier          Int
+  /// در tier=۲: بازاریاب زیرمجموعه‌ای که مشتری را معرفی کرده
+  viaMarketerId String? @map("via_marketer_id") @db.ObjectId
+
+  /// زمان واریز به کیف پول — null یعنی فیش هنوز تایید نشده
+  paidAt    DateTime?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([affiliateId, createdAt(sort: Desc)])
+  @@index([payerId])
+}
+
+/// پیام‌رسانی ادمین ↔ بازاریاب
+model AffiliateMessage {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  affiliateId String @map("affiliate_id") @db.ObjectId
+  affiliate   AffiliateProfile @relation("AffiliateMessages", fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  /// true = از ادمین | false = از بازاریاب
+  fromAdmin Boolean @default(true) @map("from_admin")
+  body      String
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([affiliateId, createdAt(sort: Desc)])
+}
+
+/// تنظیمات سراسری افلیت — سند singleton؛ فقط ادمین ویرایش می‌کند.
+/// مقادیر این سند در زمان پذیرش قرارداد روی پروفایل هر بازاریاب کپی (snapshot)
+/// می‌شوند — تغییرات فقط قراردادهای جدید را تحت تاثیر قرار می‌دهد.
+/// (الگوی همان SiteSetting؛ داده در JSON تا افزودن فیلد جدید بدون مهاجرت باشد)
+model AffiliateSetting {
+  id String @id @default("main") @map("_id")
+
+  /// { level1Percent, level2Percent, commissionYears,
+  ///    commissionOnPackage, commissionOnWalletCharge }
+  /// (شکل دقیق در سرویس افلیت — تک منبع حقیقت تایپ‌ها)
+  data Json
+
+  /// کاربر ادمین آخرین ویرایش‌کننده — برای لاگ عملیات
+  updatedBy String? @map("updated_by") @db.ObjectId
+  updatedAt DateTime @updatedAt
 }
