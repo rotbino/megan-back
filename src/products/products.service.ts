@@ -1348,8 +1348,10 @@ export class ProductsService {
   }
 
   /** POST /products/updateMyPrice — آپدیت سریع قیمت از کارت آگهی (خواسته مالک
-   *  ۷-۱۱ دور هفدهم): مدال کوچک «قیمت + اعتبار»؛ مهر زمانی قیمت تازه می‌شود،
-   *  انقضا صفر می‌شود و سوابق در ProductEditHistory می‌ماند؛ بدون تایید مجدد. */
+   *  ۷-۱۱ دور هفدهم): مدال کوچک «قیمت + اعتبار»؛ مهر زمانی قیمت همیشه تازه
+   *  می‌شود — حتی ذخیرهٔ همان قیمت / «آپدیت با همین قیمت» (خواسته مالک ۱۹-۱۱
+   *  عصر) — انقضا صفر می‌شود و سوابق تغییر واقعی قیمت در ProductEditHistory
+   *  می‌ماند؛ بدون تایید مجدد. */
   async updateMyPrice(user: AuthUser, dto: UpdateMyPriceDto) {
     if (dto.minSalePrice !== 0 && dto.minSalePrice < 1000) {
       throw AppError.badRequest(
@@ -1367,7 +1369,11 @@ export class ProductsService {
       data: {
         minSalePrice: dto.minSalePrice,
         priceValidityDays: dto.priceValidityDays ?? p.priceValidityDays ?? 3,
-        ...(priceChanged ? { priceUpdatedAt: new Date() } : {}),
+        // مهر زمانی قیمت همیشه تازه می‌شود (خواسته مالک ۱۹-۱۱ عصر): ذخیرهٔ
+        // «همان قیمت» هم باید انقضا را صفر کند و تازگی آگهی را در امتیاز
+        // تطابق/نردبانِ مشابه‌ها برگرداند — دکمهٔ «آپدیت با همین قیمت» مدال
+        // هم همین مسیر را با قیمت دست‌نخورده صدا می‌زند
+        priceUpdatedAt: new Date(),
       },
     });
 
