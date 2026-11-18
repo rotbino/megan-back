@@ -149,6 +149,8 @@ export interface ProductDto {
   hasVideo: boolean;
   isOld: boolean;
   viewCount: number;
+  /** (۱۹-۱۱) عدم نمایش موقت به دست مالک — از نما/جستجوی عمومی کنار است */
+  ownerPaused: boolean;
   /** اعتبار قیمت به روز + مهر آخرین تغییر قیمت + پرچم انقضا (۷-۱۱ دور هفدهم) */
   priceValidityDays: number;
   priceUpdatedAt: string;
@@ -226,8 +228,10 @@ export class ProductsService {
       async () => {
         // فیلتر فروشندهٔ فعال بدون join پریسما — id غیرفعال‌ها کش ۶۰ثانیه‌ای
         // (relation-filter «user: { isActive: true }» روی Atlas ۲-۴ ثانیه بود)
+        // آگهی‌های «عدم نمایش» (۱۹-۱۱) هم مثل همیشه از فهرست عمومی کنارند
         const where: Prisma.ProductWhereInput = {
           status: 'confirmed',
+          ownerPaused: false,
           ...(await this.activeUsers.activeUserWhere()),
         };
 
@@ -439,6 +443,7 @@ export class ProductsService {
 
     const where: Prisma.ProductWhereInput = {
       status: 'confirmed',
+      ownerPaused: false,
       ...(await this.activeUsers.activeUserWhere()),
       AND: andParts,
     };
@@ -622,7 +627,7 @@ export class ProductsService {
       { ttlMs: TTL.MINUTE, tags: ['products', `product:${id}`] },
       async () => {
         const p = await this.prisma.product.findFirst({
-          where: { id, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
+          where: { id, status: 'confirmed', ownerPaused: false, ...(await this.activeUsers.activeUserWhere()) },
         });
         if (!p) {
           throw AppError.notFound('محصول یافت نشد.');
@@ -642,6 +647,7 @@ export class ProductsService {
     const pageSize = dto.pageSize ?? dto.limit ?? 6;
     const baseWhere = {
       status: 'confirmed' as const,
+      ownerPaused: false,
       id: { not: dto.excludeId },
       ...(await this.activeUsers.activeUserWhere()),
       // نردبان منقضی عملاً غیرفعال است
@@ -720,6 +726,7 @@ export class ProductsService {
     const where: Prisma.ProductWhereInput = {
       userId: seller.id,
       status: 'confirmed',
+      ownerPaused: false,
       ...(dto.excludeId != null ? { id: { not: dto.excludeId } } : {}),
       OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }],
     };
@@ -743,7 +750,7 @@ export class ProductsService {
   async getProductsByIds(ids: number[]): Promise<ProductDto[]> {
     if (ids.length === 0) return [];
     const rows = await this.prisma.product.findMany({
-      where: { id: { in: ids }, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
+      where: { id: { in: ids }, status: 'confirmed', ownerPaused: false, ...(await this.activeUsers.activeUserWhere()) },
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
     const ordered = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
@@ -758,7 +765,7 @@ export class ProductsService {
 
   /** POST /products/createProduct — خروجی ویزارد ۶ مرحله‌ای → «در انتظار تایید» */
   async createProduct(user: AuthUser, dto: CreateProductDto) {
-    // ظرفیت — بسته رایگان ۱۰ آگهی؛ بسته فعال = نامحدود (خواسته مالک)
+    // ظرفیت — بسته رایگان ۲۰ آگهی؛ بسته فعال = نامحدود (خواسته مالک ۱۹-۱۱: ۲۰)
     const me = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: { activePakageType: true, packageExpiresAt: true },
@@ -772,7 +779,7 @@ export class ProductsService {
       });
       if (active >= FREE_PRODUCT_CAPACITY) {
         throw AppError.badRequest(
-          'امکان ثبت محصول جدید را ندارید! ظرفیت بسته رایگان شما (۱۰ آگهی) تکمیل شده است — با خرید بسته اشتراک، ثبت محصول نامحدود می‌شود.',
+          'امکان ثبت محصول جدید را ندارید! ظرفیت بسته رایگان شما (۲۰ آگهی) تکمیل شده است — با خرید بسته اشتراک، ثبت محصول نامحدود می‌شود.',
           'CAPACITY_FULL',
         );
       }
@@ -859,7 +866,7 @@ export class ProductsService {
     dto: { id: number; sessionId?: string },
   ) {
     const p = await this.prisma.product.findFirst({
-      where: { id: dto.id, status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
+      where: { id: dto.id, status: 'confirmed', ownerPaused: false, ...(await this.activeUsers.activeUserWhere()) },
       select: { id: true, userId: true },
     });
     if (!p) return { counted: false as const };
@@ -1435,6 +1442,39 @@ export class ProductsService {
     return { ok: true as const };
   }
 
+  /** POST /products/setMyProductVisibility — «عدم نمایش» موقت به دست مالک
+   *  (خواسته مالک ۱۹-۱۱): آگهی از همهٔ نماها/جستجوی عمومی کنار می‌رود ولی
+   *  در پنل خودش (تب «عدم نمایش») می‌ماند و هر وقت خواست با یک کلیک
+   *  برمی‌گردد. حذف نرم نیست؛ ظرفیت بسته را همچنان می‌گیرد و نردبان
+   *  فعالش دست نمی‌خورد (مالک در پنل می‌بیند و خودش تصمیم می‌گیرد). */
+  async setMyProductVisibility(user: AuthUser, dto: { id: number; visible: boolean }) {
+    const p = await this.prisma.product.findUnique({ where: { id: dto.id } });
+    if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
+    if (p.status === 'deleted') {
+      throw AppError.badRequest('آگهی حذف‌شده قابل نمایش نیست — اول از تب «حذف شده» آن را بازیابی کنید.', 'DELETED');
+    }
+    const ownerPaused = !dto.visible;
+    if (p.ownerPaused === ownerPaused) return { id: p.id, ownerPaused };
+
+    const updated = await this.prisma.product.update({
+      where: { id: dto.id },
+      data: { ownerPaused },
+    });
+    // رخداد تغییر نمایش — بازگشت‌پذیر ولی سوابقش می‌ماند (الگوی حذف نرم)
+    await this.prisma.productEditHistory.create({
+      data: {
+        productId: dto.id,
+        userId: user.id,
+        action: 'visibility',
+        before: { ownerPaused: p.ownerPaused },
+        after: { ownerPaused },
+      },
+    });
+    this.cache.invalidateTag('products');
+    this.cache.invalidateTag(`product:${dto.id}`);
+    return { id: updated.id, ownerPaused };
+  }
+
   // ─── فروشنده عمومی ─────────────────────────────────────────────────────────
 
   /**
@@ -1549,7 +1589,7 @@ export class ProductsService {
     if (!seller || !seller.isActive) throw AppError.notFound('فروشنده یافت نشد.');
 
     const rows = await this.prisma.product.findMany({
-      where: { userId: seller.id, status: 'confirmed' },
+      where: { userId: seller.id, status: 'confirmed', ownerPaused: false },
       orderBy: NATURAL_ORDER,
       take: 48,
     });
@@ -1680,7 +1720,7 @@ export class ProductsService {
     const [cats, prods] = await Promise.all([
       this.categories.getAllCategories(), // کش‌شده
       this.prisma.product.findMany({
-        where: { status: 'confirmed', productName: { contains: q }, ...(await this.activeUsers.activeUserWhere()) },
+        where: { status: 'confirmed', ownerPaused: false, productName: { contains: q }, ...(await this.activeUsers.activeUserWhere()) },
         select: { productName: true, viewCount: true },
         orderBy: { viewCount: 'desc' },
         take: 8,
@@ -1765,6 +1805,7 @@ export class ProductsService {
       hasVideo: boolean;
       isOld: boolean;
       viewCount: number;
+      ownerPaused: boolean;
       priceValidityDays?: number | null;
       priceUpdatedAt?: Date | null;
       status: string;
@@ -1819,6 +1860,8 @@ export class ProductsService {
       hasVideo: p.hasVideo,
       isOld: p.isOld,
       viewCount: p.viewCount,
+      // عدم نمایش موقت (۱۹-۱۱) — پنل «محصولات من» تب «عدم نمایش» را با همین می‌سازد
+      ownerPaused: p.ownerPaused === true,
       // اعتبار قیمت + مهر آخرین تغییر + پرچم انقضا (۷-۱۱ دور هفدهم) — پنل
       // «محصولات من» بج «قیمت منقضی شده» را با همین می‌سازد
       priceValidityDays: p.priceValidityDays ?? 3,

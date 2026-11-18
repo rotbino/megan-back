@@ -299,6 +299,18 @@ export class DeleteMyProductDto {
   id!: number;
 }
 
+/** POST /products/setMyProductVisibility — «عدم نمایش» موقت آگهی خودم (۱۹-۱۱):
+ *  visible=false → از همهٔ نماها/جستجوی عمومی کنار می‌رود (تب «عدم نمایش»
+ *  پنل)؛ visible=true → دوباره نمایش. بازگشت‌پذیر — حذف نرم نیست. */
+export class SetMyProductVisibilityDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  @IsBoolean()
+  visible!: boolean;
+}
+
 /** POST /products/getMyProductDetail — پیش‌پر کردن فرم ویرایش آگهی خودم */
 export class GetMyProductDetailDto {
   @Type(() => Number)

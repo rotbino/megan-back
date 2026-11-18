@@ -14,11 +14,11 @@
  * ImportedUsersService؛ نام فیلدهای خام (@map) عمداً استفاده می‌شوند.
  */
 
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, Product } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { mongoDateRange } from './date-range.util';
-import type { ImportedListingsQueryDto, ProductImagesQueryDto } from './dto';
+import type { ImportedListingsQueryDto, ProductFilesQueryDto, ProductImagesQueryDto } from './dto';
 
 // ─── قرارداد API (آینهٔ فرانت: lib/importer/client.ts) ──────────────────────
 
@@ -126,6 +126,37 @@ export interface ProductImagesList {
   pageSize: number;
   pageCount: number;
   summary: ProductImagesSummary;
+}
+
+// ─── «فقط تصاویر» — شکار واترمارک (۱۹-۱۱) ──────────────────────────────────
+
+/** یک کاش تصویر — خودِ عکس + شناسهٔ فایل + علامت واترمارک؛ هیچ دادهٔ دیگری
+ *  عمداً نیست (خواستهٔ مالک: «فقط تصاویر اگهی، نه عنوان و نه هیچ چیز دیگه») */
+export interface ProductFileRow {
+  /** ObjectId ردیف File — زیر تصویر نمایش داده می‌شود */
+  id: string;
+  url: string;
+  thumbUrl: string | null;
+  hasWatermark: boolean;
+  /** id آگهیِ صاحب تصویر (رشته) — برای کار پاک‌سازی مرحلهٔ بعد */
+  relatedId: string | null;
+  size: number;
+  createdAt: string;
+}
+
+export interface ProductFilesSummary {
+  total: number;
+  watermarked: number;
+  clean: number;
+}
+
+export interface ProductFilesListResult {
+  rows: ProductFileRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  summary: ProductFilesSummary;
 }
 
 /** عکس داخل کارت گروهی — بدون تکرار محصول/مالک (روی ردیف گروه هست) */
@@ -1084,6 +1115,93 @@ export class ImportedProductsService {
       replaced: cnt('replaced'),
       buskoolRemaining: cnt('buskoolRemaining'),
     };
+  }
+
+  // ═══════════════ تصاویر تنها (شکار واترمارک — ۱۹-۱۱) ═══════════════
+
+  /** GET /importer/product-files — «فقط تصاویر» بدون هیچ چیز دیگر (خواستهٔ
+   *  مالک ۱۹-۱۱): هر کاش = خودِ تصویر + شناسهٔ فایل + سوییچ واترمارک.
+   *  عنوان آگهی/فروشنده و بقیهٔ داده عمداً نیست؛ فیلتر واترمارک برای
+   *  جداکردن لیست علامت‌خورده‌ها (پایهٔ کار پاک‌سازی مرحلهٔ بعد). */
+  async listProductFiles(query: ProductFilesQueryDto): Promise<ProductFilesListResult> {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(120, Math.max(12, query.pageSize ?? 60));
+    const where: Prisma.FileWhereInput = {
+      relatedModel: 'Product',
+      fieldKey: 'gallery',
+      relatedId: { not: null },
+      ...(query.productId != null ? { relatedId: String(query.productId) } : {}),
+      ...(query.watermark === 'yes'
+        ? { hasWatermark: true }
+        : query.watermark === 'no'
+          ? { hasWatermark: false }
+          : {}),
+    };
+    const [rows, total, summary] = await Promise.all([
+      this.prisma.file.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.file.count({ where }),
+      this.productFilesSummary(),
+    ]);
+    return {
+      rows: rows.map((f) => ({
+        id: f.id,
+        url: f.url,
+        thumbUrl: f.thumbUrl,
+        hasWatermark: f.hasWatermark === true,
+        relatedId: f.relatedId,
+        size: f.size,
+        createdAt: f.createdAt.toISOString(),
+      })),
+      total,
+      page,
+      pageSize,
+      pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      summary,
+    };
+  }
+
+  /** آمار واترمارک تصاویر گالری — کل / علامت‌خورده / پاک */
+  async productFilesSummary(): Promise<ProductFilesSummary> {
+    const agg = (await this.prisma.$runCommandRaw({
+      aggregate: 'File',
+      pipeline: [
+        { $match: { related_model: 'Product', field_key: 'gallery', related_id: { $ne: null } } },
+        {
+          $facet: {
+            total: [{ $count: 'n' }],
+            watermarked: [{ $match: { has_watermark: true } }, { $count: 'n' }],
+          },
+        },
+      ] as unknown as Prisma.InputJsonObject[],
+      cursor: {},
+    })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+    const f = agg?.cursor?.firstBatch?.[0] ?? {};
+    const cnt = (key: string): number => Number(((f[key] ?? []) as { n?: number }[])[0]?.n ?? 0);
+    const total = cnt('total');
+    const watermarked = cnt('watermarked');
+    return { total, watermarked, clean: total - watermarked };
+  }
+
+  /** POST /importer/product-files/:id/watermark — علامت/برداشتن واترمارک
+   *  (مرحلهٔ ۱ خواستهٔ مالک ۱۹-۱۱): تیک ادمین روی کاش تصویر → فیلد
+   *  has_watermark همان ردیف File ترو/فالس می‌شود؛ مبنای فیلتر مرحلهٔ
+   *  پاک‌سازی (هوش مصنوعی/دستی) بعدی. */
+  async setFileWatermark(id: string, hasWatermark: boolean): Promise<{ id: string; hasWatermark: boolean }> {
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) throw new BadRequestException('شناسهٔ فایل نامعتبر است');
+    const f = await this.prisma.file.findUnique({ where: { id } });
+    if (!f || f.relatedModel !== 'Product' || f.fieldKey !== 'gallery') {
+      throw new BadRequestException('فایل گالری آگهی با این شناسه پیدا نشد');
+    }
+    const updated = await this.prisma.file.update({
+      where: { id },
+      data: { hasWatermark },
+    });
+    return { id: updated.id, hasWatermark: updated.hasWatermark === true };
   }
 
   // ─── کارخانه‌های lookup (هر بار آبجکت تازه) ────────────────────────────────

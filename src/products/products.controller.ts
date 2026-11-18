@@ -17,6 +17,7 @@ import {
   GetSellersFeedDto,
   ReportViewDto,
   SearchSuggestionsDto,
+  SetMyProductVisibilityDto,
   UpdateMyPriceDto,
   UpdateMyProductDto,
   WebImportStartDto,
@@ -193,6 +194,19 @@ export class ProductsController {
   @ApiOperation({ summary: 'حذف نرم آگهی (تب «حذف شده») — عین باسکول' })
   async deleteMyProduct(@CurrentUser() user: AuthUser, @Body() dto: DeleteMyProductDto) {
     return ok(await this.products.deleteMyProduct(user, dto.id), 'آگهی حذف شد.');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('setMyProductVisibility')
+  @ApiOperation({
+    summary: '«عدم نمایش» موقت آگهی خودم (۱۹-۱۱) — از نما/جستجوی عمومی کنار می‌رود، در تب «عدم نمایش» پنل می‌ماند',
+  })
+  async setMyProductVisibility(@CurrentUser() user: AuthUser, @Body() dto: SetMyProductVisibilityDto) {
+    return ok(
+      await this.products.setMyProductVisibility(user, dto),
+      dto.visible ? 'آگهی دوباره نمایش داده می‌شود.' : 'آگهی از نمایش خارج شد.',
+    );
   }
 
   // بازبینی آگهی حالا فقط از مسیر ادمین انجام می‌شود:

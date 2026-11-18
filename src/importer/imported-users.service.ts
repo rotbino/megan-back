@@ -61,6 +61,9 @@ export interface ImportedUserRow {
   /** سند باسکول — null یعنی کاربر باسکولی نیست (یا رکورد قدیمی) */
   b: BUserData | null;
   productsCount: number;
+  /** (۱۹-۱۱) خودش با دکمهٔ «ایمپورت از وب» ایمپورت را انجام داده — ردّ پایهٔ
+   *  «کاربر واقعی ایمچ»: حداقل یک جلسهٔ WebImportSession کامل‌شده دارد */
+  selfImported: boolean;
 }
 
 export interface ImportedUsersSummary {
@@ -81,6 +84,8 @@ export interface ImportedUsersSummary {
   cameAfterContact: number;
   /** ایمپورت ناقص/شکست‌خورده */
   failed: number;
+  /** (۱۹-۱۱) خودشان ایمپورت از وب را انجام داده‌اند — کاربران واقعی ایمچ */
+  selfImported: number;
   /** رکوردهای قدیمی که هنوز سند b ندارند — دکمهٔ «مهاجرت ساختار b» */
   needsMigration: number;
 }
@@ -102,6 +107,8 @@ export interface ImportedUsersQuery {
   login?: 'ever' | 'never' | 'after-contact';
   contacted?: 'yes' | 'no';
   failed?: 'yes' | 'no';
+  /** (۱۹-۱۱) ایمپورت از وب با دست خود کاربر — جلسهٔ WebImportSession کامل‌شده */
+  selfImport?: 'yes' | 'no';
   staleDays?: number;
   /** بازهٔ تاریخ ثبت‌نام — ISO میلادی (خواستهٔ مالک ۱۵-۱۱) */
   createdFrom?: string;
@@ -248,6 +255,11 @@ export class ImportedUsersService {
     if (query.failed === 'yes') filter.failed_import = true;
     else if (query.failed === 'no') filter.failed_import = { $ne: true };
 
+    // (۱۹-۱۱) «ایمپورت خودی» — کاربر خودش با دکمهٔ «ایمپورت از وب» کالاهایش
+    // را آورده (جلسهٔ کامل‌شده)؛ نشانهٔ کاربر واقعی ایمچ. فیلد روی خود کاربر
+    // نیست و با $lookup در پایپ‌لاین ساخته می‌شود — اینجا فقط پرچم می‌گیریم.
+    const wantSelfImport = query.selfImport === 'yes' || query.selfImport === 'no';
+
     // «رهاشده»: هرگز وارد نشده + بیش از N روز از ایمپورتش گذشته — پایهٔ
     // پاک‌سازی سالانهٔ کاربران بی‌activity (خواستهٔ مالک)
     if (query.staleDays && query.staleDays > 0) {
@@ -280,7 +292,7 @@ export class ImportedUsersService {
     };
     const sortField = sortKey[query.sort ?? 'lastLogin'] ?? 'last_login_at';
 
-    // ── aggregation: شمارش آگهی هر کاربر + facet صفحه‌بندی ──
+    // ── aggregation: شمارش آگهی هر کاربر + جلسهٔ ایمپورت خودی + facet صفحه‌بندی ──
     // (سورت روی productsCount و فیلترهای مسیر JSON فقط در aggregation ممکن است)
     const pipeline: Record<string, unknown>[] = [
       { $match: filter },
@@ -293,6 +305,27 @@ export class ImportedUsersService {
         },
       },
       { $addFields: { productsCount: { $ifNull: [{ $arrayElemAt: ['$_pc.n', 0] }, 0] } } },
+      // جلسهٔ ایمپورت از وبِ خود کاربر (۱۹-۱۱) — status done یعنی خودش دکمه را
+      // زده و تا انتها برده؛ هر دو مود (full/prices) «انجام با دست خودش» است
+      {
+        $lookup: {
+          from: 'WebImportSession',
+          let: { uid: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$user_id', '$$uid'] }, status: 'done' } },
+            { $limit: 1 },
+            { $count: 'n' },
+          ],
+          as: '_wic',
+        },
+      },
+      {
+        $addFields: {
+          selfImported: { $gt: [{ $ifNull: [{ $arrayElemAt: ['$_wic.n', 0] }, 0] }, 0] },
+        },
+      },
+      // فیلتر «ایمپورت خودی» بعد از ساخت فیلد (نه روی سند خام)
+      ...(wantSelfImport ? [{ $match: { selfImported: query.selfImport === 'yes' } }] : []),
       {
         $facet: {
           rows: [
@@ -322,6 +355,7 @@ export class ImportedUsersService {
                 last_login_at: 1,
                 b: 1,
                 productsCount: 1,
+                selfImported: 1,
               },
             },
           ],
@@ -386,6 +420,7 @@ export class ImportedUsersService {
         lastLoginAt: lastLoginIso,
         b: asBUserData(r.b),
         productsCount: Number(r.productsCount ?? 0),
+        selfImported: r.selfImported === true,
       };
     });
 
@@ -430,6 +465,22 @@ export class ImportedUsersService {
               { $count: 'n' },
             ],
             failed: [{ $match: { failed_import: true } }, { $count: 'n' }],
+            // (۱۹-۱۱) خودشان ایمپورت از وب را کامل کرده‌اند — کاربران واقعی ایمچ
+            selfImported: [
+              {
+                $lookup: {
+                  from: 'WebImportSession',
+                  let: { uid: '$_id' },
+                  pipeline: [
+                    { $match: { $expr: { $eq: ['$user_id', '$$uid'] }, status: 'done' } },
+                    { $limit: 1 },
+                  ],
+                  as: '_wic',
+                },
+              },
+              { $match: { $expr: { $gt: [{ $size: '$_wic' }, 0] } } },
+              { $count: 'n' },
+            ],
             needsMigration: [{ $match: { b_user_name: { $ne: null }, b: null } }, { $count: 'n' }],
           },
         },
@@ -447,6 +498,7 @@ export class ImportedUsersService {
       contacted: facetCount([f], 'contacted'),
       cameAfterContact: facetCount([f], 'cameAfterContact'),
       failed: facetCount([f], 'failed'),
+      selfImported: facetCount([f], 'selfImported'),
       needsMigration: facetCount([f], 'needsMigration'),
     };
   }

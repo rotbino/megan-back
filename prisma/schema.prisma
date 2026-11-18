@@ -446,6 +446,9 @@ model File {
   thumbStorageKey String? @map("thumb_storage_key")
   /// متادیتا (ابعاد، حجم اصلی، …)
   metadata    Json?
+  /// (۱۹-۱۱ «شکار واترمارک») علامت ادمین — این تصویر واترمارک منبع دارد؛
+  /// مبنای فیلتر «تصاویر آگهی‌ها» برای کار پاک‌سازی واترمارک
+  hasWatermark Boolean @default(false) @map("has_watermark")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -516,6 +519,12 @@ model Product {
   /// به‌محض ایمپورت کاربر: false می‌شود (و قیمت/موجودی/حداقل‌سفارش تازه می‌شود).
   /// آگهی‌های ثبت‌شده توسط خود کاربر (ویزارد) هرگز true نیستند.
   ownerHidden Boolean @default(false) @map("owner_hidden")
+
+  /// (۱۹-۱۱ «عدم نمایش») پنهان‌سازی موقت به دست خود مالک — از همهٔ نماها و
+  /// جستجوی عمومی کنار می‌رود ولی در پنل خودش (تب «عدم نمایش») می‌ماند و
+  /// با یک کلیک برمی‌گردد؛ حذف نرم نیست و ظرفیت بسته را همچنان می‌گیرد.
+  /// نردبان دست نمی‌خورد (مالک در پنل می‌بیند و خودش تصمیم می‌گیرد).
+  ownerPaused  Boolean @default(false) @map("owner_paused")
 
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("ProductOwner", fields: [userId], references: [id], onDelete: Cascade)
