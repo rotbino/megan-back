@@ -1225,7 +1225,7 @@ model FeedbackUpvote {
 model ActivityLog {
   id String @id @default(auto()) @map("_id") @db.ObjectId
 
-  /// search | category_view | page_view
+  /// search | category_view | page_view | catalog_view
   type String
   /// کاربر واردشده — مهمان = null
   userId    String? @map("user_id") @db.ObjectId
@@ -1237,6 +1237,9 @@ model ActivityLog {
   /// دسته انتخاب‌شده از سایدبار (type=category_view) — نام + id در صورت resolve
   categoryId   Int?    @map("category_id")
   categoryName String? @map("category_name")
+  /// کاتالوگ دیده‌شده (type=catalog_view) — userName فروشندهٔ صاحب کاتالوگ
+  /// (خواستهٔ مالک ۱۸-۱۱: ردپای «کاتالوگ کدام کاربر را دیده» برای شخصی‌سازی)
+  catalogUserName String? @map("catalog_user_name")
   /// مسیر صفحه (type=page_view)
   path     String?
   userAgent String? @map("user_agent")
@@ -1247,6 +1250,7 @@ model ActivityLog {
   @@index([userId, createdAt(sort: Desc)])
   @@index([q])
   @@index([categoryName])
+  @@index([catalogUserName])
 }
 
 // ─── علاقه‌مندی‌ها (خواسته مالک ۳۰-۱۰) ────────────────────────────────────────

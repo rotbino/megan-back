@@ -1,8 +1,9 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 
-/** انواع فعالیت — توسعه‌پذیر: نوع جدید = مقدار جدید همین enum */
-export const ACTIVITY_TYPES = ['search', 'category_view', 'page_view'] as const;
+/** انواع فعالیت — توسعه‌پذیر: نوع جدید = مقدار جدید همین enum.
+ *  catalog_view (خواستهٔ مالک ۱۸-۱۱): ردپای «کاتالوگ کدام فروشنده را دیده» */
+export const ACTIVITY_TYPES = ['search', 'category_view', 'page_view', 'catalog_view'] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export class LogActivityDto {
@@ -20,6 +21,12 @@ export class LogActivityDto {
   @IsString()
   @Length(1, 80)
   categoryName?: string;
+
+  /** userName فروشندهٔ صاحب کاتالوگ (type=catalog_view — خواستهٔ مالک ۱۸-۱۱) */
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  catalogUserName?: string;
 
   /** مسیر صفحه (type=page_view) */
   @IsOptional()

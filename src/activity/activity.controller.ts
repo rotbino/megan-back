@@ -22,7 +22,7 @@ export class ActivityController {
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
   @Post('log')
-  @ApiOperation({ summary: 'ثبت یک رویداد فعالیت — search | category_view | page_view' })
+  @ApiOperation({ summary: 'ثبت یک رویداد فعالیت — search | category_view | page_view | catalog_view' })
   async log(
     @MaybeCurrentUser() user: AuthUser | null,
     @Body() dto: LogActivityDto,

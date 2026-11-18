@@ -16,6 +16,7 @@ import type {
   CreateProductDto,
   GetProductListDto,
   GetRelatedProductsDto,
+  GetSellersFeedDto,
   GetSellerProductsDto,
   UpdateMyPriceDto,
   UpdateMyProductDto,
@@ -24,6 +25,7 @@ import { effectivePakageType, FREE_PRODUCT_CAPACITY } from '../packages/packages
 import {
   ELEVATED_BOOST,
   LADDER_BOOST,
+  freshnessScore,
   locationScore,
   typeMatchScore,
   volumeScore,
@@ -59,6 +61,36 @@ const NATURAL_ORDER: Prisma.ProductOrderByWithRelationInput[] = [
 ];
 const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
 const DAY_MS = 86_400_000;
+
+/** دورهٔ خرید دفتر → ضریب معادل ماهانه (تقریبی) — فید فروشندگان خریدار */
+const PERIOD_PER_MONTH: Record<string, number> = {
+  daily: 30,
+  weekly: 4,
+  monthly: 1,
+  yearly: 1 / 12,
+  occasional: 1,
+};
+
+/** یک نیاز خرید نرمال‌شده — از دفتر خرید دوره‌ای یا درخواست فوریِ تأییدشده */
+interface BuyerNeed {
+  /** دستهٔ نیاز — «گروه کالا»ی خود کاربر (خواستهٔ مالک ۱۸-۱۱) */
+  leafId: number;
+  /** نوع کالا (نام Good یا name درخواست فوری) — null = هر نوعی از همین کالا */
+  type: string | null;
+  /** حجم معادل ماهانه نرمال‌شده */
+  monthlyAmount: number;
+  unit: string;
+}
+
+/** ردپای فعالیت کاربر — زیربنای فید بدون درخواست (خواستهٔ مالک ۱۸-۱۱) */
+interface ActivitySignals {
+  /** دسته‌های کالاهایی که کاربر دیده است */
+  viewedCats: Set<number>;
+  /** دسته‌های جستجو/بازدیدشدهٔ کاربر */
+  searchedCats: Set<number>;
+  /** کل سیگنال‌ها برای چیپ دسته‌ها */
+  categoryIds: number[];
+}
 
 /** انقضای قیمت (خواسته مالک ۷-۱۱ دور هفدهم): مهر آخرین تغییر قیمت + پنجرهٔ
  *  اعتبار گذشته باشد ⇒ منقضی. آگهی‌های قدیمیِ بدون مهر منقضی فرض نمی‌شوند. */
@@ -317,6 +349,266 @@ export class ProductsService {
       })
       .sort((a, b) => b.tier - a.tier || b.score - a.score || a.i - b.i)
       .map((x) => x.r);
+  }
+
+  // ─── فید «فروشندگان» خریدار (خواستهٔ مالک ۱۸-۱۱) ──────────────────────────
+
+  async getSellersFeed(user: AuthUser, dto: GetSellersFeedDto) {
+    const page = dto.page ?? 1;
+    const pageSize = dto.pageSize ?? PER_PAGE_DEFAULT;
+    const sort = dto.sort === 'related' || dto.sort === 'newest' ? dto.sort : 'match';
+
+    // ۱) نیازهای خریدار — دفتر خرید دوره‌ای + درخواست‌های فوری (هر دو confirmed)
+    const [bookRows, reqRows, me] = await Promise.all([
+      this.prisma.buyerCategory.findMany({
+        where: { userId: user.id, status: 'confirmed' },
+        select: { categoryId: true, goodId: true, volumeMin: true, period: true, unit: true },
+      }),
+      this.prisma.buyRequest.findMany({
+        where: { userId: user.id, status: 'confirmed' },
+        select: { categoryId: true, name: true, requirementAmount: true, unit: true },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { provinceId: true, cityId: true },
+      }),
+    ]);
+
+    // نام انواع کالا (Good) برای ردیف‌های دفتر
+    const goodIds = [...new Set(bookRows.map((b) => b.goodId).filter((g): g is number => g != null))];
+    const goods = goodIds.length
+      ? await this.prisma.good.findMany({ where: { id: { in: goodIds } }, select: { id: true, name: true } })
+      : [];
+    const goodName = new Map(goods.map((g) => [g.id, g.name]));
+
+    const leafIds = [...new Set([...bookRows.map((b) => b.categoryId), ...reqRows.map((r) => r.categoryId)])];
+
+    // نیاز نرمال‌شده — حجم دوره‌ای به معادل ماهانه؛ فوری یکباره همان مقدار
+    const needs: BuyerNeed[] = [];
+    for (const b of bookRows) {
+      needs.push({
+        leafId: b.categoryId,
+        type: b.goodId != null ? (goodName.get(b.goodId) ?? null) : null,
+        monthlyAmount: Math.max(1, Math.round(b.volumeMin * (PERIOD_PER_MONTH[b.period] ?? 1))),
+        unit: b.unit,
+      });
+    }
+    for (const r of reqRows) {
+      needs.push({
+        leafId: r.categoryId,
+        type: r.name?.trim() || null,
+        monthlyAmount: Math.max(1, r.requirementAmount),
+        unit: r.unit,
+      });
+    }
+    const hasRequests = needs.length > 0;
+
+    // ۲) فیلتر پایه — confirmed + فروشندهٔ فعال + نردبانِ زنده
+    const andParts: Prisma.ProductWhereInput[] = [
+      { OR: [{ isLadder: false }, { ladderExpiresAt: { gt: new Date() } }] },
+    ];
+
+    /** مجموعهٔ دسته‌های مجاز — «فقط گروه کالاهایی که کاربر در لیست خرید خودش دارد»
+     *  (خواستهٔ مالک ۱۸-۱۱): خودِ دستهٔ هر نیاز — آگهی روی خودش (subCategoryId)
+     *  یا روی فرزندانش (categoryId)؛ گروه‌های خواهر (گردو در برابر پسته) و
+     *  شاخهٔ والد جارو نمی‌شوند */
+    if (hasRequests) {
+      const leafIdSet = [...new Set(needs.map((n) => n.leafId))];
+      andParts.push({
+        OR: [
+          { subCategoryId: { in: leafIdSet } },
+          { categoryId: { in: leafIdSet } },
+        ],
+      });
+    }
+
+    // فیلتر دستهٔ انتخابی (چیپ) — تقاطع subtree با دسته‌های نیاز
+    if (dto.categorySlug) {
+      const ids = await this.categories.getSubtreeIds(dto.categorySlug);
+      const universe = new Set<number>(needs.map((n) => n.leafId));
+      const finalIds = ids.length === 0 ? [] : hasRequests ? ids.filter((i) => universe.has(i)) : ids;
+      if (finalIds.length === 0) {
+        return { items: [], total: 0, page, pageCount: 0, hasRequests, categories: [] };
+      }
+      andParts.push({
+        OR: [{ subCategoryId: { in: finalIds } }, { categoryId: { in: finalIds } }],
+      });
+    }
+
+    const where: Prisma.ProductWhereInput = {
+      status: 'confirmed',
+      ...(await this.activeUsers.activeUserWhere()),
+      AND: andParts,
+    };
+
+    const s = dto.s?.trim();
+    if (s) where.productName = { contains: s };
+    if (dto.provinceId) where.provinceId = dto.provinceId;
+    if (dto.cityId) where.cityId = dto.cityId;
+
+    const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+      sort === 'newest' ? NEWEST_ORDER : NATURAL_ORDER;
+
+    // ۳) رتبه‌بندی تطابق در حافظه (سقف اسکن مثل rankByNeed)
+    let rows;
+    let total: number;
+    /** سیگنال‌های فعالیت — فقط در فالبکِ بدون درخواست لازم است؛ یک‌بار برای رتبه و چیپ */
+    const signals = hasRequests ? null : await this.activitySignals(user.id);
+    if (sort === 'match') {
+      const [cnt, scanned] = await Promise.all([
+        this.prisma.product.count({ where }),
+        this.prisma.product.findMany({ where, orderBy, take: MATCH_SCAN_CAP }),
+      ]);
+      total = cnt;
+      rows = hasRequests
+        ? this.rankForBuyerNeeds(scanned, needs, me?.provinceId ?? undefined, me?.cityId ?? undefined).slice(
+            (page - 1) * pageSize,
+            page * pageSize,
+          )
+        : this.rankByActivity(scanned, signals, me?.provinceId ?? undefined, me?.cityId ?? undefined).slice(
+            (page - 1) * pageSize,
+            page * pageSize,
+          );
+    } else {
+      [total, rows] = await Promise.all([
+        this.prisma.product.count({ where }),
+        this.prisma.product.findMany({
+          where,
+          orderBy,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
+    }
+
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const [gallery, names] = await Promise.all([
+      this.uploads.galleryMap(rows.map((r) => r.id)),
+      this.hydrateNames(rows),
+    ]);
+    return {
+      items: rows.map((r) => this.toDto(r, gallery.get(r.id) ?? [], names)),
+      total,
+      page,
+      pageCount,
+      hasRequests,
+      categories: await this.feedCategories(hasRequests ? leafIds : (signals?.categoryIds ?? [])),
+    };
+  }
+
+  /** رتبه‌بندی چندنیازی — بهترین نیازِ هر آگهی ملاک است؛ تازگی ثبت/قیمت و
+   *  نردبان/ویژه روی امتیاز می‌نشیند. هیچ آگهی‌ای حذف نمی‌شود (فقط اولویت). */
+  private rankForBuyerNeeds(
+    rows: Product[],
+    needs: BuyerNeed[],
+    provinceId?: number,
+    cityId?: number,
+  ): Product[] {
+    return rows
+      .map((r, i) => {
+        let best = 0;
+        for (const n of needs) {
+          // هم‌گروه — آگهی روی خودِ دستهٔ نیاز یا روی فرزندانش (خواستهٔ مالک
+          // ۱۸-۱۱: «فقط گروه کالاهایی که کاربر در لیست خرید خودش دارد»)
+          const sameGroup = r.subCategoryId === n.leafId || r.categoryId === n.leafId;
+          if (!sameGroup) continue;
+          // نوع کالا — بدون نوع = «هر نوعی از همین کالا» (کامل)
+          const type = n.type ? typeMatchScore(n.type, r.productName) : 20;
+          const vol = volumeScore(n.monthlyAmount, n.unit, r.stock, Math.max(1, r.minSaleAmount), r.unit);
+          const loc = locationScore(provinceId, cityId, r.provinceId, r.cityId);
+          best = Math.max(best, 40 + type + vol + loc);
+        }
+        let score = best;
+        score += freshnessScore(r.createdAt, r.priceUpdatedAt);
+        if (r.isLadder) score += LADDER_BOOST;
+        if (r.isElevated) score += ELEVATED_BOOST;
+        return { r, i, score };
+      })
+      .sort((a, b) => b.score - a.score || a.i - b.i)
+      .map((x) => x.r);
+  }
+
+  /** سیگنال‌های فعالیت کاربر برای فید بدون درخواست — ردپای جستجو/دسته/کالای دیده‌شده */
+  private async activitySignals(userId: string): Promise<ActivitySignals> {
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    const [views, searches, catViews] = await Promise.all([
+      // کالاهایی که دیده — زیردستهٔ آن‌ها سیگنال است
+      this.prisma.productView.findMany({
+        where: { viewerId: userId, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        take: 150,
+        select: { productId: true },
+      }),
+      this.prisma.activityLog.findMany({
+        where: { userId, type: 'search', q: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 40,
+        select: { q: true },
+      }),
+      this.prisma.activityLog.findMany({
+        where: { userId, type: 'category_view', categoryId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 40,
+        select: { categoryId: true },
+      }),
+    ]);
+    const viewedProductIds = [...new Set(views.map((v) => v.productId))];
+    const viewedProducts = viewedProductIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: viewedProductIds } },
+          select: { subCategoryId: true, categoryId: true },
+        })
+      : [];
+    const viewedCats = new Set<number>();
+    for (const p of viewedProducts) {
+      viewedCats.add(p.subCategoryId);
+      viewedCats.add(p.categoryId);
+    }
+    const searchedCats = new Set<number>();
+    for (const log of searches) {
+      const ids = await this.categories.searchCategoryIds(log.q ?? '').catch(() => [] as number[]);
+      ids.forEach((id) => searchedCats.add(id));
+    }
+    for (const c of catViews) if (c.categoryId != null) searchedCats.add(c.categoryId);
+    return { viewedCats, searchedCats, categoryIds: [...viewedCats, ...searchedCats] };
+  }
+
+  /** رتبه‌بندی فالبک — ردپای فعالیت + مکان کاربر (شهر/استان خودش) + تازگی؛
+   *  لیست هرگز خالی نمی‌ماند (خواستهٔ مالک ۱۸-۱۱) */
+  private rankByActivity(
+    rows: Product[],
+    signals: ActivitySignals | null,
+    provinceId?: number,
+    cityId?: number,
+  ): Product[] {
+    return rows
+      .map((r, i) => {
+        let score = 0;
+        if (signals) {
+          if (signals.viewedCats.has(r.subCategoryId) || signals.viewedCats.has(r.categoryId)) score += 30;
+          if (signals.searchedCats.has(r.subCategoryId) || signals.searchedCats.has(r.categoryId)) score += 20;
+        }
+        score += locationScore(provinceId, cityId, r.provinceId, r.cityId);
+        score += freshnessScore(r.createdAt, r.priceUpdatedAt);
+        if (r.isLadder) score += LADDER_BOOST;
+        if (r.isElevated) score += ELEVATED_BOOST;
+        return { r, i, score };
+      })
+      .sort((a, b) => b.score - a.score || a.i - b.i)
+      .map((x) => x.r);
+  }
+
+  /** چیپ‌های دستهٔ فید — دسته‌های برگِ نیازها (یا ردپای فعالیت در فالبک) */
+  private async feedCategories(ids: number[]): Promise<{ slug: string; name: string }[]> {
+    const uniq = [...new Set(ids)].slice(0, 12);
+    if (uniq.length === 0) return [];
+    const rows = await this.prisma.category.findMany({
+      where: { id: { in: uniq } },
+      select: { slug: true, categoryName: true },
+    });
+    return rows.map((r) => ({ slug: r.slug, name: r.categoryName }));
   }
 
   // ─── جزئیات ────────────────────────────────────────────────────────────────
