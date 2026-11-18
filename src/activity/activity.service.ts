@@ -32,7 +32,7 @@ export class ActivityService {
 
   /** POST /activity/log — ثبت یک رویداد (append-only، best-effort UX) */
   async log(
-    dto: { type: ActivityType; q?: string; categoryName?: string; path?: string; sessionId?: string },
+    dto: { type: ActivityType; q?: string; categoryName?: string; catalogUserName?: string; path?: string; sessionId?: string },
     user: { id: string } | null,
     userAgent?: string,
   ) {
@@ -56,6 +56,7 @@ export class ActivityService {
         q,
         categoryId: categoryId ?? null,
         categoryName,
+        catalogUserName: dto.type === 'catalog_view' ? (dto.catalogUserName?.trim().slice(0, 40) || null) : null,
         path: dto.path?.slice(0, 200) || null,
         userAgent: userAgent?.slice(0, 200) || null,
       },
@@ -75,7 +76,7 @@ export class ActivityService {
       ...(dto.userId ? { userId: dto.userId } : {}),
       ...(q
         ? {
-            OR: [{ q: { contains: q } }, { categoryName: { contains: q } }, { path: { contains: q } }],
+            OR: [{ q: { contains: q } }, { categoryName: { contains: q } }, { path: { contains: q } }, { catalogUserName: { contains: q } }],
           }
         : {}),
     };
@@ -109,6 +110,7 @@ export class ActivityService {
           q: r.q,
           categoryId: r.categoryId,
           categoryName: r.categoryName,
+          catalogUserName: r.catalogUserName,
           path: r.path,
           isGuest: r.userId == null,
           sessionId: r.sessionId,

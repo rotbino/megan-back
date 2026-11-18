@@ -14,6 +14,7 @@ import {
   GetSellerDto,
   GetSellerPhoneDto,
   GetSellerProductsDto,
+  GetSellersFeedDto,
   ReportViewDto,
   SearchSuggestionsDto,
   UpdateMyPriceDto,
@@ -37,6 +38,17 @@ export class ProductsController {
   })
   async getProductList(@Body() dto: GetProductListDto) {
     return ok(await this.products.getProductList(dto));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('getSellersFeed')
+  @ApiOperation({
+    summary:
+      'فید «فروشندگان» خریدار (۱۸-۱۱) — آگهی‌های محدود به گروه کالاهای درخواست‌های خرید خودش؛ سورت پیش‌فرض تطابق (حجم+مکان+تازگی)؛ بدون درخواست → فالبک ردپای فعالیت + مکان',
+  })
+  async getSellersFeed(@CurrentUser() user: AuthUser, @Body() dto: GetSellersFeedDto) {
+    return ok(await this.products.getSellersFeed(user, dto));
   }
 
   @Post('getProductById')

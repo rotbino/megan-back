@@ -95,3 +95,24 @@ export function locationScore(
  */
 export const LADDER_BOOST = 25;
 export const ELEVATED_BOOST = 12;
+
+/** بیشینهٔ امتیاز تازگی — فید فروشندگان خریدار (خواستهٔ مالک ۱۸-۱۱):
+ *  «آگهی‌های با تاریخ آپدیت و ثبت جدیدتر» در فرمول تطابق امتیاز می‌گیرند */
+export const FRESHNESS_MAX_SCORE = 10;
+
+/**
+ * امتیاز تازگی (۰ تا ۱۰) — جدیدترینِ مهر ثبت/آپدیت قیمت ملاک است:
+ * هفتهٔ جاری ۱۰، ماه اخیر ۷، سه‌ماهه ۴، قدیمی‌تر ۱؛ بی‌مهر = ۰.
+ * پله‌ای است تا چند دقیقه اختلاف مهر ترتیب را نجنبد.
+ */
+export function freshnessScore(createdAt: Date | null, priceUpdatedAt: Date | null): number {
+  const created = createdAt ? new Date(createdAt).getTime() : 0;
+  const priced = priceUpdatedAt ? new Date(priceUpdatedAt).getTime() : 0;
+  const newest = Math.max(created, priced);
+  if (!newest) return 0;
+  const days = (Date.now() - newest) / 86_400_000;
+  if (days <= 7) return FRESHNESS_MAX_SCORE;
+  if (days <= 30) return 7;
+  if (days <= 90) return 4;
+  return 1;
+}

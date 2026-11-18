@@ -93,6 +93,52 @@ export class GetProductByIdDto {
   id!: number;
 }
 
+/**
+ * ورودی getSellersFeed — فید شخصی‌شدهٔ «فروشندگان» خریدار (خواستهٔ مالک
+ * ۱۸-۱۱): آگهی‌های فروشِ محدود به گروه کالاهای درخواست‌های خرید خودش
+ * (دوره‌ای + فوری)، سورت/فیلتر پیش‌فرض تطابق؛ سورت‌ها و فیلترهای دلخواه
+ * هم آزاد است. ورود لازم است (دادهٔ شخصی).
+ */
+export class GetSellersFeedDto {
+  /** تطابق (پیش‌فرض) | مرتبط‌ترین | جدیدترین */
+  @IsOptional()
+  @IsString()
+  sort?: 'match' | 'related' | 'newest';
+
+  /** فیلتر دسته — فقط داخل مجموعهٔ دسته‌های درخواست‌های خود کاربر معنا دارد */
+  @IsOptional()
+  @IsString()
+  categorySlug?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  provinceId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  cityId?: number;
+
+  /** جستجوی متنی روی نام محصول */
+  @IsOptional()
+  @IsString()
+  s?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(48)
+  pageSize?: number;
+}
+
 /** ورودی reportView — ping آمار بازدید مرورگر (مهمان با sessionId) */
 export class ReportViewDto {
   @Type(() => Number)
