@@ -225,7 +225,9 @@ export class BuskoolWatermarkService {
     return out;
   }
 
-  /** اعمال — تعویض درجا با کلید نسخه‌دار تازه (همان مسیر تعویض دستی). */
+  /** اعمال — تعویض درجا با کلید نسخه‌دار تازه (همان مسیر تعویض دستی).
+   * file به شکل ردیف فرانت (ProductFileRow) برمی‌گردد تا UI همان لحظه
+   * تصویر تازه (اصلی + تامبنیل) را در جای خودش نشان دهد (خواستهٔ مالک ۱۹-۱۱). */
   async applyOne(fileId: string, replacedBy: string) {
     const r = await this.processOne(fileId);
     if (r.status !== 'removed' || !r.afterJpeg) {
@@ -245,7 +247,22 @@ export class BuskoolWatermarkService {
       replacedBy,
     );
     const { afterJpeg: _d, ...out } = r;
-    return { ...out, file: updated };
+    // ردیف به شکل ProductFileRow فرانت — URLهای نسخه‌دار تازه (اصلی+تامبنیل)
+    // همان لحظه کاش را در UI عوض می‌کنند؛ مهر اصلاح = همان nowِ تعویض
+    return {
+      ...out,
+      file: {
+        id: file.id,
+        url: updated.url,
+        thumbUrl: updated.thumbUrl,
+        hasWatermark: false,
+        reviewedAt: file.watermarkReviewedAt?.toISOString() ?? null,
+        fixedAt: updated.replacedAt,
+        relatedId: file.relatedId,
+        size: updated.size,
+        createdAt: file.createdAt?.toISOString() ?? '',
+      },
+    };
   }
 
   /** صف = گالری آگهی‌های علامت‌خوردهٔ قابل‌تعویض. */
