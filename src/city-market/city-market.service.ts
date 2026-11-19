@@ -75,6 +75,8 @@ export class CityMarketService {
       async () => {
         const where: Prisma.ProductWhereInput = {
           status: 'confirmed',
+          // «عدم نمایش» (۱۹-۱۱) — پنهان‌شدهٔ موقت مالک از بازار شهری هم کنار است
+          ownerPaused: false,
           ...(await this.activeUsers.activeUserWhere()),
           // عضویت چندشهری — عین تک‌شهری روی ایندکس city_id (O(1) هر ردیف)
           cityId: { in: [...new Set(dto.cityIds)] },
@@ -253,6 +255,8 @@ export class CityMarketService {
       hasVideo: p.hasVideo,
       isOld: p.isOld,
       viewCount: p.viewCount,
+      // کوئری بازار شهنی از قبل ownerPaused:false فیلتر می‌کند — اینجا همیشه false
+      ownerPaused: false,
       priceValidityDays: p.priceValidityDays ?? 3,
       priceUpdatedAt: fmtDate(p.priceUpdatedAt ?? null),
       priceExpired: isPriceExpired({

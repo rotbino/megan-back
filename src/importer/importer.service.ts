@@ -2183,7 +2183,7 @@ function normalizeFa(text: string | null | undefined): string {
  * محصول خودِ کاربر نیست → در businessDesc نمی‌نشیند تا صفحهٔ آیمچ متن
  * پارامتریک خودش (lib/seller-text فرانت) را نشان دهد (خواستهٔ مالک).
  */
-function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
+export function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
   if (!desc) return false;
   const t = normalizeFa(desc);
   const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');
@@ -2200,7 +2200,7 @@ function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
  * «باسکول» و نام قدیمی‌اش «اینکوباک». ک/ك عربی هم پوشیده داده می‌شود.
  * فقط همین دو واژه — بقیهٔ متن دست نمی‌خورد.
  */
-function aimchifyBrandMentions(text: string | null | undefined): string {
+export function aimchifyBrandMentions(text: string | null | undefined): string {
   return String(text ?? '')
     .replace(/باس[كک]ول/g, 'آیمچ')
     .replace(/این[كک]وبا[كک]/g, 'آیمچ');
@@ -2219,7 +2219,7 @@ function guarded<T>(p: Promise<T>): Promise<T> {
 /** استخر کارگر موازی — N کارگر وظیفه‌ها را از یک صف مشترک برمی‌دارند.
  *  خطای هر وظیفه مستقل است (درون worker مدیریت می‌شود)؛ فقط JOB_STOPPED
  *  کل استخر را می‌اندازد. */
-async function runPool<T>(
+export async function runPool<T>(
   tasks: T[],
   concurrency: number,
   stop: () => boolean,
@@ -2245,7 +2245,7 @@ async function runPool<T>(
 }
 
 /** هم‌زمانی دانلود/پردازش تصاویر (sharp + آپلود ابر) — پیش‌فرض ۴ */
-function imagePoolSize(): number {
+export function imagePoolSize(): number {
   const raw = Number(process.env.IMPORTER_IMAGE_CONCURRENCY ?? 4);
   const n = Number.isFinite(raw) ? Math.floor(raw) : 4;
   return Math.min(Math.max(n, 1), 8);
@@ -2262,7 +2262,7 @@ function newObjectId(): string {
  *  خطای شبکه‌ای (DNS/سوکت/تایم‌اوت) عکس را «ردشده» نمی‌کند؛ تا برگشتن شبکه
  *  همان عکس نگه داشته می‌شود و بعد ادامه می‌یابد. فقط ردّهای محتوایی
  *  (فایل خراب/mime غیرواقعی/بیش از ۸MB) پس از دو تلاش عکس را می‌اندازند. */
-async function fetchImage(
+export async function fetchImage(
   rawUrl: string,
   stop?: () => boolean,
 ): Promise<{ buf: Buffer; mime: string } | null> {
@@ -2335,7 +2335,7 @@ async function fetchImageOnce(rawUrl: string): Promise<{ buf: Buffer; mime: stri
  * (فریم اول → PNG)؛ jpeg/png/webp عیناً پاس می‌شوند تا «همان» پردازش کاربر
  * (پاین‌لاین ۱۲۰۰px/سقف ۵۰۰KB + واترمارک آگهی) رویشان اجرا شود.
  */
-async function normalizeImage(buf: Buffer, mime: string): Promise<{ buf: Buffer; mime: string } | null> {
+export async function normalizeImage(buf: Buffer, mime: string): Promise<{ buf: Buffer; mime: string } | null> {
   if (mime !== 'image/gif') return { buf, mime };
   try {
     return { buf: await sharp(buf).png().toBuffer(), mime: 'image/png' };

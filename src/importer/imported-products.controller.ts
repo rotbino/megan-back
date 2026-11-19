@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -6,7 +6,7 @@ import { ok } from '../common/api-response';
 import { AdminJwtAuthGuard } from '../admin/admin-auth/admin-jwt.guard';
 import { UploadsService } from '../uploads/uploads.service';
 import { ImportedProductsService } from './imported-products.service';
-import { ImportedListingsQueryDto, ProductImagesQueryDto } from './dto';
+import { ImportedListingsQueryDto, ProductFilesQueryDto, ProductImagesQueryDto, SetFileWatermarkDto } from './dto';
 
 /**
  * مدیریت آگهی‌های ایمپورت‌شده — پشت دو صفحهٔ جدید بخش «دیتا ایمپورت»
@@ -69,6 +69,31 @@ export class ImportedProductsController {
     return ok(
       await this.uploads.replaceInPlace(id, file, adminReq.adminUsername ?? 'admin'),
       'تصویر جایگزین شد؛ کلید نسخه‌دار تازه ساخته شد و همهٔ کش‌ها فوری می‌شکنند.',
+    );
+  }
+
+  // ─── «فقط تصاویر» — شکار واترمارک (خواستهٔ مالک ۱۹-۱۱) ─────────────────
+
+  @Get('product-files')
+  @ApiOperation({
+    summary: 'کاش‌های تنها — فقط خود تصویر + شناسهٔ فایل + علامت واترمارک (نه عنوان، نه هیچ دادهٔ دیگر) + فیلتر واترمارک',
+  })
+  async listFiles(@Query() dto: ProductFilesQueryDto) {
+    return ok(await this.listings.listProductFiles(dto));
+  }
+
+  @Post('product-files/:id/watermark')
+  @ApiOperation({
+    summary: 'دو تیک «دارد/ندارد» (خواستهٔ مالک ۱۹-۱۱ شب): true = صف حذف | false = بررسی‌شده بدون واترمارک | null = پس‌گرفتن بررسی',
+  })
+  async setWatermark(@Param('id') id: string, @Body() dto: SetFileWatermarkDto) {
+    return ok(
+      await this.listings.setFileWatermark(id, dto.hasWatermark),
+      dto.hasWatermark === true
+        ? 'ثبت شد: واترمارک دارد — در صف حذف قرار گرفت.'
+        : dto.hasWatermark === false
+          ? 'ثبت شد: بدون واترمارک — از لیست باقی‌مانده خارج شد.'
+          : 'بررسی پس گرفته شد — فایل به لیست باقی‌مانده برگشت.',
     );
   }
 }

@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -126,6 +127,11 @@ export class ImportedUsersQueryDto {
   @IsOptional()
   @IsIn(['yes', 'no'])
   failed?: 'yes' | 'no';
+
+  /** (۱۹-۱۱) ایمپورت از وب با دست خود کاربر — جلسهٔ WebImportSession کامل‌شده */
+  @IsOptional()
+  @IsIn(['yes', 'no'])
+  selfImport?: 'yes' | 'no';
 
   /** «رهاشده»: هرگز وارد نشده + بیش از N روز از ایمپورت گذشته */
   @IsOptional()
@@ -359,4 +365,56 @@ export class ProductImagesQueryDto {
   @Min(4)
   @Max(100)
   pageSize?: number;
+}
+
+// ─── «فقط تصاویر» — شکار واترمارک (خواستهٔ مالک ۱۹-۱۱) ─────────────────────
+
+/** GET /importer/product-files — کاش‌های تنها: خود تصویر + شناسهٔ فایل + سوییچ
+ *  واترمارک؛ نه عنوان آگهی نه هیچ دادهٔ دیگر */
+export class ProductFilesQueryDto {
+  /** فیلتر واترمارک — مبنای جداکردن لیست علامت‌خورده‌ها برای پاک‌سازی؛
+   *  fixed = اصلاح‌شده‌ها (تب «اصلاح واترمارک» — خواستهٔ مالک ۱۹-۱۱):
+   *  تصاویری که واترمارکشان حذف شده و دیگر در تب «همه» نمی‌آیند */
+  @IsOptional()
+  @IsIn(['yes', 'no', 'fixed'])
+  watermark?: 'yes' | 'no' | 'fixed';
+
+  /** فقط تصاویر این آگهی (شناسهٔ عددی) — لینک عمیق «N عکس» از صفحهٔ آگهی‌ها */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  productId?: number;
+
+  /** سورت (خواستهٔ مالک ۱۹-۱۱ عصر): تاریخ‌های معنادارِ خودِ آگهی (باسکول) —
+   *  تاریخ‌های خودِ فایل همگی «زمان ایمپورت»‌اند و برای شکار واترمارک
+   *  بی‌معنا هستند. پیش‌فرض = زمان ثبت (مالک: «پیشفرض رو بزار بر حسب زمان
+   *  ثبت»)؛ productUpdated = آخرین ویرایش آگهی — برای بررسی اینکه آیا
+   *  آگهی‌های ویرایش‌شده هم واترمارک گرفته‌اند یا فقط تازه‌ثبت‌شده‌ها */
+  @IsOptional()
+  @IsIn(['productCreated', 'productUpdated'])
+  sort?: 'productCreated' | 'productUpdated';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  page?: number;
+
+  /** پیش‌فرض ۶۰ — شبکهٔ کاشی؛ ۱۰ = پنجرهٔ اسکن دو ردیفهٔ ۵تایی (۱۹-۱۱ عصر) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(120)
+  pageSize?: number;
+}
+
+/** POST /importer/product-files/:id/watermark — دو تیک «دارد/ندارد»
+ *  (خواستهٔ مالک ۱۹-۱۱ شب): true = واترمارک دارد | false = بررسی‌شده بدون
+ *  واترمارک | null = پس‌گرفتن بررسی (بازگشت به لیست باقی‌مانده) */
+export class SetFileWatermarkDto {
+  @IsIn([true, false, null])
+  hasWatermark!: boolean | null;
 }

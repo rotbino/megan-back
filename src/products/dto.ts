@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** ویژگی مرحله «جزئیات نهایی» ویزارد */
@@ -203,13 +203,13 @@ export class CreateProductDto {
   @Min(0)
   minSalePrice!: number;
 
-  /** اعتبار قیمت به روز — ۱ تا ۵ روز + گزینهٔ «سایر» با عدد بزرگ‌تر؛
-   *  پیش‌فرض ۳ روز (خواسته مالک ۷-۱۱ دور هفدهم) */
+  /** اعتبار قیمت به روز — ۱ تا ۵ روز + گزینهٔ «سایر»؛ پیش‌فرض ۳ روز
+   *  (خواسته مالک ۷-۱۱ دور هفدهم)؛ سقف ۳۰ روز = حداکثر یک ماه (خواسته مالک ۱۹-۱۱ عصر) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(30, { message: 'اعتبار قیمت حداکثر ۳۰ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 
   @IsString()
@@ -299,6 +299,18 @@ export class DeleteMyProductDto {
   id!: number;
 }
 
+/** POST /products/setMyProductVisibility — «عدم نمایش» موقت آگهی خودم (۱۹-۱۱):
+ *  visible=false → از همهٔ نماها/جستجوی عمومی کنار می‌رود (تب «عدم نمایش»
+ *  پنل)؛ visible=true → دوباره نمایش. بازگشت‌پذیر — حذف نرم نیست. */
+export class SetMyProductVisibilityDto {
+  @Type(() => Number)
+  @IsInt()
+  id!: number;
+
+  @IsBoolean()
+  visible!: boolean;
+}
+
 /** POST /products/getMyProductDetail — پیش‌پر کردن فرم ویرایش آگهی خودم */
 export class GetMyProductDetailDto {
   @Type(() => Number)
@@ -351,17 +363,18 @@ export class BulkPriceItemDto {
   minSaleAmount!: number;
 
   /** اعتبار قیمت — اختیاری؛ فقط وقتی فرستاده شود تغییر می‌کند (۷-۱۱ دور هفدهم:
-   *  «اگر در ویرایش کالا وارد نکرده بود از همین‌جا بگیرد») */
+   *  «اگر در ویرایش کالا وارد نکرده بود از همین‌جا بگیرد»)؛ سقف ۳۰ روز (۱۹-۱۱ عصر) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(30, { message: 'اعتبار قیمت حداکثر ۳۰ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 }
 
 /** POST /products/updateMyPrice — آپدیت سریع قیمت از کارت آگهی (۷-۱۱ دور هفدهم):
- *  مدال کوچک قیمت + اعتبار؛ مهر زمانی قیمت تازه می‌شود و انقضا صفر می‌شود */
+ *  مدال کوچک قیمت + اعتبار؛ مهر زمانی قیمت همیشه تازه می‌شود — حتی «آپدیت با
+ *  همین قیمت» بدون تغییر قیمت (خواسته مالک ۱۹-۱۱ عصر) — و انقضا صفر می‌شود */
 export class UpdateMyPriceDto {
   @Type(() => Number)
   @IsInt()
@@ -377,7 +390,7 @@ export class UpdateMyPriceDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(365)
+  @Max(30, { message: 'اعتبار قیمت حداکثر ۳۰ روز می‌تواند باشد.' })
   priceValidityDays?: number;
 }
 
@@ -411,4 +424,12 @@ export class ReviewProductDto {
   @IsString({ each: true })
   @MaxLength(200, { each: true })
   rejectionReasons?: string[];
+}
+
+/** POST /products/webImportStart (۱۸-۱۱) — شروع «ثبت گروهی محصول» از وب */
+export class WebImportStartDto {
+  /** full = ایمپورت کامل (کالای جدید + به‌روزرسانی + پروفایل)
+   *  prices = فقط به‌روزرسانی قیمت/موجودی/حداقل سفارش */
+  @IsIn(['full', 'prices'])
+  mode!: 'full' | 'prices';
 }

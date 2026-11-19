@@ -17,20 +17,26 @@ import {
   GetSellersFeedDto,
   ReportViewDto,
   SearchSuggestionsDto,
+  SetMyProductVisibilityDto,
   UpdateMyPriceDto,
   UpdateMyProductDto,
+  WebImportStartDto,
 } from './dto';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../common/guards';
 import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
+import { WebImportService } from './web-import.service';
 
 @ApiTags('products')
 /** حد نرخ ریزتر از سراسری — لیست/جزئیات + ثبت آگهی */
 @Throttle({ default: { limit: 90, ttl: 60_000 } })
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly products: ProductsService) {}
+  constructor(
+    private readonly products: ProductsService,
+    private readonly webImport: WebImportService,
+  ) {}
 
   @Post('getProductList')
   @ApiOperation({
@@ -95,6 +101,42 @@ export class ProductsController {
     return ok(await this.products.getMyProducts(user.id));
   }
 
+  // ─── «ثبت گروهی محصول» — ایمپورت از وب (۱۸-۱۱) ─────────────────────
+  // فقط برای اعضای سابقِ منبع (شماره‌شان از قبل در سیستم است)؛ دکمه برای
+  // بقیه اصلاً رندر نمی‌شود. هیچ نامی از منبع در پاسخ‌ها نیست — «از وب».
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('webImportStatus')
+  @ApiOperation({ summary: 'آیا کاربر واجد شرایط «ثبت گروهی محصول» است؟' })
+  async webImportStatus(@CurrentUser() user: AuthUser) {
+    return ok(await this.webImport.status(user));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('webImportStart')
+  @ApiOperation({
+    summary:
+      'شروع ایمپورت از وب — full (کالای جدید + به‌روزرسانی + پروفایل) یا prices (فقط به‌روزرسانی قیمت/موجودی/حداقل سفارش)',
+  })
+  async webImportStart(@CurrentUser() user: AuthUser, @Body() dto: WebImportStartDto) {
+    return ok(await this.webImport.start(user, dto.mode));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post('webImportStep')
+  @ApiOperation({
+    summary: 'پردازش تکهٔ بعدی ایمپورت از وب — درصد/فاز/شمارنده‌ها/گزارش زنده',
+  })
+  async webImportStep(@CurrentUser() user: AuthUser) {
+    return ok(await this.webImport.step(user));
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('getMyProductDetail')
@@ -152,6 +194,19 @@ export class ProductsController {
   @ApiOperation({ summary: 'حذف نرم آگهی (تب «حذف شده») — عین باسکول' })
   async deleteMyProduct(@CurrentUser() user: AuthUser, @Body() dto: DeleteMyProductDto) {
     return ok(await this.products.deleteMyProduct(user, dto.id), 'آگهی حذف شد.');
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('setMyProductVisibility')
+  @ApiOperation({
+    summary: '«عدم نمایش» موقت آگهی خودم (۱۹-۱۱) — از نما/جستجوی عمومی کنار می‌رود، در تب «عدم نمایش» پنل می‌ماند',
+  })
+  async setMyProductVisibility(@CurrentUser() user: AuthUser, @Body() dto: SetMyProductVisibilityDto) {
+    return ok(
+      await this.products.setMyProductVisibility(user, dto),
+      dto.visible ? 'آگهی دوباره نمایش داده می‌شود.' : 'آگهی از نمایش خارج شد.',
+    );
   }
 
   // بازبینی آگهی حالا فقط از مسیر ادمین انجام می‌شود:

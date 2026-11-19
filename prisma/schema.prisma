@@ -446,6 +446,19 @@ model File {
   thumbStorageKey String? @map("thumb_storage_key")
   /// متادیتا (ابعاد، حجم اصلی، …)
   metadata    Json?
+  /// (۱۹-۱۱ «شکار واترمارک» — سه‌حالته، خواستهٔ مالک ۱۹-۱۱ شب):
+  /// true = واترمارک دارد (صف حذف) | false = بررسی‌شده، بدون واترمارک |
+  /// null/غایب = هنوز بررسی نشده. دقت: false بودن به‌تنهایی «بررسی‌شده»
+  /// نیست (ایمپورت پیش‌فرض false می‌گذارد) — ملاک، watermarkReviewedAt است.
+  hasWatermark Boolean? @map("has_watermark")
+  /// (۱۹-۱۱ شب) زمان بررسی (تیک «دارد» یا «ندارد») — ست شدنش یعنی فایل
+  /// از لیست «باقی‌مانده» خارج شده تا بررسی تکراری نباشد و لیست کم‌کم
+  /// خالی شود؛ null = هنوز بررسی نشده
+  watermarkReviewedAt DateTime? @map("watermark_reviewed_at")
+  /// (۱۹-۱۱) زمان اصلاح واترمارک — تصویر با موفقیت تمیز شده (AI یا دستی).
+  /// اصلاح‌شده‌ها از تب «همه» کنار گذاشته می‌شوند تا لیست باقی‌مانده خلوت
+  /// بماند و فقط در تب «اصلاح واترمارک» بیایند (خواستهٔ مالک)
+  watermarkFixedAt DateTime? @map("watermark_fixed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -510,6 +523,19 @@ model Product {
   isOld      Boolean @default(false) @map("is_old")
   viewCount  Int     @default(0) @map("view_count")
 
+  /// (۱۸-۱۱ «ثبت گروهی محصول») آگهیِ ایمپورت‌شدهٔ پیشینی که مالکش هنوز با
+  /// دکمهٔ «ایمپورت از وب» اجازه/اطلاع خود را نداده — در پنل خودِ مالک
+  /// (getMyProducts) دیده نمی‌شود ولی در سطح عمومی سایت و جستجو عادی است.
+  /// به‌محض ایمپورت کاربر: false می‌شود (و قیمت/موجودی/حداقل‌سفارش تازه می‌شود).
+  /// آگهی‌های ثبت‌شده توسط خود کاربر (ویزارد) هرگز true نیستند.
+  ownerHidden Boolean @default(false) @map("owner_hidden")
+
+  /// (۱۹-۱۱ «عدم نمایش») پنهان‌سازی موقت به دست خود مالک — از همهٔ نماها و
+  /// جستجوی عمومی کنار می‌رود ولی در پنل خودش (تب «عدم نمایش») می‌ماند و
+  /// با یک کلیک برمی‌گردد؛ حذف نرم نیست و ظرفیت بسته را همچنان می‌گیرد.
+  /// نردبان دست نمی‌خورد (مالک در پنل می‌بیند و خودش تصمیم می‌گیرد).
+  ownerPaused  Boolean @default(false) @map("owner_paused")
+
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("ProductOwner", fields: [userId], references: [id], onDelete: Cascade)
 
@@ -553,7 +579,7 @@ model ProductEditHistory {
   /// مالک آگهی در لحظهٔ رخداد (کاربر مسبب تغییر)
   userId    String @map("user_id") @db.ObjectId
 
-  /// create | edit | delete
+  /// create | edit | delete | web-import (به‌روزرسانی قیمت/موجودی از وب — ۱۸-۱۱)
   action String
 
   /// مقدارهای پیش از تغییر — {productName?, stock?, minSaleAmount?, minSalePrice?}
@@ -564,6 +590,72 @@ model ProductEditHistory {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([productId, createdAt(sort: Desc)])
+}
+
+// ─── «ثبت گروهی محصول» — ایمپورت از وب (۱۸-۱۱) ─────────────────────────────
+
+/// جلسهٔ ایمپورت از وب کاربر — کاربرِ واجد شرایط با یک کلیک کالاهایش را از
+/// سطح وب به ایمچ می‌آورد. گام‌محور است تا در سرورلس (ورسل، تایم‌اوت ۶۰ث) هم
+/// بدون قطع‌شدن پیش برود: هر فراخوانی webImportStep فقط «یک تکهٔ کوچک»
+/// پردازش می‌کند (یک صفحهٔ جستجو، یا چند کالا) و درصد پیشرفت از همین سند
+/// خوانده می‌شود — هیچ حالتی در حافظهٔ پروسه نگه داشته نمی‌شود.
+///
+/// دکمه/متن‌های روبروی کاربر هرگز نام منبع را نمی‌گویند؛ فقط «از وب».
+/// منطق عضویت: مالک باید از قبل (بدون اطلاع خودش) در سیستم ثبت شده باشد —
+/// یا حسابش b_user_name دارد (حسابِ ایمپورت‌شده) یا شماره‌اش در کالکشن
+/// منبع (user-buskool) هست؛ در غیر این صورت دکمه اصلاً دیده نمی‌شود.
+model WebImportSession {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  userId String @map("user_id") @db.ObjectId
+
+  /// full = ایمپورت کامل (کالای جدید + به‌روزرسانی + تکمیل پروفایل)
+  /// prices = فقط به‌روزرسانی قیمت/موجودی/حداقل سفارش کالاهای موجود
+  mode String
+
+  /// running | done | failed
+  status String @default("running")
+
+  /// یوزرنیم منبع — فقط داخلی؛ هرگز به کاربر نشان داده نمی‌شود
+  sourceUserName String @map("source_user_name")
+
+  /// فاز جاری: search → profile → gallery → products → done
+  phase String @default("search")
+
+  /// آیا لیست کالاها کامل رسیده (پایان فاز جستجو)
+  listDone Boolean @default(false) @map("list_done")
+  /// رکورد بعدی لیست منبع (from_record_number)
+  listFrom Int @default(0) @map("list_from")
+
+  /// اقلام یافت‌شده — آرایهٔ فشردهٔ فیلدهای لازم ({id,name,stock,…}) برای
+  /// ثبت/به‌روزرسانی بدون تماس دوباره با منبع (تصاویر جداگانه گرفته می‌شوند)
+  items Json?
+
+  /// اندیس پردازش‌شدهٔ بعدی در items
+  cursor Int @default(0)
+  /// کل اقلام (بعد از پایان جستجو)
+  total Int @default(0)
+
+  /// شمارنده‌ها — {found, created, updated, unchanged, reassigned,
+  /// skippedDeleted, skippedNew, imagesDone, imagesFailed, profileDone}
+  counters Json?
+  /// چند خط آخر گزارش زنده برای نمایش به کاربر — [{t, msg}] (بدون نام منبع)
+  log Json?
+
+  /// گام‌های ناموفق پیاپی — پس از آستانه، جلسه failed می‌شود (پیام عمومی)
+  failedSteps Int @default(0) @map("failed_steps")
+
+  /// خطای عمومی (نمایش‌پذیر برای کاربر) — جزئیات فنی هرگز اینجا نیست
+  error String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  finishedAt DateTime? @map("finished_at")
+
+  /// جلسهٔ در جریان هر کاربر (تک‌جلسگی در سرویس تضمین می‌شود)
+  @@index([userId, status])
+  /// تاریخچهٔ ایمپورتهای کاربر (جدیدترین اول)
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 // ─── درخواست‌های خرید (RFQ) — عین ساختار get_buyAd_list باسکول ───────────────
