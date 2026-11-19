@@ -418,3 +418,21 @@ export class SetFileWatermarkDto {
   @IsIn([true, false, null])
   hasWatermark!: boolean | null;
 }
+
+/** POST /importer/product-files/wm-batch — تعداد فایل‌های هر دستهٔ «اصلاح
+ *  خودکار» (UI حلقه می‌زند؛ سقف ۱۰ تا در سقف زمانی ۶۰ ثانیه‌ای ورسل جا شود) */
+export class WmBatchDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  limit?: number;
+
+  /** فایل‌هایی که در دورهای قبل «پیدا نشد/خطا» شدند — از صف این دسته کنار
+   *  گذاشته می‌شوند تا حلقهٔ UI روی همان‌ها گیر نکند (دستکاری DB نمی‌شوند) */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  exclude?: string[];
+}

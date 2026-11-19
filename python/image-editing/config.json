@@ -9,7 +9,7 @@
   "remove": {
     "alpha_floor": 0.12,
     "ink_threshold": 0.03,
-    "denoise_sigma": 0.7
+    "denoise_sigma": 0.8, "denoise_above": 0.35
   },
   "encode": {
     "main_max_bytes": 512000,

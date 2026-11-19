@@ -5,8 +5,15 @@ import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagg
 import { ok } from '../common/api-response';
 import { AdminJwtAuthGuard } from '../admin/admin-auth/admin-jwt.guard';
 import { UploadsService } from '../uploads/uploads.service';
+import { BuskoolWatermarkService } from './buskool-wm.service';
 import { ImportedProductsService } from './imported-products.service';
-import { ImportedListingsQueryDto, ProductFilesQueryDto, ProductImagesQueryDto, SetFileWatermarkDto } from './dto';
+import {
+  ImportedListingsQueryDto,
+  ProductFilesQueryDto,
+  ProductImagesQueryDto,
+  SetFileWatermarkDto,
+  WmBatchDto,
+} from './dto';
 
 /**
  * مدیریت آگهی‌های ایمپورت‌شده — پشت دو صفحهٔ جدید بخش «دیتا ایمپورت»
@@ -28,6 +35,7 @@ export class ImportedProductsController {
   constructor(
     private readonly listings: ImportedProductsService,
     private readonly uploads: UploadsService,
+    private readonly wm: BuskoolWatermarkService,
   ) {}
 
   @Get('products')
@@ -94,6 +102,54 @@ export class ImportedProductsController {
         : dto.hasWatermark === false
           ? 'ثبت شد: بدون واترمارک — از لیست باقی‌مانده خارج شد.'
           : 'بررسی پس گرفته شد — فایل به لیست باقی‌مانده برگشت.',
+    );
+  }
+
+  // ── حذف خودکار واترمارک باسکول (خواستهٔ مالک ۱۹-۱۱: دکمه در تب واترمارک +
+  //    تست تک‌تصویر) — پورت TS همان الگوریتم پایتون، مستقیم روی بک‌اند ─────
+
+  @Post('product-files/:id/wm-preview')
+  @ApiOperation({
+    summary: 'پیش‌نمایش حذف واترمارک باسکول — بدون هیچ تغییری در دیتابیس/استوریج',
+    description:
+      'تصویر دانلود، واترمارک تشخیص و حذف می‌شود و «قبل | بعد» + نسخهٔ کامل پاک‌شده به‌صورت data URL برمی‌گردد — برای دکمهٔ تست زیر هر تصویر.',
+  })
+  async wmPreview(@Param('id') id: string) {
+    return ok(await this.wm.previewOne(id));
+  }
+
+  @Post('product-files/:id/wm-apply')
+  @ApiOperation({
+    summary: 'اعمال حذف واترمارک — تعویض درجا با کلید نسخه‌دار تازه (آروان) + مهر اصلاح',
+  })
+  async wmApply(@Param('id') id: string, @Req() req: FastifyRequest) {
+    const adminReq = req as FastifyRequest & { adminUsername?: string };
+    const r = await this.wm.applyOne(id, `${adminReq.adminUsername ?? 'admin'} · buskool-wm`);
+    return ok(
+      r,
+      r.status === 'removed' && r.file
+        ? 'واترمارک حذف و تصویر جایگزین شد — به تب «اصلاح واترمارک» رفت.'
+        : r.status === 'not_found'
+          ? 'واترمارک باسکول در این تصویر پیدا نشد — دستی بررسی کنید.'
+          : 'تصویر جایگزین نشد (کلید ذخیره‌سازی ندارد).',
+    );
+  }
+
+  @Post('product-files/wm-batch')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'دستهٔ بعدی صف حذف واترمارک — UI حلقه می‌زند تا صف خالی شود',
+    description:
+      'تا limit فایل علامت‌خورده را پردازش می‌کند (دانلود → تشخیص → حذف → تعویض درجا). تعداد باقی‌ماندهٔ صف هم برمی‌گردد.',
+  })
+  async wmBatch(@Body() dto: WmBatchDto, @Req() req: FastifyRequest) {
+    const adminReq = req as FastifyRequest & { adminUsername?: string };
+    return ok(
+      await this.wm.batch(
+        dto.limit ?? 5,
+        `${adminReq.adminUsername ?? 'admin'} · buskool-wm`,
+        dto.exclude,
+      ),
     );
   }
 }

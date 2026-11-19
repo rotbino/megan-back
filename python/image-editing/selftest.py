@@ -26,8 +26,8 @@ def main():
     cfg = Config()
     d = cfg["detect"]
     tpl = WatermarkTemplate.load(cfg.resolve(cfg["template"]))
-    fidA = str(tpl.meta.get("fidA", "6af9ac07d6118900aef951a9"))
-    fidB = str(tpl.meta.get("fidB", "6af9ac07d6118900aef951a8"))
+    fidA = os.path.splitext(str(tpl.meta.get("fidA", "6af9ac07d6118900aef951a9")))[0]
+    fidB = os.path.splitext(str(tpl.meta.get("fidB", "6af9ac07d6118900aef951a8")))[0]
     print("template: %s  (%dx%d, alpha max %.2f)" % (os.path.basename(tpl.path), *tpl.size, tpl.alpha.max()))
 
     imgA = cv2.imread(os.path.join(GOLDEN_DIR, fidA + ".jpg"), cv2.IMREAD_COLOR)

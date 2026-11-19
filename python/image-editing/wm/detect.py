@@ -60,8 +60,8 @@ def detect(gray, tpl, sigma=7.0, scales=DEFAULT_SCALES, fine=True):
         tw, th = int(round(TW * s)), int(round(TH * s))
         if tw < 40 or W < tw + 2 or H < th + 2:
             continue
-        T = tpl.resized(tw, th)
-        if T.std() < 0.03:
+        T = tpl.resized_detect(tw, th)
+        if T.std() < 0.003:
             continue
         res = cv2.matchTemplate(R, T, cv2.TM_CCOEFF_NORMED)
         res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
@@ -81,22 +81,22 @@ def detect(gray, tpl, sigma=7.0, scales=DEFAULT_SCALES, fine=True):
         sc, s, (x, y), (tw, th) = best
         return Detection(sc, s, x, y, tw, th, _evidence(R, x, y, tw, th))
 
-    # ریزتراز: ±۵px و ±۰٫۰۴ مقیاس
+    # ریزتراز: ±۸px (همهٔ شیفت‌های صحیح، از جمله صفر!) و ±۰٫۰۴ مقیاس
     fine_best = best
     sc0, s0, (x0, y0), (tw0, th0) = best
-    for s in (s0 - 0.04, s0 - 0.02, s0 + 0.02, s0 + 0.04):
+    for s in (s0 - 0.04, s0 - 0.02, s0, s0 + 0.02, s0 + 0.04):
         tw, th = int(round(TW * s)), int(round(TH * s))
         if tw < 40 or W < tw + 2 or H < th + 2:
             continue
-        T = tpl.resized(tw, th)
-        for dy in range(-5, 6, 2):
-            for dx in range(-5, 6, 2):
+        T = tpl.resized_detect(tw, th)
+        for dy in range(-8, 9):
+            for dx in range(-8, 9):
                 x = x0 + int(round((tw0 - tw) / 2)) + dx
                 y = y0 + int(round((th0 - th) / 2)) + dy
                 if x < 0 or y < 0 or x + tw > W or y + th > H:
                     continue
                 patch = R[y:y + th, x:x + tw]
-                if patch.std() < 1.0 or T.std() < 0.03:
+                if patch.std() < 1.0 or T.std() < 0.003:
                     continue
                 sc = _pearson(T, patch)
                 if sc > fine_best[0]:
