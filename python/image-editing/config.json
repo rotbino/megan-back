@@ -1,0 +1,28 @@
+{
+  "template": "templates/buskool-golden.npz",
+  "detect": {
+    "sigma": 7.0,
+    "scales": [0.55, 0.62, 0.7, 0.78, 0.85, 0.92, 1.0, 1.08, 1.15, 1.25, 1.35, 1.5, 1.65],
+    "min_score": 0.45,
+    "min_evidence": 5.0
+  },
+  "remove": {
+    "alpha_floor": 0.12,
+    "ink_threshold": 0.03,
+    "denoise_sigma": 0.7
+  },
+  "encode": {
+    "main_max_bytes": 512000,
+    "main_quality": 84,
+    "quality_ladder": [78, 72, 66, 60, 54, 48],
+    "thumb_size": 500,
+    "thumb_quality": 78
+  },
+  "deploy": {
+    "delete_old_keys": true,
+    "verify_upload": true
+  },
+  "batch": {
+    "query": { "related_model": "Product", "field_key": "gallery", "has_watermark": true }
+  }
+}
