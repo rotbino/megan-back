@@ -74,6 +74,7 @@ import {
 } from './buskool.client';
 import { importerAdminPhone } from './dto';
 import { descToText } from './desc-text';
+import { cleanBuskoolWatermark } from './buskool-wm-clean';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
 import {
   isNetworkError,
@@ -1443,6 +1444,7 @@ export class ImporterService {
     for (const [pid, urls] of photosByPid) urls.forEach((url, i) => imgTasks.push({ kind: 'product', pid, url, i }));
 
     let relatedDone = 0;
+    let wmCleanedUser = 0; // واترمارک‌های پاک‌شدهٔ همین کاربر (۲۰-۱۱)
     const imgWorker = async (t: ImgTask): Promise<void> => {
       if (job.stopRequested) throw new Error('JOB_STOPPED');
       await this.waitWhilePaused(job);
@@ -1458,6 +1460,21 @@ export class ImporterService {
           this.bump(job, 'imagesFailed');
         }
         return;
+      }
+      // (۲۰-۱۱) پاک‌سازی واترمارک در لحظهٔ ایمپورت — فقط تصاویر گالری آگهی؛
+      // آواتار/تصاویر کسب‌وکار مالیت آگهی ندارند و دست نمی‌خورند
+      let uploadBuf = norm.buf;
+      let uploadMime = norm.mime;
+      let wmOutcome: 'removed' | 'not_found' | 'failed' | undefined;
+      if (t.kind === 'product') {
+        const wm = await cleanBuskoolWatermark(norm.buf);
+        wmOutcome = wm.status;
+        if (wm.status === 'removed') {
+          uploadBuf = wm.buf;
+          uploadMime = wm.mimetype ?? norm.mime;
+          wmCleanedUser++;
+          this.bump(job, 'wmCleaned');
+        }
       }
       try {
         if (t.kind === 'avatar') {
@@ -1510,19 +1527,21 @@ export class ImporterService {
           }
         } else {
           // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
-          // users/{userId}/products/{pid}/gallery/… با واترمارک و تامبنیل —
-          // «انگار که آگهی توسط کاربر ایجاد شده»؛ ردیف File با storageKey کامل.
+          // users/{userId}/products/{pid}/gallery/… — از ۲۰-۱۱ واترمارک باسکول
+          // همین لحظه پاک می‌شود و نسخهٔ تمیز بالا می‌رود («انگار که آگهی
+          // توسط کاربر ایجاد شده»)؛ ردیف File با storageKey کامل.
           const res = await this.netRetry(job, () =>
             this.uploads.ingestExternal({
               ownerId: user.id,
               model: 'Product',
               modelId: String(t.pid),
               fieldKey: 'gallery',
-              buffer: norm.buf,
-              mimetype: norm.mime,
+              buffer: uploadBuf,
+              mimetype: uploadMime,
               filename: t.url.split('/').pop() || `buskool-${t.pid}-${t.i}`,
               replace: false, // گالری چندفایلی
               metadata: { importedFrom: 'buskool', originalUrl: t.url },
+              watermarkOutcome: wmOutcome,
             }),
           );
           if (res.ok) {
@@ -1549,6 +1568,11 @@ export class ImporterService {
 
     if (imgTasks.length) {
       await runPool(imgTasks, imagePoolSize(), () => job.stopRequested, imgWorker);
+    }
+
+    // گزارش پاک‌سازی واترمارک همین کاربر (۲۰-۱۱)
+    if (wmCleanedUser > 0) {
+      this.log(job, 'success', `واترمارک باسکول از ${wmCleanedUser} تصویر این کاربر پاک شد`);
     }
 
     // جمع‌بندی مراحل تصویری

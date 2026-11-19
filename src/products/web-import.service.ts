@@ -39,6 +39,7 @@ import {
   normalizeImage,
   runPool,
 } from '../importer/importer.service';
+import { cleanBuskoolWatermark } from '../importer/buskool-wm-clean';
 import { descToText } from '../importer/desc-text';
 import { asBUserData, bkPackageTitle, type BUserData } from '../importer/b-user-data';
 
@@ -100,6 +101,9 @@ export interface WebImportCounters {
   skippedOwner: number;
   imagesDone: number;
   imagesFailed: number;
+  /** (۲۰-۱۱) تصاویری که واترمارکشان در لحظهٔ ایمپورت پاک شد — بی‌صدا؛ در
+   *  UI کاربر نمایش داده نمی‌شود (قاعدهٔ طلایی: هیچ اشاره‌ای به منبع نیست) */
+  imagesWmCleaned: number;
   profileDone: number;
   itemErrors: number;
 }
@@ -115,6 +119,7 @@ const EMPTY_COUNTERS: WebImportCounters = {
   skippedOwner: 0,
   imagesDone: 0,
   imagesFailed: 0,
+  imagesWmCleaned: 0,
   profileDone: 0,
   itemErrors: 0,
 };
@@ -849,17 +854,22 @@ export class WebImportService {
           counters.imagesFailed++;
           return;
         }
+        // (۲۰-۱۱) پاک‌سازی واترمارک در لحظهٔ ایمپورت — نسخهٔ تمیز بالا
+        // می‌رود؛ نتیجهٔ بررسی در ردیف File مهر می‌خورد. بی‌صدا برای کاربر.
+        const wm = await cleanBuskoolWatermark(norm.buf);
+        if (wm.status === 'removed') counters.imagesWmCleaned++;
         const res = await this.uploads
           .ingestExternal({
             ownerId: session.userId,
             model: 'Product',
             modelId: String(it.id),
             fieldKey: 'gallery',
-            buffer: norm.buf,
-            mimetype: norm.mime,
+            buffer: wm.status === 'removed' ? wm.buf : norm.buf,
+            mimetype: wm.status === 'removed' ? wm.mimetype ?? norm.mime : norm.mime,
             filename: t.url.split('/').pop() || `web-${it.id}-${t.i}`,
             replace: false,
             metadata: { importedFrom: 'web-import', originalUrl: t.url },
+            watermarkOutcome: wm.status,
           })
           .catch(() => null);
         if (res?.ok) {
