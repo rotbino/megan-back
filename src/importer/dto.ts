@@ -436,3 +436,16 @@ export class WmBatchDto {
   @IsString({ each: true })
   exclude?: string[];
 }
+
+/** POST /importer/product-files/review-batch — دکمهٔ «بررسی شد» پایین صفحه
+ *  (خواستهٔ مالک ۲۱-۱۱): مهر گروهی watermarkReviewedAt روی همهٔ تصاویرِ دستهٔ
+ *  فعلی — یعنی «این N تصویر بررسی شد؛ هر کدام لازم بود اصلاح شد» و دیگر
+ *  هرگز در صفحهٔ بررسی لود نمی‌شوند؛ دستهٔ بعدی جای آن‌ها را می‌گیرد. */
+export class ReviewFilesDto {
+  /** شناسهٔ فایل‌های دستهٔ فعلی (حداکثر ۲۰۰ = سقف صفحه‌بندی + حاشیه) */
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
+}

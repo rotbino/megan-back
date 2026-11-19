@@ -979,7 +979,10 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         // تازه تمیز است → از صف شکار خارج و با مهر «اصلاح شد» به تب
         // «اصلاح واترمارک» می‌رود (خواستهٔ مالک ۱۹-۱۱) — هم برای مسیر دستی
         // (Paint) و هم ربات AI که همین اندپوینت/الگو را صدا می‌زند.
+        // (۲۱-۱۱) مهر بررسی هم می‌خورد — تعویض‌شده یعنی بررسی‌شده+اصلاح‌شده؛
+        // دیگر هرگز در صفحهٔ بررسیِ تصاویر لود نمی‌شود.
         hasWatermark: false,
+        watermarkReviewedAt: now,
         watermarkFixedAt: now,
       },
     });

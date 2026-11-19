@@ -11,6 +11,7 @@ import {
   ImportedListingsQueryDto,
   ProductFilesQueryDto,
   ProductImagesQueryDto,
+  ReviewFilesDto,
   SetFileWatermarkDto,
   WmBatchDto,
 } from './dto';
@@ -109,6 +110,7 @@ export class ImportedProductsController {
   //    تست تک‌تصویر) — پورت TS همان الگوریتم پایتون، مستقیم روی بک‌اند ─────
 
   @Post('product-files/:id/wm-preview')
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({
     summary: 'پیش‌نمایش حذف واترمارک باسکول — بدون هیچ تغییری در دیتابیس/استوریج',
     description:
@@ -119,8 +121,12 @@ export class ImportedProductsController {
   }
 
   @Post('product-files/:id/wm-apply')
+  // (۲۱-۱۱) اصلاح موازی: مالک ده‌ها دکمهٔ «اصلاح» را همزمان می‌زند — هر
+  // درخواست مستقل پردازش می‌شود؛ سقف ۶۰تاییِ کنترلر این جریان را می‌بندد
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
   @ApiOperation({
     summary: 'اعمال حذف واترمارک — تعویض درجا با کلید نسخه‌دار تازه (آروان) + مهر اصلاح',
+    description: 'قابل فراخوانی موازی — هر تصویر مستقل دانلود/پاک/تعویض می‌شود.',
   })
   async wmApply(@Param('id') id: string, @Req() req: FastifyRequest) {
     const adminReq = req as FastifyRequest & { adminUsername?: string };
@@ -128,7 +134,7 @@ export class ImportedProductsController {
     return ok(
       r,
       r.status === 'removed' && r.file
-        ? 'واترمارک حذف و تصویر جایگزین شد — به تب «اصلاح واترمارک» رفت.'
+        ? 'واترمارک حذف و تصویر جایگزین شد — تیک «اصلاح شد» خورد.'
         : r.status === 'not_found'
           ? 'واترمارک باسکول در این تصویر پیدا نشد — دستی بررسی کنید.'
           : 'تصویر جایگزین نشد (کلید ذخیره‌سازی ندارد).',
@@ -150,6 +156,21 @@ export class ImportedProductsController {
         `${adminReq.adminUsername ?? 'admin'} · buskool-wm`,
         dto.exclude,
       ),
+    );
+  }
+
+  @Post('product-files/review-batch')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'دکمهٔ «بررسی شد» (خواستهٔ مالک ۲۱-۱۱) — مهر گروهی بررسی روی دستهٔ فعلی',
+    description:
+      'همهٔ تصاویرِ صفحهٔ فعلی مهر watermarkReviewedAt می‌خورند و دیگر هرگز در صفحهٔ بررسی لود نمی‌شوند؛ ' +
+      'دستهٔ بعدیِ نیاز‌به‌بررسی جای آن‌ها را می‌گیرد. هیچ فیلد/تب/صفحه‌بندی جدیدی درست نمی‌کند — همان فیلد «بررسی‌شده».',
+  })
+  async reviewBatch(@Body() dto: ReviewFilesDto) {
+    return ok(
+      await this.listings.reviewFilesBatch(dto.ids),
+      'دستهٔ فعلی بررسی شد — تصاویر بعدیِ نیازمند بررسی بارگذاری می‌شوند.',
     );
   }
 }

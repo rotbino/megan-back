@@ -248,7 +248,10 @@ export class BuskoolWatermarkService {
     );
     const { afterJpeg: _d, ...out } = r;
     // ردیف به شکل ProductFileRow فرانت — URLهای نسخه‌دار تازه (اصلی+تامبنیل)
-    // همان لحظه کاش را در UI عوض می‌کنند؛ مهر اصلاح = همان nowِ تعویض
+    // همان لحظه کاش را در UI عوض می‌کنند؛ مهر اصلاح = همان nowِ تعویض.
+    // (۲۱-۱۱) replaceInPlace حالا مهر بررسی هم می‌زند (تعویض‌شده = بررسی‌شده
+    // + اصلاح‌شده) — پس ردیف برگشتی هم reviewedAt تازه دارد.
+    const nowIso = updated.replacedAt;
     return {
       ...out,
       file: {
@@ -256,7 +259,7 @@ export class BuskoolWatermarkService {
         url: updated.url,
         thumbUrl: updated.thumbUrl,
         hasWatermark: false,
-        reviewedAt: file.watermarkReviewedAt?.toISOString() ?? null,
+        reviewedAt: nowIso,
         fixedAt: updated.replacedAt,
         relatedId: file.relatedId,
         size: updated.size,
