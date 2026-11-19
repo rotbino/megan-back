@@ -411,8 +411,10 @@ export class ProductFilesQueryDto {
   pageSize?: number;
 }
 
-/** POST /importer/product-files/:id/watermark — علامت/برداشتن واترمارک فایل */
+/** POST /importer/product-files/:id/watermark — دو تیک «دارد/ندارد»
+ *  (خواستهٔ مالک ۱۹-۱۱ شب): true = واترمارک دارد | false = بررسی‌شده بدون
+ *  واترمارک | null = پس‌گرفتن بررسی (بازگشت به لیست باقی‌مانده) */
 export class SetFileWatermarkDto {
-  @IsBoolean()
-  hasWatermark!: boolean;
+  @IsIn([true, false, null])
+  hasWatermark!: boolean | null;
 }

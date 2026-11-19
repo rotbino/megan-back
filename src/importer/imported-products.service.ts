@@ -137,7 +137,12 @@ export interface ProductFileRow {
   id: string;
   url: string;
   thumbUrl: string | null;
-  hasWatermark: boolean;
+  /** true = واترمارک دارد (صف حذف) | false/null = ندارد یا بررسی‌نشده —
+   *  ملاک «بررسی‌شده بودن» reviewedAt است (ایمپورت پیش‌فرض false می‌گذارد) */
+  hasWatermark: boolean | null;
+  /** (۱۹-۱۱ شب) زمان بررسی — ست یعنی با یکی از دو تیک «دارد/ندارد» بررسی
+   *  شده و از لیست باقی‌مانده خارج است؛ null = هنوز بررسی نشده */
+  reviewedAt: string | null;
   /** (۱۹-۱۱) زمان اصلاح واترمارک — غیرnull یعنی تمیز شده و در تب «اصلاح واترمارک» است */
   fixedAt: string | null;
   /** id آگهیِ صاحب تصویر (رشته) — برای کار پاک‌سازی مرحلهٔ بعد */
@@ -147,9 +152,11 @@ export interface ProductFileRow {
 }
 
 export interface ProductFilesSummary {
-  /** باقی‌مانده = همه به‌جز اصلاح‌شده‌ها (تب «همه» همین را نشان می‌دهد) */
+  /** باقی‌مانده = نه بررسی‌شده (دارد/ندارد) نه اصلاح‌شده — لیست کم‌کم خالی می‌شود */
   total: number;
+  /** صف حذف = «دارد» تیک خورده (اصلاح‌شدهٔ دوباره‌علامت‌خورده هم شامل می‌شود) */
   watermarked: number;
+  /** بررسی‌شده = «ندارد» تیک خورده (watermarkReviewedAt ست) و هنوز اصلاح نشده */
   clean: number;
   /** اصلاح‌شده‌ها — تب «اصلاح واترمارک» */
   fixed: number;
@@ -1168,16 +1175,21 @@ export class ImportedProductsService {
       field_key: 'gallery',
       related_id: { $ne: null },
       ...(query.productId != null ? { related_id: String(query.productId) } : {}),
-      // اصلاح‌شده‌ها فقط در تب خودشان می‌آیند؛ بقیهٔ تب‌ها (همه/بله/خیر)
-      // خلوت می‌مانند تا باقی‌مانده‌ها راحت‌تر پیدا شوند (خواستهٔ مالک ۱۹-۱۱)
+      // دو تیک «دارد/ندارد» (خواستهٔ مالک ۱۹-۱۱ شب) — ملاک خروج از
+      // باقی‌مانده، مهر watermark_reviewed_at است نه مقدار has_watermark
+      // (ایمپورت پیش‌فرض false می‌گذارد و false به‌تنهایی بررسی‌شده نیست):
+      //   all = باقی‌مانده: فقط بررسی‌نشده‌ها — لیست کم‌کم خالی می‌شود؛
+      //   yes = صف حذف: هرچه «دارد» است (شرط اصلاح‌شدگی ندارد — تصویر
+      //   اصلاح‌شده‌ای که دوباره علامت خورده هم اینجاست تا دوباره پاک‌سازی شود)؛
+      //   no = بررسی‌شده: «ندارد» تیک خورده (واترمارکی برای حذف نیست)؛
+      //   fixed = اصلاح‌شده‌ها فقط در تب خودشان.
       ...(query.watermark === 'fixed'
         ? { watermark_fixed_at: { $ne: null } }
-        : { watermark_fixed_at: null }),
-      ...(query.watermark === 'yes'
-        ? { has_watermark: true }
-        : query.watermark === 'no'
-          ? { has_watermark: false }
-          : {}),
+        : query.watermark === 'yes'
+          ? { has_watermark: true }
+          : query.watermark === 'no'
+            ? { watermark_fixed_at: null, watermark_reviewed_at: { $ne: null }, has_watermark: false }
+            : { watermark_fixed_at: null, watermark_reviewed_at: null }),
     };
 
     const [totalAgg, rowsAgg, summary] = await Promise.all([
@@ -1213,6 +1225,7 @@ export class ImportedProductsService {
               thumb_url: 1,
               size: 1,
               has_watermark: 1,
+              watermark_reviewed_at: 1,
               watermark_fixed_at: 1,
               related_id: 1,
               created_at: 1,
@@ -1229,7 +1242,9 @@ export class ImportedProductsService {
       id: toId(r._id),
       url: String(r.url ?? ''),
       thumbUrl: (r.thumb_url as string) ?? null,
-      hasWatermark: r.has_watermark === true,
+      // false بودن به‌تنهایی «بررسی‌شده» نیست (پیش‌فرض ایمپورت) — reviewedAt ملاک است
+      hasWatermark: r.has_watermark === true ? true : r.has_watermark === false ? false : null,
+      reviewedAt: toIso(r.watermark_reviewed_at) ?? null,
       fixedAt: toIso(r.watermark_fixed_at) ?? null,
       relatedId: (r.related_id as string) ?? null,
       size: Number(r.size ?? 0),
@@ -1246,9 +1261,9 @@ export class ImportedProductsService {
     };
   }
 
-  /** آمار واترمارک تصاویر گالری — باقی‌مانده / علامت‌خورده / پاک / اصلاح‌شده.
-   *  اصلاح‌شده‌ها از «کل» کنار گذاشته می‌شوند تا شمارندهٔ تب «همه» با چیزی که
-   *  کاربر می‌بیند یکی باشد (خواستهٔ مالک ۱۹-۱۱: لیست باقی‌مانده خلوت بماند). */
+  /** آمار واترمارک تصاویر گالری — باقی‌مانده / صف حذف / بررسی‌شده / اصلاح‌شده
+   *  (خواستهٔ مالک ۱۹-۱۱ شب): ملاک «بررسی‌شده»، مهر watermark_reviewed_at
+   *  است؛ هر تیک فایل را از باقی‌مانده خارج می‌کند تا لیست کم‌کم خالی شود. */
   async productFilesSummary(): Promise<ProductFilesSummary> {
     const agg = (await this.prisma.$runCommandRaw({
       aggregate: 'File',
@@ -1256,8 +1271,15 @@ export class ImportedProductsService {
         { $match: { related_model: 'Product', field_key: 'gallery', related_id: { $ne: null } } },
         {
           $facet: {
-            total: [{ $match: { watermark_fixed_at: null } }, { $count: 'n' }],
-            watermarked: [{ $match: { watermark_fixed_at: null, has_watermark: true } }, { $count: 'n' }],
+            // باقی‌مانده = نه بررسی‌شده و نه اصلاح‌شده
+            total: [{ $match: { watermark_fixed_at: null, watermark_reviewed_at: null } }, { $count: 'n' }],
+            // صف حذف = «دارد» (اصلاح‌شدهٔ دوباره‌علامت‌خورده هم شامل می‌شود)
+            watermarked: [{ $match: { has_watermark: true } }, { $count: 'n' }],
+            // بررسی‌شده = «ندارد» تیک خورده و هنوز اصلاح‌نشده
+            clean: [
+              { $match: { watermark_fixed_at: null, watermark_reviewed_at: { $ne: null }, has_watermark: false } },
+              { $count: 'n' },
+            ],
             fixed: [{ $match: { watermark_fixed_at: { $ne: null } } }, { $count: 'n' }],
           },
         },
@@ -1266,27 +1288,33 @@ export class ImportedProductsService {
     })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
     const f = agg?.cursor?.firstBatch?.[0] ?? {};
     const cnt = (key: string): number => Number(((f[key] ?? []) as { n?: number }[])[0]?.n ?? 0);
-    const total = cnt('total');
-    const watermarked = cnt('watermarked');
-    const fixed = cnt('fixed');
-    return { total, watermarked, clean: total - watermarked, fixed };
+    return { total: cnt('total'), watermarked: cnt('watermarked'), clean: cnt('clean'), fixed: cnt('fixed') };
   }
 
-  /** POST /importer/product-files/:id/watermark — علامت/برداشتن واترمارک
-   *  (مرحلهٔ ۱ خواستهٔ مالک ۱۹-۱۱): تیک ادمین روی کاش تصویر → فیلد
-   *  has_watermark همان ردیف File ترو/فالس می‌شود؛ مبنای فیلتر مرحلهٔ
-   *  پاک‌سازی (هوش مصنوعی/دستی) بعدی. */
-  async setFileWatermark(id: string, hasWatermark: boolean): Promise<{ id: string; hasWatermark: boolean }> {
+  /** POST /importer/product-files/:id/watermark — دو تیک «دارد/ندارد»
+   *  (خواستهٔ مالک ۱۹-۱۱ شب): true = واترمارک دارد (صف حذف) |
+   *  false = بررسی‌شده بدون واترمارک | null = پس‌گرفتن بررسی.
+   *  هر دو تیک، watermarkReviewedAt را مهر می‌کنند تا فایل از لیست
+   *  باقی‌مانده خارج شود و بررسی تکراری نباشد (لیست کم‌کم خالی می‌شود). */
+  async setFileWatermark(id: string, hasWatermark: boolean | null): Promise<{ id: string; hasWatermark: boolean | null }> {
     if (!/^[0-9a-fA-F]{24}$/.test(id)) throw new BadRequestException('شناسهٔ فایل نامعتبر است');
     const f = await this.prisma.file.findUnique({ where: { id } });
     if (!f || f.relatedModel !== 'Product' || f.fieldKey !== 'gallery') {
       throw new BadRequestException('فایل گالری آگهی با این شناسه پیدا نشد');
     }
+    const now = new Date();
     const updated = await this.prisma.file.update({
       where: { id },
-      data: { hasWatermark },
+      data: {
+        hasWatermark,
+        // تیک (هر دو) = مهر بررسی و خروج از باقی‌مانده؛ پس‌گرفتن = پاک‌کردن مهر
+        watermarkReviewedAt: hasWatermark === null ? null : now,
+      },
     });
-    return { id: updated.id, hasWatermark: updated.hasWatermark === true };
+    return {
+      id: updated.id,
+      hasWatermark: updated.hasWatermark === true ? true : updated.hasWatermark === false ? false : null,
+    };
   }
 
   // ─── کارخانه‌های lookup (هر بار آبجکت تازه) ────────────────────────────────

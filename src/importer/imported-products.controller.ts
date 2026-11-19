@@ -84,12 +84,16 @@ export class ImportedProductsController {
 
   @Post('product-files/:id/watermark')
   @ApiOperation({
-    summary: 'علامت/برداشتن واترمارک یک فایل — مرحلهٔ ۱ شکار واترمارک (۱۹-۱۱): تیک ادمین روی کاش → File.hasWatermark',
+    summary: 'دو تیک «دارد/ندارد» (خواستهٔ مالک ۱۹-۱۱ شب): true = صف حذف | false = بررسی‌شده بدون واترمارک | null = پس‌گرفتن بررسی',
   })
   async setWatermark(@Param('id') id: string, @Body() dto: SetFileWatermarkDto) {
     return ok(
       await this.listings.setFileWatermark(id, dto.hasWatermark),
-      dto.hasWatermark ? 'علامت واترمارک ثبت شد.' : 'علامت واترمارک برداشته شد.',
+      dto.hasWatermark === true
+        ? 'ثبت شد: واترمارک دارد — در صف حذف قرار گرفت.'
+        : dto.hasWatermark === false
+          ? 'ثبت شد: بدون واترمارک — از لیست باقی‌مانده خارج شد.'
+          : 'بررسی پس گرفته شد — فایل به لیست باقی‌مانده برگشت.',
     );
   }
 }
