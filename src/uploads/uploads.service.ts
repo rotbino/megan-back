@@ -661,6 +661,10 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     filename: string;
     replace?: boolean;
     metadata?: Record<string, unknown>;
+    /** (۲۰-۱۱) نتیجهٔ بررسی واترمارک در لحظهٔ ایمپورت — مهر ردیف File:
+     *  removed = تمیز شد (fixed+reviewed) | not_found = بررسی‌شده، تمیز |
+     *  failed = واترمارک دارد ولی پاک نشد → در صف اصلاح می‌ماند */
+    watermarkOutcome?: 'removed' | 'not_found' | 'failed';
   }): Promise<
     | { ok: true; file: FileDto }
     | { ok: false; reason: 'FILE_TOO_LARGE' | 'FILE_TOO_SMALL' | 'FILE_TYPE_NOT_ALLOWED' | 'IMAGE_TOO_SMALL' }
@@ -710,6 +714,17 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         thumbUrl,
         storageKey: key,
         thumbStorageKey: thumbKey,
+        // (۲۰-۱۱) مهر بررسی/اصلاح در لحظهٔ ایمپورت — تصاویر تازه دیگر
+        // در لیست «باقی‌مانده» نمی‌آیند؛ only failed در صف اصلاح می‌ماند
+        ...(input.watermarkOutcome
+          ? input.watermarkOutcome === 'failed'
+            ? { hasWatermark: true }
+            : {
+                hasWatermark: false,
+                watermarkReviewedAt: new Date(),
+                ...(input.watermarkOutcome === 'removed' ? { watermarkFixedAt: new Date() } : {}),
+              }
+          : {}),
         metadata: {
           originalSize: input.buffer.length,
           width: processed.width,
