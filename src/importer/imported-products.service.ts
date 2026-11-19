@@ -230,6 +230,10 @@ function num(v: unknown): number | null {
 
 @Injectable()
 export class ImportedProductsService {
+  /** (۲۱-۱۱) کش رتبهٔ آگهی‌ها برای listProductFiles — حلقهٔ «بررسی شد» در هر
+   *  نوبت همین کوئریِ سنگین را می‌زد؛ رتبه به وضعیت بررسی وابسته نیست. */
+  private productRankCache: { key: string; ids: string[]; at: number } | null = null;
+
   constructor(private readonly prisma: PrismaService) {}
 
   // ═══════════════════════════ آگهی‌ها: لیست ═══════════════════════════
@@ -1149,47 +1153,64 @@ export class ImportedProductsService {
     const pageSize = Math.min(120, Math.max(1, query.pageSize ?? 60));
 
     // ── رتبهٔ آگهی‌ها: آرایهٔ id مرتب بر اساس تاریخ درخواستی ──
+    // (۲۱-۱۱) کش ۳۰ثانیه‌ای: رتبه فقط از تاریخِ آگهی‌ها می‌آید و به وضعیت
+    // بررسیِ فایل‌ها ربطی ندارد؛ حلقهٔ «بررسی شد → دستهٔ بعدی» در هر نوبت
+    // همین کوئریِ سنگین (۵۰هزار آگهی) را می‌زد — حالا نوبت‌های پیاپی فوری‌اند.
     const primary: 'createdAt' | 'updatedAt' = query.sort === 'productUpdated' ? 'updatedAt' : 'createdAt';
     const secondary: 'createdAt' | 'updatedAt' = primary === 'updatedAt' ? 'createdAt' : 'updatedAt';
-    type RankRow = { id: number; createdAt: Date; updatedAt: Date };
-    const dateOf = (row: RankRow, key: 'createdAt' | 'updatedAt'): number =>
-      new Date(row[key]).getTime() || 0;
-    const productsForRank = await this.prisma.product.findMany({
-      ...(query.productId != null ? { where: { id: query.productId } } : {}),
-      select: { id: true, createdAt: true, updatedAt: true },
-      take: 50_000,
-    });
-    productsForRank.sort((a, b) => {
-      const pa = dateOf(a, primary);
-      const pb = dateOf(b, primary);
-      if (pa !== pb) return pb - pa; // جدیدترین اول
-      const sa = dateOf(a, secondary);
-      const sb = dateOf(b, secondary);
-      if (sa !== sb) return sb - sa;
-      return b.id - a.id;
-    });
-    const rankProductIds = productsForRank.map((p) => String(p.id));
+    const rankCacheKey = `${primary}:${query.productId ?? 'all'}`;
+    const rankCacheHit =
+      this.productRankCache?.key === rankCacheKey &&
+      Date.now() - this.productRankCache.at < 30_000
+        ? this.productRankCache
+        : null;
+    let rankProductIds: string[];
+    if (rankCacheHit) {
+      rankProductIds = rankCacheHit.ids;
+    } else {
+      type RankRow = { id: number; createdAt: Date; updatedAt: Date };
+      const dateOf = (row: RankRow, key: 'createdAt' | 'updatedAt'): number =>
+        new Date(row[key]).getTime() || 0;
+      const productsForRank = await this.prisma.product.findMany({
+        ...(query.productId != null ? { where: { id: query.productId } } : {}),
+        select: { id: true, createdAt: true, updatedAt: true },
+        take: 50_000,
+      });
+      productsForRank.sort((a, b) => {
+        const pa = dateOf(a, primary);
+        const pb = dateOf(b, primary);
+        if (pa !== pb) return pb - pa; // جدیدترین اول
+        const sa = dateOf(a, secondary);
+        const sb = dateOf(b, secondary);
+        if (sa !== sb) return sb - sa;
+        return b.id - a.id;
+      });
+      rankProductIds = productsForRank.map((p) => String(p.id));
+      this.productRankCache = { key: rankCacheKey, ids: rankProductIds, at: Date.now() };
+    }
 
     const filter: Record<string, unknown> = {
       related_model: 'Product',
       field_key: 'gallery',
       related_id: { $ne: null },
       ...(query.productId != null ? { related_id: String(query.productId) } : {}),
-      // دو تیک «دارد/ندارد» (خواستهٔ مالک ۱۹-۱۱ شب) — ملاک خروج از
-      // باقی‌مانده، مهر watermark_reviewed_at است نه مقدار has_watermark
-      // (ایمپورت پیش‌فرض false می‌گذارد و false به‌تنهایی بررسی‌شده نیست):
-      //   all = باقی‌مانده: فقط بررسی‌نشده‌ها — لیست کم‌کم خالی می‌شود؛
-      //   yes = صف حذف: هرچه «دارد» است (شرط اصلاح‌شدگی ندارد — تصویر
-      //   اصلاح‌شده‌ای که دوباره علامت خورده هم اینجاست تا دوباره پاک‌سازی شود)؛
-      //   no = بررسی‌شده: «ندارد» تیک خورده (واترمارکی برای حذف نیست)؛
-      //   fixed = اصلاح‌شده‌ها فقط در تب خودشان.
+      // (بازطراحی ۲۱-۱۱ — «بررسی شد» گروهی): فهرستِ صفحه دیگر تب و پیجینگ
+      // ندارد؛ فقط یک چیز معنا دارد — «نیاز به بررسی»:
+      //   all = باقی‌مانده: اصلاح‌نشده و (بررسی‌نشده یا علامت‌خوردهٔ قدیمی
+      //   «دارد» — چون سوییچ‌ها حذف شدند، علامت‌خورده‌های صف قدیمی هم باید
+      //   دوباره دیده شوند تا با دکمهٔ «اصلاح» تمیز و با «بررسی شد» بسته شوند)؛
+      //   yes = صف حذف قدیمی (سازگاری API — دیگر در UI نیست)؛
+      //   no = بررسی‌شده؛ fixed = اصلاح‌شده.
       ...(query.watermark === 'fixed'
         ? { watermark_fixed_at: { $ne: null } }
         : query.watermark === 'yes'
           ? { has_watermark: true }
           : query.watermark === 'no'
             ? { watermark_fixed_at: null, watermark_reviewed_at: { $ne: null }, has_watermark: false }
-            : { watermark_fixed_at: null, watermark_reviewed_at: null }),
+            : {
+                watermark_fixed_at: null,
+                $or: [{ watermark_reviewed_at: null }, { has_watermark: true }],
+              }),
     };
 
     const [totalAgg, rowsAgg, summary] = await Promise.all([
@@ -1262,8 +1283,9 @@ export class ImportedProductsService {
   }
 
   /** آمار واترمارک تصاویر گالری — باقی‌مانده / صف حذف / بررسی‌شده / اصلاح‌شده
-   *  (خواستهٔ مالک ۱۹-۱۱ شب): ملاک «بررسی‌شده»، مهر watermark_reviewed_at
-   *  است؛ هر تیک فایل را از باقی‌مانده خارج می‌کند تا لیست کم‌کم خالی شود. */
+   *  (خواستهٔ مالک ۱۹-۱۱ شب؛ به‌روزشده ۲۱-۱۱): ملاک «بررسی‌شده»، مهر
+   *  watermark_reviewed_at است؛ باقی‌مانده = اصلاح‌نشده و (بررسی‌نشده یا
+   *  علامت‌خوردهٔ قدیمی) — هم‌ارز همان چیزی که صفحهٔ بررسی لود می‌کند. */
   async productFilesSummary(): Promise<ProductFilesSummary> {
     const agg = (await this.prisma.$runCommandRaw({
       aggregate: 'File',
@@ -1271,11 +1293,19 @@ export class ImportedProductsService {
         { $match: { related_model: 'Product', field_key: 'gallery', related_id: { $ne: null } } },
         {
           $facet: {
-            // باقی‌مانده = نه بررسی‌شده و نه اصلاح‌شده
-            total: [{ $match: { watermark_fixed_at: null, watermark_reviewed_at: null } }, { $count: 'n' }],
+            // باقی‌مانده = اصلاح‌نشده و (بررسی‌نشده یا علامت‌خوردهٔ قدیمی «دارد»)
+            total: [
+              {
+                $match: {
+                  watermark_fixed_at: null,
+                  $or: [{ watermark_reviewed_at: null }, { has_watermark: true }],
+                },
+              },
+              { $count: 'n' },
+            ],
             // صف حذف = «دارد» (اصلاح‌شدهٔ دوباره‌علامت‌خورده هم شامل می‌شود)
             watermarked: [{ $match: { has_watermark: true } }, { $count: 'n' }],
-            // بررسی‌شده = «ندارد» تیک خورده و هنوز اصلاح‌نشده
+            // بررسی‌شده = مهر خورده و هنوز اصلاح‌نشده
             clean: [
               { $match: { watermark_fixed_at: null, watermark_reviewed_at: { $ne: null }, has_watermark: false } },
               { $count: 'n' },
@@ -1315,6 +1345,28 @@ export class ImportedProductsService {
       id: updated.id,
       hasWatermark: updated.hasWatermark === true ? true : updated.hasWatermark === false ? false : null,
     };
+  }
+
+  /** POST /importer/product-files/review-batch — دکمهٔ «بررسی شد» پایین صفحه
+   *  (خواستهٔ مالک ۲۱-۱۱): مهر گروهی watermarkReviewedAt روی همهٔ تصاویرِ
+   *  دستهٔ فعلی + صفرکردن has_watermark (یعنی «بررسی شد؛ چیزی برای حذف
+   *  نمانده»). اصلاح‌شده‌ها هم بی‌ضرر مهر می‌خورند (fixedشان دست‌نخورده
+   *  می‌ماند) — بعد از این، هیچ‌کدام دیگر در صفحهٔ بررسی لود نمی‌شوند و
+   *  دستهٔ بعدی جای آن‌ها را می‌گیرد تا بالاخره لیست خالی شود. */
+  async reviewFilesBatch(ids: string[]): Promise<{ updated: number }> {
+    const valid = [...new Set(ids)].filter((v) => /^[0-9a-fA-F]{24}$/.test(v)).slice(0, 200);
+    if (!valid.length) throw new BadRequestException('فهرست شناسهٔ فایل‌ها خالی یا نامعتبر است');
+    const now = new Date();
+    // فقط فایل‌های گالری آگهی — سقف امن روی حجم ورودی
+    const r = await this.prisma.file.updateMany({
+      where: { id: { in: valid }, relatedModel: 'Product', fieldKey: 'gallery' },
+      data: {
+        watermarkReviewedAt: now,
+        // علامت‌خورده‌های قدیمی «دارد» که بررسی شدند = بسته‌شدن رکورد
+        hasWatermark: false,
+      },
+    });
+    return { updated: r.count };
   }
 
   // ─── کارخانه‌های lookup (هر بار آبجکت تازه) ────────────────────────────────
