@@ -1,11 +1,15 @@
 /**
- * حذف واترمارک باسکول — پورت TypeScript از python/image-editing.
+ * حذف واترمارک باسکول — پورت TypeScript از python/image-editing (v4).
  *
- * همان الگوریتم اثبات‌شدهٔ زیرپروژهٔ پایتون (تمپلیت دوتنه از جفت طلایی):
- *   ۱) تشخیص: پاسخ DoG + تطبیق تمپلیت چندمقیاسی (درشت ¼ برای سرعت، سپس
- *      ریزتراز تمام‌شیفت ±۴px در تفکیک کامل) + گارد نواحی مسطح.
- *   ۲) حذف: وارون‌سازی ترکیب آلفا با رنگ — B = (I − a·c)/(1−a) — که
- *      a نقشهٔ آلفا و c رنگ جوهر است (بدنهٔ روشن + متن تیره، مستقل از زمینه).
+ * همان الگوریتم اثبات‌شدهٔ زیرپروژهٔ پایتون + دو بهبود v4:
+ *   ۱) تشخیص: پاس DoG + تطبیق تمپلیت چندمقیاسی (درشت ½ + ریزتراز ±۸px
+ *      تمام‌تفکیک) + گارد نواحی مسطح + «جستجوی زیرپیکسلی پیوسته» روی
+ *      (ds، dx، dy) — مهرهایی که نیم‌پیکسل جابه‌جا شده‌اند (تغییر اندازهٔ
+ *      عکس توسط باسکول/CDN) کامل می‌نشینند.
+ *   ۲) حذف: وارون‌سازی ترکیب آلفا با رنگ — B = (I − a·c)/(1−a) — با
+ *      نقشه‌های نمونه‌برداری‌شدهٔ پیوسته + «gain تطبیقی» (اگر جوهرِ باقی‌مانده
+ *      به‌روشنی بیشتر از تمپلیت باشد، پاس اضافه با آن نسبت حذف می‌کند) +
+ *      دینویز قوی‌تر روی جوهر پررنگ (σ=1.3).
  *
  * همهٔ ثابت‌ها عین python/image-editing/config.json هستند.
  */
@@ -19,10 +23,20 @@ const MIN_SCORE = 0.45;
 const MIN_EVIDENCE = 5.0;
 const ALPHA_FLOOR = 0.12;
 const INK_THRESHOLD = 0.03;
-const DENOISE_SIGMA = 0.8;
-const DENOISE_ABOVE = 0.35;
-const COARSE_DIV = 2; // جستجوی درشت در ½ تفکیک (¼ برای تشخیص مقیاس خیلی نویزی بود)
-const FINE_RANGE = 8; // پنجرهٔ ریزتراز — درشت در پله‌های ۲px می‌آید
+const DENOISE_SIGMA = 1.3;
+const DENOISE_ABOVE = 0.25;
+const COARSE_DIV = 2; // جستجوی درشت در ½ تفکیک
+const FINE_RANGE = 8; // پنجرهٔ ریزتراز
+// v4 — جستجوی زیرپیکسلی پیوسته
+const SUB_DS = [-0.012, -0.006, 0, 0.006, 0.012];
+const SUB_DXY = [-0.5, -0.25, 0, 0.25, 0.5];
+// v4 — gain تطبیقی
+const AG_GAP = 0.35;
+const AG_DAMP = 0.85;
+const AG_MAX = 2;
+const BG_SIGMA = 9.0;   // درون‌یابی پس‌زمینه برای برآورد gain
+const BG_KSIZE = 55;
+const INK_PIX = 0.05;   // حداقل آلفای «پیکسل جوهر»
 
 export interface WmDetection {
   score: number;
@@ -32,11 +46,14 @@ export interface WmDetection {
   w: number;
   h: number;
   evidence: number;
+  dx: number; // جابه‌جایی زیرپیکسلی افقی مهر (v4)
+  dy: number; // جابه‌جایی زیرپیکسلی عمودی
+  sf: number; // مقیاس پیوستهٔ پالایش‌شده (۰ = همان scale)
 }
 
 export interface WmMaps {
   a: Float32Array; // آلفا (h×w)
-  c: Float32Array; // رنگ جوهر (h×w×۳، درهم)
+  c: Float32Array; // رنگ جوهر (h×w×۳، درهم RGB)
   d: Float32Array; // نقشهٔ تشخیص (h×w)
   w: number;
   h: number;
@@ -101,6 +118,109 @@ export function areaResize(src: Float32Array, sw: number, sh: number, dw: number
         }
       }
       out[y * dw + x] = cnt > 0 ? sum / cnt : 0;
+    }
+  }
+  return out;
+}
+
+/** بلور گاوسی جداشدنی روی نقشهٔ دوبعدی float. */
+function blurMap2D(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  const radius = Math.max(1, Math.ceil(sigma * 3));
+  const ksize = radius * 2 + 1;
+  const k = new Float32Array(ksize);
+  let ksum = 0;
+  for (let i = 0; i < ksize; i++) {
+    const t = (i - radius) / sigma;
+    k[i] = Math.exp(-0.5 * t * t);
+    ksum += k[i];
+  }
+  for (let i = 0; i < ksize; i++) k[i] /= ksum;
+  const tmp = new Float32Array(src.length);
+  const out = new Float32Array(src.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let i = 0; i < ksize; i++) {
+        const xx = Math.min(w - 1, Math.max(0, x + i - radius));
+        s += k[i] * src[row + xx];
+      }
+      tmp[row + x] = s;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let i = 0; i < ksize; i++) {
+        const yy = Math.min(h - 1, Math.max(0, y + i - radius));
+        s += k[i] * tmp[yy * w + x];
+      }
+      out[y * w + x] = s;
+    }
+  }
+  return out;
+}
+
+/** کernen گاوسی جداشدنی (برای کانولوشن نرمال‌شدهٔ پس‌زمینه). */
+function gaussKernel(ksize: number, sigma: number): Float32Array {
+  const radius = (ksize - 1) / 2;
+  const k = new Float32Array(ksize);
+  let s = 0;
+  for (let i = 0; i < ksize; i++) {
+    const t = (i - radius) / sigma;
+    k[i] = Math.exp(-0.5 * t * t);
+    s += k[i];
+  }
+  for (let i = 0; i < ksize; i++) k[i] /= s;
+  return k;
+}
+
+/**
+ * نمونه‌برداری پیوستهٔ یک نقشهٔ دوبعدی از قالب مبنا (v4).
+ * پیکسل (i, j) جعبهٔ bw×bh به مختصات مبنا می‌رود: u = (i − ox)/s.
+ * برای کوچک‌شده (s<1) قالب با گاوسی پیش‌تار می‌شود (ضدآلیاسینگ).
+ */
+function sampleMap2D(base: Float32Array, bw: number, bh: number, s: number, ox: number, oy: number): Float32Array {
+  const th_ = (base.length / (BUSKOOL_TEMPLATE.w)) | 0; // h مبنا
+  const tw_ = BUSKOOL_TEMPLATE.w;
+  let src = base;
+  if (s < 0.995) {
+    const sig = 0.55 * (1.0 / s - 1.0);
+    if (sig > 0.05) src = blurMap2D(base, tw_, th_, sig);
+  }
+  const out = new Float32Array(bw * bh);
+  // ردیف‌ها/ستون‌های نمونه با وزن bilinear — جداشدنی
+  const u0 = new Int32Array(bw);
+  const u1 = new Int32Array(bw);
+  const fu = new Float32Array(bw);
+  const v0 = new Int32Array(bh);
+  const v1 = new Int32Array(bh);
+  const fv = new Float32Array(bh);
+  for (let i = 0; i < bw; i++) {
+    const u = (i - ox) / s;
+    const a0 = Math.floor(u);
+    u0[i] = Math.min(tw_ - 1, Math.max(0, a0));
+    u1[i] = Math.min(tw_ - 1, Math.max(0, a0 + 1));
+    fu[i] = Math.min(1, Math.max(0, u - a0));
+  }
+  for (let j = 0; j < bh; j++) {
+    const v = (j - oy) / s;
+    const b0 = Math.floor(v);
+    v0[j] = Math.min(th_ - 1, Math.max(0, b0));
+    v1[j] = Math.min(th_ - 1, Math.max(0, b0 + 1));
+    fv[j] = Math.min(1, Math.max(0, v - b0));
+  }
+  for (let j = 0; j < bh; j++) {
+    const r0 = v0[j] * tw_;
+    const r1 = v1[j] * tw_;
+    const w1 = fv[j];
+    const w0 = 1 - w1;
+    for (let i = 0; i < bw; i++) {
+      const fx = fu[i];
+      const gx = 1 - fx;
+      const top = src[r0 + u0[i]] * gx + src[r0 + u1[i]] * fx;
+      const bot = src[r1 + u0[i]] * gx + src[r1 + u1[i]] * fx;
+      out[j * bw + i] = top * w0 + bot * w1;
     }
   }
   return out;
@@ -242,7 +362,8 @@ function stdOf(m: Float32Array, n: number): number {
 }
 
 /**
- * تشخیص واترمارک — درشت (¼ تفکیک، همهٔ مقیاس‌ها) سپس ریزتراز کامل.
+ * تشخیص واترمارک — درشت (½ تفکیک، همهٔ مقیاس‌ها) سپس ریزتراز کامل و
+ * جستجوی زیرپیکسلی پیوسته (v4).
  * gray: تصویر خاکستری float؛ خروجی: تشخیص یا null.
  */
 export async function detectWatermark(
@@ -254,7 +375,7 @@ export async function detectWatermark(
   const TW = maps.w;
   const TH = maps.h;
 
-  // ── درشت: ¼ تفکیک ──
+  // ── درشت: ½ تفکیک ──
   const cw = Math.max(1, Math.floor(w / COARSE_DIV));
   const ch = Math.max(1, Math.floor(h / COARSE_DIV));
   const cgray = areaResize(gray, w, h, cw, ch);
@@ -284,15 +405,13 @@ export async function detectWatermark(
   }
   if (best.scale === 0) return null;
 
-  // ── ریزتراز در تفکیک کامل: مقیاس‌های همسایه ±۰٫۰۴ و شیفت‌های ±۸px ──
-  // نکته: امتیاز درشت (نیم‌تفکیک) با امتیاز ریز (تمام‌تفکیک) هم‌مقیاس نیست —
-  // ریزتراز نباید با امتیاز درشت seed شود وگرنه هرگز بهترش نمی‌کند.
+  // ── ریزتراز در تفکیک کامل: مقیاس‌های همسایه و شیفت‌های ±۸px ──
   const R = await dogResponse(gray, w, h, DOG_SIGMA);
   const idx = SCALES.indexOf(best.scale);
   const bases = [SCALES[idx - 1], best.scale, SCALES[idx + 1]].filter((v) => v != null);
   let fine: { score: number; scale: number; x: number; y: number; w: number; h: number } | null = null;
   for (const base of bases) {
-    for (const ds of [-0.04, -0.02, 0, 0.02, 0.04]) {
+    for (let ds = -0.04; ds <= 0.04; ds += 0.02) {
       const s = base + ds;
       const tw = Math.round(TW * s);
       const th = Math.round(TH * s);
@@ -328,16 +447,54 @@ export async function detectWatermark(
       w: best.w,
       h: best.h,
       evidence: evidenceOf(R, w, best.x, best.y, best.w, best.h),
+      dx: 0,
+      dy: 0,
+      sf: 0,
     };
   }
+
+  // ── جستجوی زیرپیکسلی پیوسته (v4): (ds، dx، dy) با گام ۰٫۲۵px ──
+  // نقشهٔ تشخیص با مقیاس پیوسته نمونه‌برداری می‌شود؛ جستجوی مشترک از
+  // جبران بیش‌ازحدِ سهمی‌های جداگانه جلوگیری می‌کند.
+  const fb = fine;
+  const patch = new Float32Array(fb.w * fb.h);
+  for (let j = 0; j < fb.h; j++) {
+    const ro = (fb.y + j) * w + fb.x;
+    patch.set(R.subarray(ro, ro + fb.w), j * fb.w);
+  }
+  const bestC = { score: fb.score, ds: 0, dx: 0, dy: 0 };
+  if (stdOf(patch, patch.length) >= 1.0) {
+    for (const ds of SUB_DS) {
+      const sf = fb.scale + ds;
+      if (sf <= 0.2) continue;
+      for (const ddx of SUB_DXY) {
+        for (const ddy of SUB_DXY) {
+          if (ds === 0 && ddx === 0 && ddy === 0) continue; // خود قله
+          const Tc = sampleMap2D(maps.d, fb.w, fb.h, sf, ddx, ddy);
+          if (stdOf(Tc, Tc.length) < 0.003) continue;
+          const sc = pearson(Tc, patch, Tc.length);
+          if (sc > bestC.score) {
+            bestC.score = sc;
+            bestC.ds = ds;
+            bestC.dx = ddx;
+            bestC.dy = ddy;
+          }
+        }
+      }
+    }
+  }
+  const sf = fb.scale + bestC.ds;
   return {
-    score: fine.score,
-    scale: fine.scale,
-    x: fine.x,
-    y: fine.y,
-    w: fine.w,
-    h: fine.h,
-    evidence: evidenceOf(R, w, fine.x, fine.y, fine.w, fine.h),
+    score: fb.score,
+    scale: fb.scale,
+    x: fb.x,
+    y: fb.y,
+    w: fb.w,
+    h: fb.h,
+    evidence: evidenceOf(R, w, fb.x, fb.y, fb.w, fb.h),
+    dx: bestC.dx,
+    dy: bestC.dy,
+    sf: sf > 0.3 && sf < 2.5 ? sf : 0,
   };
 }
 
@@ -346,7 +503,7 @@ export function isStrong(det: WmDetection | null): det is WmDetection {
 }
 
 // ─── حذف ────────────────────────────────────────────────────────────────────
-/** بلور گاوسی جداپذیر روی ناحیهٔ کوچک (برای denoise بازسازی). */
+/** بلور گاوسی جداشدنی روی ناحیهٔ کوچک RGB درهم (برای denoise بازسازی). */
 function gaussianBlurRegion(reg: Float32Array, w: number, h: number, sigma: number): Float32Array {
   const radius = Math.max(1, Math.ceil(sigma * 3));
   const ksize = radius * 2 + 1;
@@ -385,9 +542,98 @@ function gaussianBlurRegion(reg: Float32Array, w: number, h: number, sigma: numb
   return out;
 }
 
+/** پس‌زمینهٔ برآوردی با کانولوشن نرمال‌شده (فقط از پیکسل‌های غیرجوهر). */
+function normBackgroundGray(gray: Float32Array, w: number, h: number, inkMask: Uint8Array): Float32Array {
+  const k = gaussKernel(BG_KSIZE, BG_SIGMA);
+  const ksize = k.length;
+  const radius = (ksize - 1) / 2;
+  const tnum = new Float32Array(w * h);
+  const tden = new Float32Array(w * h);
+  // پاس افقی: نمونه از همسایه‌های xx
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      let sn = 0;
+      let sd = 0;
+      for (let i = 0; i < ksize; i++) {
+        const xx = Math.min(w - 1, Math.max(0, x + i - radius));
+        const m = inkMask[row + xx] ? 0 : 1;
+        sn += k[i] * gray[row + xx] * m;
+        sd += k[i] * m;
+      }
+      tnum[row + x] = sn;
+      tden[row + x] = sd;
+    }
+  }
+  // پاس عمودی
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sn = 0;
+      let sd = 0;
+      for (let i = 0; i < ksize; i++) {
+        const yy = Math.min(h - 1, Math.max(0, y + i - radius));
+        sn += k[i] * tnum[yy * w + x];
+        sd += k[i] * tden[yy * w + x];
+      }
+      out[y * w + x] = sn / Math.max(sd, 1e-3);
+    }
+  }
+  return out;
+}
+
 /**
- * حذف واترمارک از RGB خام (Uint8 درهم ۳کاناله) — خروجی: باکس مؤثر یا null.
- * پیکسل‌های بیرون از باکس دست نمی‌خورند (همان تضمین پایتون).
+ * برآورد نسبت جوهرِ باقی‌مانده نسبت به جوهر تمپلیت (v4).
+ * resid = تصویر فعلی − پس‌زمینهٔ درون‌یابی‌شده؛ gain = LSQ(resid, a·(c−B̂)).
+ */
+function residualGain(cur: Float32Array, a: Float32Array, cPlanes: Float32Array[],
+                      bw: number, bh: number): number {
+  const n = bw * bh;
+  const gray = new Float32Array(n);
+  const cg = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    gray[i] = (cur[i * 3] + cur[i * 3 + 1] + cur[i * 3 + 2]) / 3;
+    cg[i] = (cPlanes[0][i] + cPlanes[1][i] + cPlanes[2][i]) / 3;
+  }
+  const ink = new Uint8Array(n);
+  let nInk = 0;
+  for (let i = 0; i < n; i++) {
+    if (a[i] > INK_PIX) {
+      ink[i] = 1;
+      nInk++;
+    }
+  }
+  if (nInk < 30) return 0;
+  const best = normBackgroundGray(gray, bw, bh, ink);
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    if (!ink[i]) continue;
+    const inkT = a[i] * (cg[i] - best[i]);
+    num += (gray[i] - best[i]) * inkT;
+    den += inkT * inkT;
+  }
+  if (den < 1e-9) return 0;
+  const g = num / den;
+  return Math.max(-0.15, Math.min(0.95, g));
+}
+
+/** وارون‌سازی ترکیب آلفا با gain: B = (I − g·a·c)/(1 − g·a). */
+function inversePass(reg: Float32Array, a: Float32Array, cPlanes: Float32Array[], gain: number): void {
+  const n = a.length;
+  for (let i = 0; i < n; i++) {
+    const ga = Math.max(-0.6, Math.min(0.95, a[i] * gain));
+    const den = Math.max(1 - ga, ALPHA_FLOOR);
+    for (let c = 0; c < 3; c++) {
+      const p = i * 3 + c;
+      reg[p] = (reg[p] - ga * cPlanes[c][i]) / den;
+    }
+  }
+}
+
+/**
+ * حذف واترمارک از RGB خام (Uint8 درهم ۳کاناله) — v4.
+ * خروجی: باکس مؤثر یا null. پیکسل‌های بیرون از باکس دست نمی‌خورند.
  */
 export function removeWatermarkRgb(
   rgb: Uint8Array,
@@ -403,52 +649,86 @@ export function removeWatermarkRgb(
   if (x2 <= x1 || y2 <= y1) return null;
   const bw = x2 - x1;
   const bh = y2 - y1;
-  const aFull = areaResize(maps.a, maps.w, maps.h, det.w, det.h);
-  // رنگ: هر کانال جداگانه resize شود (resize تختِ درهم، کانال‌ها را قاطی می‌کرد)
-  const cCh: Float32Array[] = [];
-  for (let c = 0; c < 3; c++) {
-    const plane = new Float32Array(maps.w * maps.h);
-    for (let i = 0; i < plane.length; i++) plane[i] = maps.c[i * 3 + c];
-    cCh.push(areaResize(plane, maps.w, maps.h, det.w, det.h));
+
+  // نقشه‌های (a، c) — پیوسته اگر تراز زیرپیکسلی موجود است (v4)
+  let a: Float32Array;
+  let cPlanes: Float32Array[];
+  const useSub = det.dx !== 0 || det.dy !== 0 || det.sf > 0;
+  if (useSub) {
+    const sf = det.sf > 0 ? det.sf : det.scale;
+    const ox = det.x + det.dx - x1;
+    const oy = det.y + det.dy - y1;
+    a = sampleMap2D(maps.a, bw, bh, sf, ox, oy);
+    cPlanes = [];
+    for (let c = 0; c < 3; c++) {
+      const plane = new Float32Array(maps.w * maps.h);
+      for (let i = 0; i < plane.length; i++) plane[i] = maps.c[i * 3 + c];
+      cPlanes.push(sampleMap2D(plane, bw, bh, sf, ox, oy));
+    }
+  } else {
+    const ax = x1 - det.x;
+    const ay = y1 - det.y;
+    const aFull = areaResize(maps.a, maps.w, maps.h, det.w, det.h);
+    const aCrop = new Float32Array(bw * bh);
+    for (let j = 0; j < bh; j++) {
+      for (let i = 0; i < bw; i++) aCrop[j * bw + i] = aFull[(ay + j) * det.w + (ax + i)];
+    }
+    a = aCrop;
+    cPlanes = [];
+    for (let c = 0; c < 3; c++) {
+      const plane = new Float32Array(maps.w * maps.h);
+      for (let i = 0; i < plane.length; i++) plane[i] = maps.c[i * 3 + c];
+      const rs = areaResize(plane, maps.w, maps.h, det.w, det.h);
+      const crop = new Float32Array(bw * bh);
+      for (let j = 0; j < bh; j++) {
+        for (let i = 0; i < bw; i++) crop[j * bw + i] = rs[(ay + j) * det.w + (ax + i)];
+      }
+      cPlanes.push(crop);
+    }
   }
-  const ax = x1 - det.x;
-  const ay = y1 - det.y;
-  // ناحیهٔ کاری به‌صورت float
+
+  // ناحیهٔ کاری به‌صورت float (RGB درهم)
   const reg = new Float32Array(bw * bh * 3);
   for (let j = 0; j < bh; j++) {
     const ro = ((y1 + j) * w + x1) * 3;
     for (let i = 0; i < bw * 3; i++) reg[j * bw * 3 + i] = rgb[ro + i];
   }
-  const rec = new Float32Array(bw * bh * 3);
-  for (let j = 0; j < bh; j++) {
-    for (let i = 0; i < bw; i++) {
-      const ai = aFull[(ay + j) * det.w + (ax + i)];
-      const den = Math.max(1 - ai, ALPHA_FLOOR);
-      for (let c = 0; c < 3; c++) {
-        const p = j * bw * 3 + i * 3 + c;
-        const cc = cCh[c][(ay + j) * det.w + (ax + i)];
-        rec[p] = ai > INK_THRESHOLD ? (reg[p] - ai * cc) / den : reg[p];
-      }
-    }
+  const reg0 = Float32Array.from(reg);
+
+  inversePass(reg, a, cPlanes, 1.0);
+
+  // gain تطبیقی: فقط زیرحذفیِ واضح (سوگیری برآوردگر < ۰٫۲۵ است)
+  for (let it = 0; it < AG_MAX; it++) {
+    const g = residualGain(reg, a, cPlanes, bw, bh);
+    if (g < AG_GAP) break;
+    inversePass(reg, a, cPlanes, g * AG_DAMP);
   }
+
+  // دینویز نهایی فقط روی جوهر پررنگ
   if (DENOISE_SIGMA > 0) {
-    const blur = gaussianBlurRegion(rec, bw, bh, DENOISE_SIGMA);
+    const blur = gaussianBlurRegion(reg, bw, bh, DENOISE_SIGMA);
     for (let j = 0; j < bh; j++) {
       for (let i = 0; i < bw; i++) {
-        if (aFull[(ay + j) * det.w + (ax + i)] > DENOISE_ABOVE) {
+        if (a[j * bw + i] > DENOISE_ABOVE) {
           for (let c = 0; c < 3; c++) {
-            const p = j * bw * 3 + i * 3 + c;
-            rec[p] = blur[p];
+            const p = (j * bw + i) * 3 + c;
+            reg[p] = blur[p];
           }
         }
       }
     }
   }
+
+  // نوشتن با ماسک جوهر + clip
   for (let j = 0; j < bh; j++) {
     const ro = ((y1 + j) * w + x1) * 3;
-    for (let i = 0; i < bw * 3; i++) {
-      const v = rec[j * bw * 3 + i];
-      rgb[ro + i] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+    for (let i = 0; i < bw; i++) {
+      const ink = a[j * bw + i] > INK_THRESHOLD;
+      for (let c = 0; c < 3; c++) {
+        const p = (j * bw + i) * 3 + c;
+        const v = ink ? reg[p] : reg0[p];
+        rgb[ro + i * 3 + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+      }
     }
   }
   return { x1, y1, x2, y2 };
