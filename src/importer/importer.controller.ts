@@ -67,6 +67,15 @@ export class ImporterController {
     return ok(await this.importedUsers.migrateB(dto.adminPhone));
   }
 
+  @Post('fix-identity')
+  @ApiOperation({
+    summary:
+      'جداسازی هویت آیمچ از باسکول (۲۰-۱۱) — احراز باسکول → bVerified و isVerified همه false (جز پرونده‌های واقعاً تأییدشده)؛ یوزرنیم آیمچِ برابر با یوزرنیم باسکول → تصادفی یکتا (باسکول در bUserName می‌ماند)',
+  })
+  async fixIdentity(@Body() dto: MigrateBDto) {
+    return ok(await this.importedUsers.fixIdentity(dto.adminPhone));
+  }
+
   @Post('single')
   @ApiOperation({ summary: 'شروع ایمپورت تک‌کاربره — پروفایل، آگهی‌ها، عکس‌ها، کامنت‌ها' })
   startSingle(@Body() dto: SingleImportDto) {

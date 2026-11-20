@@ -55,6 +55,7 @@ import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { uniqueUserName } from '../common/user-name';
 import { buildStorage } from '../uploads/storage';
 import { UploadsService } from '../uploads/uploads.service';
 import sharp from 'sharp';
@@ -996,11 +997,13 @@ export class ImporterService {
     // واقعی ویژه شود (بعداً با تماس/تخفیف دعوتش می‌کنیم).
     // در ایمپورت مجدد، مهرهای CRM (contactedAt) و تاریخ اولین ایمپورت
     // (importedAt) از سند قبلی حفظ می‌شوند.
-    const prevDoc = await this.prisma.user.findFirst({
-      where: { userName },
+    // ⚠️ تطبیق «قبلاً ایمپورت شده؟» با bUserName است نه userName — یوزرنیم
+    // آیمچ از ۲۰-۱۱ تصادفی و مستقل از یوزرنیم باسکول است (خواستهٔ مالک).
+    const existingDoc = await this.prisma.user.findFirst({
+      where: { bUserName: userName },
       select: { b: true },
     });
-    const prevB = asBUserData(prevDoc?.b);
+    const prevB = asBUserData(existingDoc?.b);
 
     // آمار باسکول — از همان ابتدای جاب موازی در پرواز بود، الان آماده است
     const statsResp = await statsP;
@@ -1070,48 +1073,56 @@ export class ImporterService {
       activityDomain: profile.activity_domain ?? pf?.activity_domain ?? null,
     };
 
-    const user = await this.prisma.user.upsert({
-      where: { userName },
-      update: {
-        firstName: ui.first_name ?? '',
-        lastName: ui.last_name ?? '',
-        sex: ui.sex ?? null,
-        isVerified: ui.is_verified === 1,
-        isBuyer: ui.is_buyer === 1,
-        isSeller: ui.is_seller === 1 || true,
-        // ⚠️ activePakageType عمداً دست نمی‌خورد — ویژه شدن باسکول فقط در
-        // b.premium ثبت می‌شود؛ در آیمچ فقط پرداخت واقعی کاربر را ویژه می‌کند
-        provinceId: provinceLoc?.buskolId ?? null,
-        cityId: cityLoc?.buskolId ?? null,
-        profile: profileJson as object,
-        // سند رفتار باسکول — همهٔ فیلدهای ارزشمند در یک JSON (خواستهٔ مالک)
-        b: bData as object,
-        // دربارهٔ کسب‌وکار در جای خودش (خواستهٔ مالک ۱۳-۱۱) — همان ستونی که
-        // کاتالوگ عمومی و فرم ویرایش می‌خوانند
-        businessDesc,
-        // ضدتکرار ایمپورت لیستی (خواستهٔ مالک ۱۳-۱۱) — موفقیت پرچم شکست را برمی‌دارد
-        bUserName: userName,
-        failedImport: false,
-      },
-      create: {
-        phone,
-        userName,
-        firstName: ui.first_name ?? '',
-        lastName: ui.last_name ?? '',
-        sex: ui.sex ?? null,
-        role: 'USER',
-        isVerified: ui.is_verified === 1,
-        isBuyer: ui.is_buyer === 1,
-        isSeller: true,
-        provinceId: provinceLoc?.buskolId ?? null,
-        cityId: cityLoc?.buskolId ?? null,
-        profile: profileJson as object,
-        b: bData as object,
-        businessDesc,
-        bUserName: userName,
-        createdAt: this.bkDate(ui.created_at) ?? new Date(),
-      },
+    // ── ثبت/به‌روزرسانی کاربر ──
+    // قاعدهٔ هویت (خواستهٔ مالک ۲۰-۱۱):
+    //   • userName آیمچ = شناسهٔ تصادفی مستقل — هرگز یوزرنیم باسکول نیست و
+    //     در آپدیتِ ایمپورت مجدد دست نمی‌خورد.
+    //   • bUserName = یوزرنیم باسکول (کلید تطبیق ایمپورت/آپدیت قیمت‌ها).
+    //   • bVerified = احراز باسکول (فقط دادهٔ رفتاری)؛ isVerified واقعی آیمچ
+    //     فقط از فلوی مدارک + تأیید ادمین پر می‌شود و اینجا هرگزtrueنمی‌شود.
+    const existingUser = await this.prisma.user.findFirst({
+      where: { bUserName: userName },
+      select: { id: true },
     });
+    const baseData = {
+      firstName: ui.first_name ?? '',
+      lastName: ui.last_name ?? '',
+      sex: ui.sex ?? null,
+      isBuyer: ui.is_buyer === 1,
+      isSeller: true,
+      provinceId: provinceLoc?.buskolId ?? null,
+      cityId: cityLoc?.buskolId ?? null,
+      profile: profileJson as object,
+      b: bData as object,
+      businessDesc,
+      bUserName: userName,
+      // احراز باسکول — در سمت b_verified (خواستهٔ مالک ۲۰-۱۱)
+      bVerified: ui.is_verified === 1,
+    };
+    const user = existingUser
+      ? await this.prisma.user.update({
+          // ⚠️ activePakageType عمداً دست نمی‌خورد — ویژه شدن باسکول فقط در
+          // b.premium ثبت می‌شود؛ در آیمچ فقط پرداخت واقعی کاربر را ویژه می‌کند.
+          // isVerified هم عمداً دست نمی‌خورد (هویت آیمچ مستقل از باسکول).
+          // userName هم دست نمی‌خورد — شناسهٔ آیمچ از روز اول مستقل است.
+          where: { id: existingUser.id },
+          data: {
+            ...baseData,
+            // موفقیت پرچم شکست را برمی‌دارد (ضدتکرار لیستی)
+            failedImport: false,
+          },
+        })
+      : await this.prisma.user.create({
+          data: {
+            ...baseData,
+            phone,
+            // یوزرنیم آیمچ — تصادفی و غیربرابر با یوزرنیم باسکول
+            userName: await uniqueUserName(this.prisma, userName),
+            role: 'USER',
+            failedImport: false,
+            createdAt: this.bkDate(ui.created_at) ?? new Date(),
+          },
+        });
     this.step(job, 'profile', 'done');
     if (bkPremium) {
       this.log(
@@ -1132,7 +1143,9 @@ export class ImporterService {
     this.log(
       job,
       'success',
-      `کاربر ${ui.first_name} ${ui.last_name} (@${userName}) ثبت شد — ایمچ #${user.id.slice(-6)} • باسکول #${ui.id}`,
+      `کاربر ${ui.first_name} ${ui.last_name} (@${userName}) ثبت شد — یوزرنیم آیمچ: @${user.userName} • ایمچ #${user.id.slice(-6)} • باسکول #${ui.id}${
+        ui.is_verified === 1 ? ' • احراز باسکول → فقط دادهٔ رفتاری (b_verified)' : ''
+      }`,
     );
 
     // ── ۲. آواتار — تعیین منبع (دانلود/ذخیره در استخر مشترک تصاویر، مرحلهٔ ۵) ──
@@ -1852,7 +1865,9 @@ export class ImporterService {
         }
       : null;
     const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ bUserName: userName }, { userName }] },
+      // تطبیق فقط با bUserName — یوزرنیم آیمچ مستقل است و تطبیق با آن
+      // می‌توانست حساب بومیِ هم‌نام را قفل کند (خواستهٔ مالک ۲۰-۱۱)
+      where: { bUserName: userName },
       select: { id: true, profile: true },
     });
     if (existing) {
@@ -1868,33 +1883,31 @@ export class ImporterService {
       });
       return;
     }
-    // پروفایل باسکول اصلاً نیامده — stub حداقلی با شمارهٔ ساختگی یکتا
-    for (let i = 0; i < 3; i++) {
-      const suffix = i === 0 ? '' : `-${Math.random().toString(36).slice(2, 6)}`;
-      const stubName = `bk-f-${userName}`.slice(0, 56) + suffix;
-      try {
-        const phone = await this.uniqueFakePhone(0, stubName);
-        await this.prisma.user.create({
-          data: {
-            phone,
-            userName: stubName,
-            role: 'USER',
-            isSeller: false,
-            isBuyer: false,
-            bUserName: userName,
-            failedImport: true,
-            profile: {
-              bStub: true,
-              importedFrom: 'buskool-failed',
-              importedAt: new Date().toISOString(),
-              ...(errDoc ? { bImportError: errDoc } : {}),
-            } as object,
-          },
-        });
-        return;
-      } catch {
-        /* userName تکراری — پسوند تصادفی بعدی */
-      }
+    // پروفایل باسکول اصلاً نیامده — stub حداقلی با شمارهٔ ساختگی یکتا.
+    // یوزرنیم آیمچِ stub هم تصادفی است (الگوی bk-f- قدیمی یوزرنیم باسکول را
+    // لو می‌داد — خواستهٔ مالک ۲۰-۱۱)
+    try {
+      const phone = await this.uniqueFakePhone(0, userName);
+      await this.prisma.user.create({
+        data: {
+          phone,
+          userName: await uniqueUserName(this.prisma, userName),
+          role: 'USER',
+          isSeller: false,
+          isBuyer: false,
+          bUserName: userName,
+          failedImport: true,
+          profile: {
+            bStub: true,
+            importedFrom: 'buskool-failed',
+            importedAt: new Date().toISOString(),
+            ...(errDoc ? { bImportError: errDoc } : {}),
+          } as object,
+        },
+      });
+      return;
+    } catch {
+      /* برخورد نادر کلید یکتا — رکورد بدون مهر شکست می‌ماند؛ ایمپورت بعدی دوباره می‌سازد */
     }
   }
 
@@ -1905,8 +1918,13 @@ export class ImporterService {
   private async uniqueFakePhone(bkId: number, userName: string): Promise<string> {
     for (let i = 0; i < 50; i++) {
       const candidate = `08${String(100000000 + ((bkId + i * 7919) % 900000000)).slice(-9)}`;
-      const owner = await this.prisma.user.findUnique({ where: { phone: candidate }, select: { userName: true } });
-      if (!owner || owner.userName === userName) return candidate;
+      const owner = await this.prisma.user.findUnique({
+        where: { phone: candidate },
+        select: { userName: true, bUserName: true },
+      });
+      // مالکِ مجاز: خودِ این کاربر باسکول — با bUserName (جدید) یا userName
+      // (رکوردهای قدیمی پیش از جداسازی هویت)
+      if (!owner || owner.bUserName === userName || owner.userName === userName) return candidate;
     }
     return `08${String(Date.now()).slice(-9)}`;
   }
@@ -2030,9 +2048,13 @@ export class ImporterService {
 
   // ═══════════════════════════ پیش‌نمایش ═══════════════════════════
 
-  /** خواندن دادهٔ ایمپورت‌شدهٔ یک کاربر از دیتابیس ایمچ (قرارداد فرانت) */
+  /** خواندن دادهٔ ایمپورت‌شدهٔ یک کاربر از دیتابیس ایمچ (قرارداد فرانت).
+   *  ورودی یوزرنیم باسکول است — تطبیق با bUserName (یوزرنیم آیمچ از ۲۰-۱۱
+   *  تصادفی است)؛ fallback هم‌نامی با userName برای رکوردهای پیش از مهاجرت. */
   async preview(userName: string) {
-    const user = await this.prisma.user.findUnique({ where: { userName } });
+    const user = await this.prisma.user.findFirst({
+      where: { OR: [{ bUserName: userName }, { userName }] },
+    });
     if (!user) throw new ForbiddenException(`کاربر @${userName} در دیتابیس ایمچ نیست — اول ایمپورت کنید`);
 
     const [products, reviews, bComments, bCommentsTotal, buyRequests, photoRows] = await Promise.all([
@@ -2093,6 +2115,9 @@ export class ImporterService {
         id: user.id,
         phone: user.phone,
         userName: user.userName,
+        // هویت دوگانه (خواستهٔ مالک ۲۰-۱۱) — یوزرنیم آیمچ مستقل + هویت باسکول
+        bUserName: user.bUserName,
+        bVerified: user.bVerified,
         firstName: user.firstName,
         lastName: user.lastName,
         isVerified: user.isVerified,

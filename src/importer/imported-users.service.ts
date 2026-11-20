@@ -26,6 +26,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { generateUserName } from '../common/user-name';
 import { buildStorage } from '../uploads/storage';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
 import { mongoDateRange } from './date-range.util';
@@ -45,6 +46,8 @@ export interface ImportedUserRow {
   role: string;
   isActive: boolean;
   isVerified: boolean;
+  /** (۲۰-۱۱) احراز هویت باسکول — دادهٔ رفتاری، بدون اعتبار در آیمچ */
+  bVerified: boolean;
   failedImport: boolean;
   /** دلیل آخرین شکست ایمپورت (خواستهٔ مالک ۱۵-۱۱) — از profile.bImportError؛
    *  null یعنی شکست قدیمی بدون ثبت دلیل یا ایمپورت سالم */
@@ -88,6 +91,9 @@ export interface ImportedUsersSummary {
   selfImported: number;
   /** رکوردهای قدیمی که هنوز سند b ندارند — دکمهٔ «مهاجرت ساختار b» */
   needsMigration: number;
+  /** (۲۰-۱۱) هنوز جداسازی هویت آیمچ/باسکول نشده — یوزرنیم آیمچ == یوزرنیم
+   *  باسکول (یا الگوی لودهندهٔ bk-f-*) — دکمهٔ «جداسازی هویت» */
+  needsIdentityFix: number;
 }
 
 export interface ImportedUsersListResult {
@@ -345,6 +351,7 @@ export class ImportedUsersService {
                 role: 1,
                 is_active: 1,
                 is_verified: 1,
+                b_verified: 1,
                 failed_import: 1,
                 import_error: '$profile.bImportError',
                 is_stub: { $eq: ['$profile.bStub', true] },
@@ -408,6 +415,7 @@ export class ImportedUsersService {
         role: String(r.role ?? 'USER'),
         isActive: r.is_active !== false,
         isVerified: r.is_verified === true,
+        bVerified: r.b_verified === true,
         failedImport: r.failed_import === true,
         importError: normalizeImportError(r.import_error),
         isStub: r.is_stub === true,
@@ -482,6 +490,20 @@ export class ImportedUsersService {
               { $count: 'n' },
             ],
             needsMigration: [{ $match: { b_user_name: { $ne: null }, b: null } }, { $count: 'n' }],
+            // (۲۰-۱۱) جداسازی هویت لازم دارد: یوزرنیم آیمچ == یوزرنیم باسکول،
+            // یا الگوی قدیمیِ لودهندهٔ bk-f-* — پس از fix-identity صفر می‌شود
+            needsIdentityFix: [
+              {
+                $match: {
+                  $or: [
+                    { $expr: { $eq: ['$user_name', '$b_user_name'] } },
+                    { user_name: { $regex: '^bk-f-' } },
+                    { user_name: { $regex: '^bk-c-' } },
+                  ],
+                },
+              },
+              { $count: 'n' },
+            ],
           },
         },
       ],
@@ -500,6 +522,7 @@ export class ImportedUsersService {
       failed: facetCount([f], 'failed'),
       selfImported: facetCount([f], 'selfImported'),
       needsMigration: facetCount([f], 'needsMigration'),
+      needsIdentityFix: facetCount([f], 'needsIdentityFix'),
     };
   }
 
@@ -520,6 +543,7 @@ export class ImportedUsersService {
         role: true,
         isActive: true,
         isVerified: true,
+        bVerified: true,
         isBuyer: true,
         isSeller: true,
         avatarUrl: true,
@@ -599,6 +623,7 @@ export class ImportedUsersService {
         role: user.role,
         isActive: user.isActive,
         isVerified: user.isVerified,
+        bVerified: user.bVerified,
         isBuyer: user.isBuyer,
         isSeller: user.isSeller,
         avatarUrl: user.avatarUrl,
@@ -775,6 +800,151 @@ export class ImportedUsersService {
 
     this.logger.log(`migrate-b: ${migrated} migrated, ${premiumFixed} premium reset`);
     return { migrated, premiumFixed, skipped: legacyUsers.length === 0 ? 0 : 0 };
+  }
+
+  // ═══════════════════════════ جداسازی هویت آیمچ/باسکول ═══════════════════════════
+
+  /**
+   * مهاجرت یک‌بارهٔ جداسازی هویت (خواستهٔ مالک ۲۰-۱۱):
+   *
+   *   ۱) احراز هویت — isVerifiedِ همه false می‌شود (هیچ کاربری واقعاً در آیمچ
+   *      احراز نشده؛ مقدار فعلی از باسکول کپی شده بود). مقدار باسکول در
+   *      bVerified (b_verified) نگه داشته می‌شود: isVerified قدیمی یا b.isVerified.
+   *      استثنا: کاربرانی که پروندهٔ احراز تأییدشده دارند (VerificationOrder
+   *      approved) — احراز واقعی‌اند و true می‌مانند.
+   *
+   *   ۲) یوزرنیم — برای هر کاربری که یوزرنیم آیمچش با یوزرنیم باسکولش یکی
+   *      است (یا الگوی قدیمی bk-f-* / bk-c-* دارد)، یوزرنیم آیمچ تصادفی و
+   *      یکتا ساخته می‌شود (مستقل از باسکول). یوزرنیم باسکول در bUserName
+   *      هست و دست نمی‌خورد — کلید ایمپورت/آپدیت قیمت‌های بعدی باسکول.
+   *      ردپای تحلیل (ActivityLog.catalogUserName) هم با نام جدید هماهنگ می‌شود.
+   *
+   * idempotent است: اجرای دوباره فقط کاربران تازه‌رسیده را می‌گیرد؛ احرازِ
+   * واقعیِ بعدی (پروندهٔ approved) هرگز پاک نمی‌شود.
+   */
+  async fixIdentity(adminPhone: string) {
+    this.assertAdmin(adminPhone);
+
+    // پاسخ دستور update خام مونگو: { n, nModified } (و نه modifiedCount)
+    const modCount = (r: unknown): number => {
+      const x = r as { nModified?: number; modifiedCount?: number; n?: number } | null;
+      return Number(x?.nModified ?? x?.modifiedCount ?? x?.n ?? 0);
+    };
+
+    // ── ۱) احراز هویت ──
+    // الف) b_verified برای کاربران باسکولی: از is_verified قدیمی یا b.isVerified
+    // (دو updateMany خام — سند‌های b_user_name == null شامل نمی‌شوند)
+    const setBFromVerified = await this.prisma.$runCommandRaw({
+      update: 'User',
+      updates: [
+        {
+          q: {
+            b_user_name: { $ne: null },
+            $or: [{ is_verified: true }, { 'b.isVerified': true }],
+          },
+          u: { $set: { b_verified: true } },
+          multi: true,
+        },
+      ],
+    }) as unknown as { modifiedCount?: number };
+    // ب) is_verified = false برای همه — به‌جز پرونده‌های احرازِ واقعاً تأییدشده
+    const approved = await this.prisma.verificationOrder.findMany({
+      where: { status: 'approved' },
+      select: { userId: true },
+    });
+    const approvedOids = approved.map((v) => ({ $oid: v.userId }));
+    const clearVerified = await this.prisma.$runCommandRaw({
+      update: 'User',
+      updates: [
+        {
+          q: {
+            is_verified: true,
+            ...(approvedOids.length ? { _id: { $nin: approvedOids } } : {}),
+          },
+          u: { $set: { is_verified: false } },
+          multi: true,
+        },
+      ],
+    }) as unknown as { modifiedCount?: number };
+    // ج) b_verified صریح false برای بقیه (تا هیچ سندی بدون فیلد نماند)
+    await this.prisma.$runCommandRaw({
+      update: 'User',
+      updates: [{ q: { b_verified: { $ne: true } }, u: { $set: { b_verified: false } }, multi: true }],
+    });
+
+    // ── ۲) یوزرنیم‌های تصادفی ──
+    // همهٔ کاندیدها: باسکولی‌ها (bUserName پر) + stub های قدیمی با الگوی
+    // bk-f-* / bk-c-* (حتی اگر bUserName نداشته باشند — رکوردهای خیلی قدیمی)
+    const toRename = await this.prisma.user.findMany({
+      where: {
+        OR: [
+          { bUserName: { not: null } },
+          { userName: { startsWith: 'bk-f-' } },
+          { userName: { startsWith: 'bk-c-' } },
+        ],
+      },
+      select: { id: true, userName: true, bUserName: true },
+    });
+    const needsRename = toRename.filter(
+      (u) =>
+        (u.bUserName != null && u.userName === u.bUserName) ||
+        u.userName.startsWith('bk-f-') ||
+        u.userName.startsWith('bk-c-'),
+    );
+    // یکتایی در حافظه: همهٔ یوزرنیم‌های فعلی + نام‌های تازهٔ همین اجرا
+    const taken = new Set(toRename.map((u) => u.userName));
+    // کاربران بدون bUserName هم در مجموعه یکتایی می‌آیند (بدون ریسک تغییرشان)
+    const others = await this.prisma.user.findMany({
+      where: { bUserName: null },
+      select: { id: true, userName: true },
+    });
+    const renameIds = new Set(toRename.map((u) => u.id));
+    for (const o of others) taken.add(o.userName);
+
+    let renamed = 0;
+    let renameFailed = 0;
+    const CHUNK = 50;
+    for (let i = 0; i < needsRename.length; i += CHUNK) {
+      const chunk = needsRename.slice(i, i + CHUNK);
+      await Promise.all(
+        chunk.map(async (u) => {
+          let next = generateUserName();
+          // یکتا + غیربرابر با یوزرنیم باسکول خود کاربر
+          for (let t = 0; t < 20 && (taken.has(next) || next === u.bUserName); t++) {
+            next = generateUserName();
+          }
+          if (taken.has(next) || next === u.bUserName) {
+            next = `${generateUserName()}${Date.now().toString(36)}`;
+          }
+          taken.add(next);
+          try {
+            await this.prisma.user.update({ where: { id: u.id }, data: { userName: next } });
+            // ردپای تحلیل کاتالوگ — آمار قدیمی با نام جدید ادامه پیدا می‌کند
+            await this.prisma.activityLog
+              .updateMany({ where: { catalogUserName: u.userName }, data: { catalogUserName: next } })
+              .catch(() => undefined);
+            renamed++;
+          } catch {
+            renameFailed++;
+          }
+        }),
+      );
+    }
+
+    const totalUsers = toRename.length + others.filter((o) => !renameIds.has(o.id)).length;
+    const res = {
+      totalUsers,
+      buskoolUsers: toRename.filter((u) => u.bUserName != null).length,
+      renamedUserNames: renamed,
+      renameFailed,
+      bVerifiedSet: modCount(setBFromVerified),
+      verifiedCleared: modCount(clearVerified),
+      approvedKept: approved.length,
+    };
+    this.logger.log(
+      `fix-identity: renamed=${renamed} (failed=${renameFailed}), bVerified=${res.bVerifiedSet}, cleared=${res.verifiedCleared}, approvedKept=${res.approvedKept}`,
+    );
+    return res;
   }
 
   // ═══════════════════════════ حذف کامل کاربران ═══════════════════════════

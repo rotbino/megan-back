@@ -7,6 +7,7 @@ import { CacheService } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
 import { hashPassword, verifyPassword } from '../common/password';
 import { env, isDev, jwtExpiresInSeconds, OTP_FIXED_CODE } from '../common/config/env';
+import { uniqueUserName } from '../common/user-name';
 import { forceUserDeparture } from '../chat/io-holder';
 
 const OTP_TTL_MS = 2 * 60 * 1000; // عمر کد: ۲ دقیقه
@@ -21,12 +22,8 @@ const LOGIN_LOCK_MS = 15 * 60 * 1000;
 
 const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
 
-/** شناسه عمومی پروفایل مثل باسکول (wbrstu2g1) — بدون حروف گیج‌کننده */
-const USERNAME_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
-function generateUserName(): string {
-  const bytes = randomBytes(8);
-  return Array.from(bytes, (b) => USERNAME_ALPHABET[b % USERNAME_ALPHABET.length]).join('');
-}
+// تولید یوزرنیم عمومی به utils مشترک رفت (src/common/user-name.ts) — ثبت‌نام و
+// ایمپورتر باسکول از یک سازنده استفاده می‌کنند (قاعدهٔ هویت ۲۰-۱۱).
 
 @Injectable()
 export class AuthService implements OnModuleInit, OnModuleDestroy {
@@ -94,7 +91,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       // ثبت‌نام خودکار — مثل جریان OTP قبلی
       isNewUser = true;
       user = await this.prisma.user.create({
-        data: { phone, userName: await this.uniqueUserName(), lastLoginAt: new Date() },
+        data: { phone, userName: await uniqueUserName(this.prisma), lastLoginAt: new Date() },
       });
     } else {
       // کاربر غیرفعال (A3) — ورود مسدود؛ داده‌ها حذف نشده‌اند
@@ -404,7 +401,10 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // ۹) ادغام پرچم‌ها/کیف پول/بسته — فیلدهای خالی از حساب جذب‌شده پر می‌شوند
+    // ۹) ادغام پرچم‌ها/کیف پول/بسته — فیلدهای خالی از حساب جذب‌شده پر می‌شوند.
+    // هویت باسکولی حساب جذب‌شده هم به مالک جدید می‌رسد (خواستهٔ مالک ۲۰-۱۱):
+    // بدون این، پس از ادغام bUserName گم می‌شد و «ایمپورت از وب» و آپدیت
+    // قیمت‌های بعدی باسکول برای این کاربر کار نمی‌کرد.
     const betterPackage =
       (stale.packageExpiresAt?.getTime() ?? 0) > (keeper.packageExpiresAt?.getTime() ?? 0);
     await p.user.update({
@@ -414,6 +414,9 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
         isSeller: keeper.isSeller || stale.isSeller,
         isBuyer: keeper.isBuyer || stale.isBuyer,
         isVerified: keeper.isVerified || stale.isVerified,
+        bVerified: keeper.bVerified || stale.bVerified,
+        bUserName: keeper.bUserName ?? stale.bUserName,
+        failedImport: keeper.failedImport || stale.failedImport,
         activePakageType: Math.max(keeper.activePakageType, stale.activePakageType),
         ...(betterPackage
           ? { packageExpiresAt: stale.packageExpiresAt, packageStartedAt: stale.packageStartedAt }
@@ -429,6 +432,12 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
           ? { profile: keeper.profile as Prisma.InputJsonValue }
           : stale.profile !== null
             ? { profile: stale.profile as Prisma.InputJsonValue }
+            : {}),
+        // سند رفتار باسکول — الگوی profile: مالک خودش دارد وگرنه از جذب‌شده
+        ...(keeper.b !== null
+          ? { b: keeper.b as Prisma.InputJsonValue }
+          : stale.b !== null
+            ? { b: stale.b as Prisma.InputJsonValue }
             : {}),
       },
     });
@@ -504,7 +513,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       user = await this.prisma.user.create({
         data: {
           phone,
-          userName: await this.uniqueUserName(),
+          userName: await uniqueUserName(this.prisma),
           lastLoginAt: new Date(),
         },
       });
@@ -618,14 +627,5 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000);
     await this.prisma.refreshToken.create({ data: { tokenHash: sha256(token), userId, expiresAt } });
     return token;
-  }
-
-  private async uniqueUserName(): Promise<string> {
-    for (let i = 0; i < 5; i++) {
-      const candidate = generateUserName();
-      const exists = await this.prisma.user.findUnique({ where: { userName: candidate } });
-      if (!exists) return candidate;
-    }
-    return `${generateUserName()}${Date.now().toString(36)}`;
   }
 }
