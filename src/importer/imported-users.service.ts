@@ -884,17 +884,20 @@ export class ImportedUsersService {
     });
 
     // ── ۲) تغییرنام‌ها — فقط `batch` نفر در این فراخوانی ──
+    // ⚠️ batchSize صریح لازم است: پاسخ find خام مونگو پیش‌فرض فقط ۱۰۱ سند
+    // در firstBatch برمی‌گرداند و بدون آن هر فراخوانی فقط ۱۰۱ نفر را می‌گرفت
     const rawDocs = (await this.prisma.$runCommandRaw({
       find: 'User',
       filter: renameFilter,
       limit: batch,
+      batchSize: batch,
       projection: { _id: 1, user_name: 1, b_user_name: 1 },
     })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
     const docs = rawDocs?.cursor?.firstBatch ?? [];
 
     let renamed = 0;
     let renameFailed = 0;
-    const CHUNK = 50;
+    const CHUNK = 100;
     for (let i = 0; i < docs.length; i += CHUNK) {
       const chunk = docs.slice(i, i + CHUNK);
       await Promise.all(
