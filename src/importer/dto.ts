@@ -449,3 +449,69 @@ export class ReviewFilesDto {
   @IsString({ each: true })
   ids!: string[];
 }
+
+// ═══════════════════ آپدیت قیمت‌ها + کاربران جدید (۲۱-۱۱) ═══════════════════
+
+/** POST /importer/update/scan — یک تکهٔ ۱۰۰۰تایی از جدیدترین آگهی‌های باسکول:
+ *  آپدیت قیمت/موجودی/حداقل‌سفارش آگهی‌های موجود + لیست کاربران تازه‌ثبت‌نامِ
+ *  غایب در ایمچ. فرانت حلقهٔ بچ‌ها را می‌چرخاند (۵ث فاصله). */
+export class UpdateScanDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+
+  /** رکورد شروع — بازهٔ [from, to) نیمه‌باز و ۰-بنیاد است (تست زندهٔ ۲۱-۱۱:
+   *  from=0,to=5 پنج آیتم می‌دهد؛ from=1 چهار آیتم). بچ اول: 0→1000 */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  from!: number;
+
+  /** رکورد پایان — حداکثر from+1000 (سقف سرویس) */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  to!: number;
+
+  /** پیش‌فرض true — false یعنی فقط شناسایی کاربران بدون دست‌زدن به قیمت‌ها */
+  @IsOptional()
+  @IsBoolean()
+  updatePrices?: boolean;
+
+  /** فقط کاربرانِ ثبت‌نام‌شده در این چند روز اخیر — ۰ = همهٔ غایب‌ها */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(3650)
+  recentDays?: number;
+}
+
+/** POST /importer/update/fetch-phone — شمارهٔ موبایل فروشندهٔ باسکول
+ *  (get_seller_phone_number با کوکی؛ هر کوکی ۲۰ شماره) */
+export class FetchPhoneDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+
+  /** شناسهٔ کاربر باسکول (user_info.id) */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  sId!: number;
+
+  /** شناسهٔ آگهی باسکول — item=PRODUCT */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  pId!: number;
+}
+
+/** POST /importer/update/extract-user — پیش‌ایمپورت یک یوزرنیم باسکول:
+ *  چک وجود در ایمچ (bUserName) + گرفتن شماره؛ ایمپورت کامل با startSingle */
+export class ExtractUserDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+
+  @IsString()
+  @Length(2, 64)
+  userName!: string;
+}
