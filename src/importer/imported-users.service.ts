@@ -805,7 +805,7 @@ export class ImportedUsersService {
   // ═══════════════════════════ جداسازی هویت آیمچ/باسکول ═══════════════════════════
 
   /**
-   * مهاجرت یک‌بارهٔ جداسازی هویت (خواستهٔ مالک ۲۰-۱۱):
+   * مهاجرت جداسازی هویت (خواستهٔ مالک ۲۰-۱۱) — **قابل ازسرگیری**:
    *
    *   ۱) احراز هویت — isVerifiedِ همه false می‌شود (هیچ کاربری واقعاً در آیمچ
    *      احراز نشده؛ مقدار فعلی از باسکول کپی شده بود). مقدار باسکول در
@@ -819,11 +819,14 @@ export class ImportedUsersService {
    *      هست و دست نمی‌خورد — کلید ایمپورت/آپدیت قیمت‌های بعدی باسکول.
    *      ردپای تحلیل (ActivityLog.catalogUserName) هم با نام جدید هماهنگ می‌شود.
    *
-   * idempotent است: اجرای دوباره فقط کاربران تازه‌رسیده را می‌گیرد؛ احرازِ
-   * واقعیِ بعدی (پروندهٔ approved) هرگز پاک نمی‌شود.
+   * سقف تابع سرورلس ورسل ۶۰ ثانیه است — هر فراخوانی حداکثر `batch` (پیش‌فرض
+   * ۵۰۰) تغییرنام انجام می‌دهد و «remaining» برمی‌گرداند؛ فراخوانی مجدد تا
+   * done:true کار را ادامه می‌دهد (idempotent: اجرای دوباره فقط تازه‌رسیده‌ها
+   * را می‌گیرد؛ احرازِ واقعیِ بعدی هرگز پاک نمی‌شود).
    */
-  async fixIdentity(adminPhone: string) {
+  async fixIdentity(adminPhone: string, batchArg?: string) {
     this.assertAdmin(adminPhone);
+    const batch = Math.min(2000, Math.max(50, Number(batchArg) || 500));
 
     // پاسخ دستور update خام مونگو: { n, nModified } (و نه modifiedCount)
     const modCount = (r: unknown): number => {
@@ -831,9 +834,17 @@ export class ImportedUsersService {
       return Number(x?.nModified ?? x?.modifiedCount ?? x?.n ?? 0);
     };
 
-    // ── ۱) احراز هویت ──
+    // فیلتر «نیاز به تغییرنام» — تساوی دو فیلد فقط با $expr مونگو ممکن است
+    const renameFilter = {
+      $or: [
+        { $expr: { $eq: ['$user_name', '$b_user_name'] } },
+        { user_name: { $regex: '^bk-f-' } },
+        { user_name: { $regex: '^bk-c-' } },
+      ],
+    };
+
+    // ── ۱) احراز هویت (فقط در نخستین فراخوانی کار واقعی دارد؛ بعدی‌ها no-op) ──
     // الف) b_verified برای کاربران باسکولی: از is_verified قدیمی یا b.isVerified
-    // (دو updateMany خام — سند‌های b_user_name == null شامل نمی‌شوند)
     const setBFromVerified = await this.prisma.$runCommandRaw({
       update: 'User',
       updates: [
@@ -846,7 +857,7 @@ export class ImportedUsersService {
           multi: true,
         },
       ],
-    }) as unknown as { modifiedCount?: number };
+    });
     // ب) is_verified = false برای همه — به‌جز پرونده‌های احرازِ واقعاً تأییدشده
     const approved = await this.prisma.verificationOrder.findMany({
       where: { status: 'approved' },
@@ -865,84 +876,73 @@ export class ImportedUsersService {
           multi: true,
         },
       ],
-    }) as unknown as { modifiedCount?: number };
+    });
     // ج) b_verified صریح false برای بقیه (تا هیچ سندی بدون فیلد نماند)
     await this.prisma.$runCommandRaw({
       update: 'User',
       updates: [{ q: { b_verified: { $ne: true } }, u: { $set: { b_verified: false } }, multi: true }],
     });
 
-    // ── ۲) یوزرنیم‌های تصادفی ──
-    // همهٔ کاندیدها: باسکولی‌ها (bUserName پر) + stub های قدیمی با الگوی
-    // bk-f-* / bk-c-* (حتی اگر bUserName نداشته باشند — رکوردهای خیلی قدیمی)
-    const toRename = await this.prisma.user.findMany({
-      where: {
-        OR: [
-          { bUserName: { not: null } },
-          { userName: { startsWith: 'bk-f-' } },
-          { userName: { startsWith: 'bk-c-' } },
-        ],
-      },
-      select: { id: true, userName: true, bUserName: true },
-    });
-    const needsRename = toRename.filter(
-      (u) =>
-        (u.bUserName != null && u.userName === u.bUserName) ||
-        u.userName.startsWith('bk-f-') ||
-        u.userName.startsWith('bk-c-'),
-    );
-    // یکتایی در حافظه: همهٔ یوزرنیم‌های فعلی + نام‌های تازهٔ همین اجرا
-    const taken = new Set(toRename.map((u) => u.userName));
-    // کاربران بدون bUserName هم در مجموعه یکتایی می‌آیند (بدون ریسک تغییرشان)
-    const others = await this.prisma.user.findMany({
-      where: { bUserName: null },
-      select: { id: true, userName: true },
-    });
-    const renameIds = new Set(toRename.map((u) => u.id));
-    for (const o of others) taken.add(o.userName);
+    // ── ۲) تغییرنام‌ها — فقط `batch` نفر در این فراخوانی ──
+    const rawDocs = (await this.prisma.$runCommandRaw({
+      find: 'User',
+      filter: renameFilter,
+      limit: batch,
+      projection: { _id: 1, user_name: 1, b_user_name: 1 },
+    })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
+    const docs = rawDocs?.cursor?.firstBatch ?? [];
 
     let renamed = 0;
     let renameFailed = 0;
     const CHUNK = 50;
-    for (let i = 0; i < needsRename.length; i += CHUNK) {
-      const chunk = needsRename.slice(i, i + CHUNK);
+    for (let i = 0; i < docs.length; i += CHUNK) {
+      const chunk = docs.slice(i, i + CHUNK);
       await Promise.all(
-        chunk.map(async (u) => {
-          let next = generateUserName();
-          // یکتا + غیربرابر با یوزرنیم باسکول خود کاربر
-          for (let t = 0; t < 20 && (taken.has(next) || next === u.bUserName); t++) {
-            next = generateUserName();
+        chunk.map(async (d) => {
+          const id = toId(d._id);
+          const oldName = String(d.user_name ?? '');
+          const bName = (d.b_user_name as string | null) ?? null;
+          // یکتایی: تکیه بر ایندکس یونیک + تا ۳ نام تصادفی؛ برخورد با یوزرنیم
+          // باسکول خود کاربر هم در نخست انتخاب رد می‌شود (فضای ۳۳^۸)
+          for (let t = 0; t < 3; t++) {
+            const next = generateUserName();
+            if (next === bName || next === oldName) continue;
+            try {
+              await this.prisma.user.update({ where: { id }, data: { userName: next } });
+              // ردپای تحلیل کاتالوگ — آمار قدیمی با نام جدید ادامه پیدا می‌کند
+              await this.prisma.activityLog
+                .updateMany({ where: { catalogUserName: oldName }, data: { catalogUserName: next } })
+                .catch(() => undefined);
+              renamed++;
+              return;
+            } catch {
+              /* کلید یکتا برخورد کرد — نام بعدی */
+            }
           }
-          if (taken.has(next) || next === u.bUserName) {
-            next = `${generateUserName()}${Date.now().toString(36)}`;
-          }
-          taken.add(next);
-          try {
-            await this.prisma.user.update({ where: { id: u.id }, data: { userName: next } });
-            // ردپای تحلیل کاتالوگ — آمار قدیمی با نام جدید ادامه پیدا می‌کند
-            await this.prisma.activityLog
-              .updateMany({ where: { catalogUserName: u.userName }, data: { catalogUserName: next } })
-              .catch(() => undefined);
-            renamed++;
-          } catch {
-            renameFailed++;
-          }
+          renameFailed++;
         }),
       );
     }
 
-    const totalUsers = toRename.length + others.filter((o) => !renameIds.has(o.id)).length;
+    // باقی‌مانده پس از این دسته (شمارش با همان فیلتر)
+    const remainingAgg = (await this.prisma.$runCommandRaw({
+      aggregate: 'User',
+      pipeline: [{ $match: renameFilter }, { $count: 'n' }],
+      cursor: {},
+    })) as unknown as { cursor?: { firstBatch?: { n?: number }[] } };
+    const remaining = Number(remainingAgg?.cursor?.firstBatch?.[0]?.n ?? 0);
+
     const res = {
-      totalUsers,
-      buskoolUsers: toRename.filter((u) => u.bUserName != null).length,
       renamedUserNames: renamed,
       renameFailed,
+      remaining,
+      done: remaining === 0 && renameFailed === 0,
       bVerifiedSet: modCount(setBFromVerified),
       verifiedCleared: modCount(clearVerified),
       approvedKept: approved.length,
     };
     this.logger.log(
-      `fix-identity: renamed=${renamed} (failed=${renameFailed}), bVerified=${res.bVerifiedSet}, cleared=${res.verifiedCleared}, approvedKept=${res.approvedKept}`,
+      `fix-identity: renamed=${renamed} (failed=${renameFailed}), remaining=${remaining}, bVerified=${res.bVerifiedSet}, cleared=${res.verifiedCleared}, approvedKept=${res.approvedKept}`,
     );
     return res;
   }
