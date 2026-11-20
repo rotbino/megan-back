@@ -204,7 +204,10 @@ export class BuskoolClient {
    *  می‌شود و به‌محض وصل شدن همان درخواست ادامه می‌یابد. خطاهای گذرا (5xx و
    *  محدودیت 429/403) با backoff تا ۳ بار تلاش می‌شوند؛ 4xx رکوردی و پاسخ HTML
    *  همان‌جا تمام می‌شوند (fatalCall) تا سیاست خطای رکورد درباره‌شان تصمیم بگیرد. */
-  async call<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  /** opts.noCookie (۲۱-۱۱): درخواست بدون کوکی — لیست عمومی جدیدترین‌ها با
+   * کوکی شخصی‌سازی می‌شود (هماهنگ با فعالیت صاحب کوکی) و دیگر آخرین آگهی‌های
+   * واقعی سایت نیست — برای آپدیت قیمت‌ها حتماً باید بدون کوکی برود. */
+  async call<T>(path: string, body: Record<string, unknown>, opts?: { noCookie?: boolean }): Promise<T> {
     let lastErr: unknown;
     let hardFails = 0; // شکست‌های غیرشبکه‌ای (HTTP 4xx/5xx، HTML، …)
     let firstNetErrAt = 0; // شروع پنجرهٔ شبکه‌ای همین تماس
@@ -224,7 +227,9 @@ export class BuskoolClient {
           Origin: API,
           Referer: `${API}/`,
         };
-        if (cookie) headers.Cookie = cookie;
+        // کوکی فقط وقتی خواسته شده (پیش‌فرض) — لیست عمومی جدیدترین‌ها باید
+        // بدون کوکی برود تا شخصی‌سازی‌شدهٔ صاحب کوکی نیاید (۲۱-۱۱)
+        if (cookie && !opts?.noCookie) headers.Cookie = cookie;
 
         const res = await fetch(`${API}${path}`, {
           method: 'POST',
@@ -412,6 +417,71 @@ export interface BkProductItem {
 
 export interface BkProductListResp {
   products: BkProductItem[];
+}
+
+// ─── لیست عمومی «جدیدترین آگهی‌ها» (۲۱-۱۱ — آپدیت قیمت‌ها + کاربران جدید) ───
+//
+// POST /user/get_product_list با sort_by:"RD" (همان «جدیدترین‌ها» باسکول؛
+// BM=مرتبط‌ترین). بدون کوکی. هر آیتم main (id/updated_at/stock/min_sale_price/
+// min_sale_amount) + user_info کامل (id/user_name/created_at/is_verified/…)
+// دارد — هر دو کاری که مالک خواست از همین یک لیست درمی‌آید: آپدیت قیمتِ
+// آگهی‌های موجود + شناسایی کاربران تازه‌ثبت‌نام که هنوز در ایمچ نیستند.
+
+export interface BkLatestItem {
+  main: {
+    id: number;
+    updated_at: string;
+    product_name: string;
+    stock: number;
+    min_sale_price: number;
+    min_sale_amount: number;
+    myuser_id: number;
+    sub_category_id: number;
+    province_id: number;
+    city_id: number;
+    sub_category_name: string;
+    unit: string;
+    category_id: number;
+    category_name: string;
+    is_elevated: number;
+    is_rejected?: number;
+    deleted_at?: string | null;
+    last_price_update?: string;
+    has_video: number;
+    is_old: boolean;
+  };
+  user_info: {
+    id: number;
+    user_name: string;
+    first_name: string;
+    last_name: string;
+    active_pakage_type: number;
+    created_at: string;
+    is_verified: number;
+  };
+  profile_info?: Record<string, unknown>;
+  photos?: { file_path: string }[];
+}
+
+export interface BkLatestListResp {
+  products: BkLatestItem[];
+  total_count?: number;
+  status?: boolean;
+}
+
+// ─── شمارهٔ موبایل فروشنده (۲۱-۱۱ — استخراج کاربران جدید) ───────────────────
+//
+// POST /get_seller_phone_number {s_id, p_id, item:"PRODUCT", client:"web"}
+// کوکیِ لاگین‌شده می‌خواهد. کد فرانت خود باسکول (chunks/1.js) پاسخ را
+// e.data.phone می‌خواند — یعنی بدنهٔ {data:{phone}}؛ اشکال رایج دیگر
+// ({phone} مستقیم) هم پذیرفته می‌شود (پارس مداراجو در سرویس).
+// ⚠️ محدودیت باسکول: هر کوکی فقط ۲۰ شماره (خواستهٔ مالک ۲۱-۱۱) — گارد
+// بودجه در PriceUpdateService.
+
+export interface BkSellerPhoneResp {
+  status?: boolean;
+  phone?: string | number;
+  data?: { phone?: string | number } | string;
 }
 
 export interface BkProductDetailResp {

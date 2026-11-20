@@ -557,7 +557,9 @@ export class WebImportService {
     if (!user.businessDesc && !descAuto && (pf?.description ?? '').trim()) {
       data.businessDesc = aimchifyBrandMentions((pf?.description ?? '').trim());
     }
-    if (ui.is_verified === 1 && !user.isVerified) data.isVerified = true;
+    // احراز باسکول — فقط دادهٔ رفتاری در b_verified (خواستهٔ مالک ۲۰-۱۱)؛
+    // isVerified آیمچ فقط از فلوی مدارک + تأیید ادمین پر می‌شود
+    data.bVerified = ui.is_verified === 1;
 
     // profile embedded — فقط کلیدهای خالی پر می‌شوند
     const prevProfile = (user.profile as Record<string, unknown> | null) ?? {};

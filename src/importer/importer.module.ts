@@ -8,6 +8,8 @@ import { ImportedUsersService } from './imported-users.service';
 import { ImportedProductsController } from './imported-products.controller';
 import { ImportedProductsService } from './imported-products.service';
 import { BuskoolWatermarkService } from './buskool-wm.service';
+import { PriceUpdateController } from './price-update.controller';
+import { PriceUpdateService } from './price-update.service';
 
 /**
  * ایمپورتر باسکول — ابزار داخلی ادمین (بازسازی ۱۳-۱۱).
@@ -22,8 +24,8 @@ import { BuskoolWatermarkService } from './buskool-wm.service';
  */
 @Module({
   imports: [UploadsModule, AdminAuthModule],
-  controllers: [ImporterController, ImportedUsersController, ImportedProductsController],
-  providers: [ImporterService, ImportedUsersService, ImportedProductsService, BuskoolWatermarkService],
+  controllers: [ImporterController, ImportedUsersController, ImportedProductsController, PriceUpdateController],
+  providers: [ImporterService, ImportedUsersService, ImportedProductsService, BuskoolWatermarkService, PriceUpdateService],
   exports: [ImporterService, ImportedUsersService, ImportedProductsService, BuskoolWatermarkService],
 })
 export class ImporterModule {}

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../common/api-response';
@@ -65,6 +65,15 @@ export class ImporterController {
   })
   async migrateB(@Body() dto: MigrateBDto) {
     return ok(await this.importedUsers.migrateB(dto.adminPhone));
+  }
+
+  @Post('fix-identity')
+  @ApiOperation({
+    summary:
+      'جداسازی هویت آیمچ از باسکول (۲۰-۱۱، قابل ازسرگیری) — احراز باسکول → bVerified و isVerified همه false (جز پرونده‌های واقعاً تأییدشده)؛ یوزرنیم آیمچِ برابر با یوزرنیم باسکول → تصادفی یکتا (باسکول در bUserName می‌ماند)؛ هر فراخوانی حداکثر ?batch= نفر — تا done:true ادامه دهید',
+  })
+  async fixIdentity(@Body() dto: MigrateBDto, @Query('batch') batch?: string) {
+    return ok(await this.importedUsers.fixIdentity(dto.adminPhone, batch));
   }
 
   @Post('single')
