@@ -895,36 +895,48 @@ export class ImportedUsersService {
     })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
     const docs = rawDocs?.cursor?.firstBatch ?? [];
 
+    // تغییرنام‌ها با «یک» دستور update خام و آرایهٔ statements — یک رفت‌وبرگشت
+    // به‌جای صدها (تأخیرِ بالا‌ی Atlas از ورسل با فراخوانی‌های تکی غیرقابل‌تحمل بود).
+    // ordered:false → خطای یک statement (برخورد نادر کلید یکتا) بقیه را نمی‌اندازد؛
+    // نام برخوردکرده همان کاربر می‌ماند و فراخوانی بعدی با نام تازه retry می‌شود.
     let renamed = 0;
     let renameFailed = 0;
-    const CHUNK = 100;
-    for (let i = 0; i < docs.length; i += CHUNK) {
-      const chunk = docs.slice(i, i + CHUNK);
-      await Promise.all(
-        chunk.map(async (d) => {
-          const id = toId(d._id);
-          const oldName = String(d.user_name ?? '');
-          const bName = (d.b_user_name as string | null) ?? null;
-          // یکتایی: تکیه بر ایندکس یونیک + تا ۳ نام تصادفی؛ برخورد با یوزرنیم
-          // باسکول خود کاربر هم در نخست انتخاب رد می‌شود (فضای ۳۳^۸)
-          for (let t = 0; t < 3; t++) {
-            const next = generateUserName();
-            if (next === bName || next === oldName) continue;
-            try {
-              await this.prisma.user.update({ where: { id }, data: { userName: next } });
-              // ردپای تحلیل کاتالوگ — آمار قدیمی با نام جدید ادامه پیدا می‌کند
-              await this.prisma.activityLog
-                .updateMany({ where: { catalogUserName: oldName }, data: { catalogUserName: next } })
-                .catch(() => undefined);
-              renamed++;
-              return;
-            } catch {
-              /* کلید یکتا برخورد کرد — نام بعدی */
-            }
-          }
-          renameFailed++;
-        }),
-      );
+    if (docs.length) {
+      const userStatements: Record<string, unknown>[] = [];
+      const logStatements: Record<string, unknown>[] = [];
+      const used = new Set<string>();
+      for (const d of docs) {
+        const id = toId(d._id);
+        const oldName = String(d.user_name ?? '');
+        const bName = (d.b_user_name as string | null) ?? null;
+        // نام تصادفی مستقل — یکتا در همین دسته + غیربرابر با یوزرنیم باسکول
+        // خود کاربر (فضای ۳۳^۸؛ برخورد با بقیهٔ دیتابیس را ایندکس یونیک می‌گیرد)
+        let next = generateUserName();
+        while (used.has(next) || next === bName || next === oldName) next = generateUserName();
+        used.add(next);
+        userStatements.push({ q: { _id: { $oid: id } }, u: { $set: { user_name: next } } });
+        // ردپای تحلیل کاتالوگ — آمار قدیمی با نام جدید ادامه پیدا می‌کند
+        logStatements.push({
+          q: { catalog_user_name: oldName },
+          u: { $set: { catalog_user_name: next } },
+          multi: true,
+        });
+      }
+      const upRes = (await this.prisma.$runCommandRaw({
+        update: 'User',
+        updates: userStatements as unknown as Prisma.InputJsonObject[],
+        ordered: false,
+      })) as unknown as { nModified?: number; n?: number; writeErrors?: unknown[] };
+      renamed = modCount(upRes);
+      renameFailed = Number(upRes?.writeErrors?.length ?? 0);
+      // ActivityLog جدا از User — خطایش بی‌اهمیت است (فقط آمار)
+      await this.prisma
+        .$runCommandRaw({
+          update: 'ActivityLog',
+          updates: logStatements as unknown as Prisma.InputJsonObject[],
+          ordered: false,
+        })
+        .catch(() => undefined);
     }
 
     // باقی‌مانده پس از این دسته (شمارش با همان فیلتر)
