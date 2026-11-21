@@ -94,10 +94,20 @@ export class AdminAuthService implements OnModuleInit {
     }
 
     this.clearFails(key);
-    const updated = await this.prisma.adminUser.update({
-      where: { id: admin.id },
-      data: { lastLoginAt: new Date() },
-    });
+    // مهر lastLoginAt حیاتی نیست — اگر نوشتن شکست بخورد (مثل بحران سهمیهٔ
+    // Atlas در ۲۱-۱۱ که نوشتن‌های کلاستر را بلاک کرده بود) ورود ادمین
+    // همچنان توکن صادر می‌کند؛ فقط مهر تازه نمی‌شود.
+    let updated = admin;
+    try {
+      updated = await this.prisma.adminUser.update({
+        where: { id: admin.id },
+        data: { lastLoginAt: new Date() },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `admin-login: ثبت lastLoginAt ناموفق (ورود بدون مهر ادامه می‌یابد): ${String((err as Error)?.message ?? err).slice(0, 140)}`,
+      );
+    }
 
     const token = await this.jwt.signAsync(
       { sub: admin.id, username: admin.username, role: admin.role, scope: 'admin' },
