@@ -593,6 +593,49 @@ model Product {
   @@index([slug])
 }
 
+// ─── «کاربران در انتظار ایمپورت» — اسکن صفحهٔ آپدیت (۲۲-۱۱) ────────────────
+
+/// کاربران باسکولِ شناسایی‌شده در اسکن‌های صفحهٔ «آپدیت» که هنوز کامل ایمپورت
+/// نشده‌اند (خواستهٔ مالک ۲۲-۱۱): به‌محض شناسایی در اسکن، «بدون موبایل» در
+/// دیتابیس ثبت می‌شوند و دیگر گم نمی‌شوند — لیست صفحه از همین جدول خوانده
+/// می‌شود (ماندگار بین جلسه‌ها). موبایل بعداً با دکمهٔ «گرفتن موبایل» از
+/// باسکول گرفته و روی همین رکورد ذخیره می‌شود؛ دکمهٔ «ایمپورت» هم اول همین
+/// رکورد را نگاه می‌کند: موبایل داشته → مستقیم ایمپورت کامل؛ نداشته → اول
+/// موبایل، بعد بلافاصله ایمپورت کامل. با موفقیت ایمپورت، رکورد حذف می‌شود
+/// و کاربر از لیست خارج می‌شود (حذف در جاب تک‌کاربره/لیستی + خودترمیمی لیست).
+model PendingImportUser {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// شناسهٔ کاربر باسکول (user_info.id) — یکتا؛ کلید ثبت/به‌روزرسانی در اسکن
+  bUserId    Int      @unique @map("b_user_id")
+  /// یوزرنیم باسکول — کلید تطبیق با bUserName جدول User و پاک‌سازی بعد از ایمپورت
+  bUserName  String   @map("b_user_name")
+  firstName  String   @default("") @map("first_name")
+  lastName   String   @default("") @map("last_name")
+  /// تاریخ ثبت‌نام در باسکول — مرتب‌سازی «تازه‌ثبت‌نام‌تر اول»
+  bCreatedAt DateTime? @map("b_created_at")
+  /// احراز باسکول — فقط دادهٔ رفتاری (همتای bVerified روی User)
+  isVerified Boolean  @default(false) @map("is_verified")
+  activePakageType Int @default(0) @map("active_pakage_type")
+  /// شمارهٔ موبایل — بعد از «گرفتن موبایل» پر می‌شود؛ خالی = هنوز گرفته نشده
+  phone      String?
+  /// مهر زمان گرفتن موبایل از باسکول
+  phoneTakenAt DateTime? @map("phone_taken_at")
+  /// نمونه‌آگهی برای گرفتن شماره (s_id/p_id) و نمایش در جدول
+  sampleProductId   Int    @map("sample_product_id")
+  sampleProductName String @default("") @map("sample_product_name")
+  sampleCategory    String?
+  samplePrice       Int    @default(0) @map("sample_price")
+  /// چند آگهی از او در آخرین اسکن دیده شد
+  adsSeen    Int      @default(1) @map("ads_seen")
+  /// آخرین باری که در اسکن دیده شد — برای تشخیص کهنه‌ها در آینده
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  /// مرتب‌سازی لیست (تازه‌ثبت‌نام‌تر اول)
+  @@index([bCreatedAt(sort: Desc)])
+}
+
 /// تاریخچهٔ تغییرات آگهی (خواسته مالک ۳-۱۱) — ثبت/ویرایش/حذفِ نرم؛
 /// سوابق قیمت، حداقل فروش و موجودی برای رجوع در موارد اختلاف و نمایش
 /// آیندهٔ «تاریخچهٔ قیمت» به کاربر. حذف نرم است تا فروشندهٔ حقه‌باز نتواند

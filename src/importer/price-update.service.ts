@@ -1,6 +1,6 @@
 /**
  * آپدیت قیمت‌ها + شناسایی کاربران جدید باسکول (۲۱-۱۱، خواستهٔ مالک — «یک تیر
- * برای دو نشان»).
+ * برای دو نشان»؛ نوسازی ۲۲-۱۱: کاربران جدید «در دیتابیس» ثبت می‌شوند).
  *
  * هر فراخوانی «اسکن» یک تکهٔ ۱۰۰۰تایی از لیست عمومی جدیدترین آگهی‌های باسکول
  * را می‌گیرد و از همان دو کار را می‌کند:
@@ -9,9 +9,12 @@
  *      می‌شوند (یک select سبک + مقایسه در حافظه + یک دستور update خام —
  *      نه select/save تک‌تکی؛ خواستهٔ مالک: منابع کم، سرعت بالا).
  *   ۲) شناسایی کاربران تازه‌ثبت‌نام باسکول که هنوز در ایمچ نیستند —
- *      user_info هر آیتم (id/user_name/created_at/…) یونیک می‌شود، با
- *      bUserName جدول یوزر تطبیق داده می‌شود و غایب‌ها با نمونه‌آگهی‌شان
- *      برمی‌گردند تا مالک با یک کلیک شماره‌شان را بگیرد و کامل ایمپورتشان کند.
+ *      user_info هر آیتم یونیک می‌شود، با bUserName جدول یوزر تطبیق داده
+ *      می‌شود و غایب‌ها «همان‌جا در جدول PendingImportUser ثبت می‌شوند»
+ *      (خواستهٔ مالک ۲۲-۱۱: یک بار که پیدا شدیم دیگر توی دیتابیس داریمش —
+ *      «کاربران در انتظار ایمپورت»؛ بدون موبایل). لیست صفحه از همان جدول
+ *      خوانده می‌شود و بین جلسه‌ها/ریفرش‌ها می‌ماند؛ با ایمپورت کامل، رکورد
+ *      حذف و کاربر از لیست خارج می‌شود.
  *
  * ادب شبکه (خواستهٔ مالک — «باسکول تشخیص ندهد ماشین هست و بلاکمون نکند»):
  *   • لیست جدیدترین‌ها «بدون کوکی» گرفته می‌شود — با کوکی، باسکول نتیجه را با
@@ -23,6 +26,9 @@
  * شمارهٔ موبایل فروشنده (/get_seller_phone_number): کوکی می‌خواهد و باسکول به
  * هر کوکی فقط ۲۰ شماره می‌دهد (خواستهٔ مالک) — بودجهٔ مصرفی ماژول-سطح، با
  * عوض‌شدن کوکی صفر می‌شود؛ پاسخِ {phone} یا {data:{phone}} هر دو پذیرفته است.
+ * دکمهٔ «گرفتن موبایل» شماره را روی رکورد PendingImportUser ذخیره می‌کند
+ * (خواستهٔ مالک ۲۲-۱۱) تا دکمهٔ ایمپورت بعدی بدون مصرف دوبارهٔ سهمیه، مستقیم
+ * سراغ ایمپورت کامل برود.
  *
  * سرورلس‌پسند: هیچ جاب/حلقهٔ بلندی اینجا اجرا نمی‌شود — هر فراخوانی فقط یک
  * تکهٔ کوچک کار می‌کند (≪ تایم‌اوت ۶۰ث ورسل) و فرانت حلقهٔ بچ‌ها را
@@ -96,6 +102,29 @@ export interface ScanNewUser {
   adsSeen: number;
 }
 
+/** رکورد «کاربر در انتظار ایمپورت» — ردیف جدول صفحهٔ آپدیت (۲۲-۱۱) */
+export interface PendingImportUserRow {
+  bUserId: number;
+  bUserName: string;
+  firstName: string;
+  lastName: string;
+  createdAt: string | null;
+  isVerified: boolean;
+  activePakageType: number;
+  /** شمارهٔ موبایل — null یعنی هنوز گرفته نشده (بدون موبایل ثبت شده) */
+  phone: string | null;
+  phoneTakenAt: string | null;
+  sampleProductId: number;
+  sampleProductName: string;
+  sampleCategory: string | null;
+  samplePrice: number;
+  adsSeen: number;
+  /** آخرین باری که در اسکن دیده شد (ISO) */
+  lastSeenAt: string;
+  /** تاریخ ثبت رکورد در دیتابیس (ISO) */
+  registeredAt: string;
+}
+
 export interface ScanResult {
   from: number;
   to: number;
@@ -115,7 +144,7 @@ export interface ScanResult {
   usersSeen: number;
   /** کاربران غایب در ایمچ (قبل از فیلتر روز) */
   usersMissing: number;
-  /** کاربران تازه‌ثبت‌نامِ غایب — لیست برگشتی */
+  /** کاربران تازه‌ثبت‌نامِ غایب — همان‌ها در دیتابیس هم ثبت شدند */
   newUsers: ScanNewUser[];
   /** به سقف NEW_USERS_CAP خورد */
   truncated: boolean;
@@ -354,7 +383,132 @@ export class PriceUpdateService {
     } else {
       res.newUsers = missingAll;
     }
+
+    // ── ثبت در دیتابیس: «کاربران در انتظار ایمپورت» (خواستهٔ مالک ۲۲-۱۱) ──
+    // یک بار که پیدا شد، دیگر داریمش — رکورد بدون موبایل ساخته می‌شود و
+    // لیست صفحه از دیتابیس خوانده می‌شود (ماندگار بین جلسه‌ها). به‌روزرسانی
+    // رکورد موجود: فقط داده‌های اسکن (نمونه‌آگهی/تعداد/نام) — موبایلِ گرفته‌شده
+    // و مهرش هرگز بازنویسی نمی‌شوند. best-effort: خطای دیتابیس اسکن را
+    // نمی‌اندازد (قیمت‌ها همین الان آپدیت شده‌اند؛ رکوردها در اسکن بعدی/دوباره
+    // می‌آیند).
+    if (missingAll.length) {
+      try {
+        await this.upsertPending(missingAll);
+      } catch (err) {
+        this.logger.warn(`pending-upsert failed: ${(err as Error).message}`);
+      }
+    }
     return res;
+  }
+
+  /** ثبت/به‌روزرسانی رکوردهای «در انتظار ایمپورت» — کلید یکتا bUserId.
+   *  موبایل گرفته‌شده و مهرش در رکورد موجود حفظ می‌شوند.
+   *  موازی قطعه‌ای (۲۰تایی) — با recentDays=0 یک بچ می‌تواند صدها کاربر غایب
+   *  داشته باشد و upsertهای پیاپیِ تکی روی Atlas از ورسل کُند می‌شوند. */
+  private async upsertPending(users: ScanNewUser[]) {
+    const now = new Date();
+    const CONCURRENCY = 20;
+    for (let i = 0; i < users.length; i += CONCURRENCY) {
+      const chunk = users.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        chunk.map((u) =>
+          this.prisma.pendingImportUser.upsert({
+            where: { bUserId: u.bUserId },
+            create: {
+              bUserId: u.bUserId,
+              bUserName: u.bUserName,
+              firstName: u.firstName,
+              lastName: u.lastName,
+              bCreatedAt: u.createdAt ? new Date(u.createdAt) : null,
+              isVerified: u.isVerified,
+              activePakageType: u.activePakageType,
+              sampleProductId: u.sampleProductId,
+              sampleProductName: u.sampleProductName,
+              sampleCategory: u.sampleCategory,
+              samplePrice: u.samplePrice,
+              adsSeen: u.adsSeen,
+              lastSeenAt: now,
+            },
+            update: {
+              bUserName: u.bUserName,
+              firstName: u.firstName,
+              lastName: u.lastName,
+              bCreatedAt: u.createdAt ? new Date(u.createdAt) : undefined,
+              isVerified: u.isVerified,
+              activePakageType: u.activePakageType,
+              sampleProductId: u.sampleProductId,
+              sampleProductName: u.sampleProductName,
+              sampleCategory: u.sampleCategory,
+              samplePrice: u.samplePrice,
+              adsSeen: u.adsSeen,
+              lastSeenAt: now,
+            },
+          }),
+        ),
+      );
+    }
+  }
+
+  // ═══════════════════════════ لیست انتظار ایمپورت ═══════════════════════════
+
+  /** سقف لیست برگشتی — لیست صفحه خوانا بماند */
+  private static readonly PENDING_LIST_CAP = 500;
+
+  /**
+   * لیست «کاربران در انتظار ایمپورت» (خواستهٔ مالک ۲۲-۱۱) — منبع جدول صفحهٔ
+   * آپدیت؛ ماندگار بین جلسه‌ها/ریفرش‌ها.
+   *
+   * خودترمیمی قبل از خواندن: رکوردهایی که کاربرشان الان در ایمچ است (با ایمپورت
+   * کامل، از هر مسیری: تک‌کاربره/لیستی/وب/دیمت) حذف می‌شوند — استاب failedImport
+   * حذف نمی‌شود چون کاربر هنوز «کامل» ایمپورت نشده و مالک باید بتواند دوباره
+   * ایمپورتش کند (موبایلش هم که گرفته شده حفظ شده — سهمیه دوباره مصرف نمی‌شود).
+   */
+  async pendingUsers(adminPhone: string): Promise<{ users: PendingImportUserRow[]; removedImported: number }> {
+    this.assertAdmin(adminPhone);
+
+    // ── خودترمیمی: ایمپورت‌شده‌های کامل را از لیست بگیر ──
+    let removedImported = 0;
+    const pendings = await this.prisma.pendingImportUser.findMany({
+      select: { bUserName: true },
+    });
+    if (pendings.length) {
+      const names = pendings.map((p) => p.bUserName);
+      const imported = await this.prisma.user.findMany({
+        where: { bUserName: { in: names }, failedImport: false },
+        select: { bUserName: true },
+      });
+      if (imported.length) {
+        const del = await this.prisma.pendingImportUser.deleteMany({
+          where: { bUserName: { in: imported.map((i) => i.bUserName).filter((n): n is string => !!n) } },
+        });
+        removedImported = del.count;
+      }
+    }
+
+    // مرتب: تازه‌ثبت‌نام‌تر اول — در سورت مونگو nullها در desc خودشان آخر می‌افتند
+    const rows = await this.prisma.pendingImportUser.findMany({
+      orderBy: [{ bCreatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: PriceUpdateService.PENDING_LIST_CAP,
+    });
+    const users: PendingImportUserRow[] = rows.map((r) => ({
+      bUserId: r.bUserId,
+      bUserName: r.bUserName,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      createdAt: r.bCreatedAt?.toISOString() ?? null,
+      isVerified: r.isVerified,
+      activePakageType: r.activePakageType,
+      phone: r.phone ?? null,
+      phoneTakenAt: r.phoneTakenAt?.toISOString() ?? null,
+      sampleProductId: r.sampleProductId,
+      sampleProductName: r.sampleProductName,
+      sampleCategory: r.sampleCategory ?? null,
+      samplePrice: r.samplePrice,
+      adsSeen: r.adsSeen,
+      lastSeenAt: r.lastSeenAt.toISOString(),
+      registeredAt: r.createdAt.toISOString(),
+    }));
+    return { users, removedImported };
   }
 
   // ═══════════════════════════ شمارهٔ موبایل فروشنده ═══════════════════════════
@@ -362,11 +516,15 @@ export class PriceUpdateService {
   /**
    * گرفتن شمارهٔ موبایل یک فروشندهٔ باسکول — کوکی می‌خواهد؛ هر کوکی فقط ۲۰
    * شماره (محدودیت باسکول). پاسخ {phone} یا {data:{phone}} هر دو پذیرفته است.
+   *
+   * اگر bUserName داده شود (خواستهٔ مالک ۲۲-۱۱ — دکمهٔ «گرفتن موبایل»)، شماره
+   * روی رکورد «در انتظار ایمپورت» همان کاربر ذخیره می‌شود تا دفعهٔ بعد ایمپورت
+   * بدون مصرف دوبارهٔ سهمیه، مستقیم شروع شود.
    */
   async fetchPhone(
     adminPhone: string,
-    input: { sId: number; pId: number },
-  ): Promise<{ phone: string; budget: PhoneBudgetInfo }> {
+    input: { sId: number; pId: number; bUserName?: string },
+  ): Promise<{ phone: string; budget: PhoneBudgetInfo; saved: boolean }> {
     this.assertAdmin(adminPhone);
     const { cookie } = buskoolConfig();
     if (!cookie) {
@@ -413,7 +571,22 @@ export class PriceUpdateService {
 
     // مصرف بودجه — فقط شمارهٔ واقعاً بیرون‌آمده
     this.phoneUse.used++;
-    return { phone, budget: this.budgetInfo() };
+
+    // ذخیره روی رکورد «در انتظار ایمپورت» — best-effort؛ شکستش گرفتن شماره
+    // را خراب نمی‌کند (فرانت شماره را دارد و با همان ایمپورت را شروع می‌کند)
+    let saved = false;
+    if (input.bUserName) {
+      try {
+        const upd = await this.prisma.pendingImportUser.updateMany({
+          where: { bUserName: input.bUserName },
+          data: { phone, phoneTakenAt: new Date() },
+        });
+        saved = upd.count > 0;
+      } catch (err) {
+        this.logger.warn(`pending phone-save failed: ${(err as Error).message}`);
+      }
+    }
+    return { phone, budget: this.budgetInfo(), saved };
   }
 
   // ═══════════════════════════ استخراج تک‌کاربر ═══════════════════════════
@@ -476,7 +649,9 @@ export class PriceUpdateService {
 
     // ۴) شمارهٔ موبایل (با کوکی + بودجه) — سپس فرانت startSingle را می‌زند.
     // خطای کوکی/شبکه همان‌جا پیام تمیز می‌شود؛ بودجه فقط شمارهٔ واقعی مصرف می‌کند.
-    const { phone, budget } = await this.fetchPhone(adminPhone, { sId, pId });
+    // bUserName هم پاس می‌شود تا اگر همین کاربر در لیست «در انتظار ایمپورت»
+    // هست، شماره‌اش روی رکوردش ذخیره شود (سهمیه دوباره مصرف نشود).
+    const { phone, budget } = await this.fetchPhone(adminPhone, { sId, pId, bUserName: userName });
     return { exists: false, phone, budget };
   }
 }

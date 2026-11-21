@@ -3,13 +3,15 @@
  * گام‌محور و سرورلس‌پسند: هر فراخوانی فقط یک تکهٔ ۱۰۰۰تایی کار می‌کند و
  * فرانت حلقهٔ بچ‌ها را با ۵ ثانیه فاصله می‌چرخاند (خواستهٔ مالک:
  * «یک تیر برای دو نشان» — هم آپدیت قیمت، هم کاربران جدید، در یک صفحه).
+ * نوسازی ۲۲-۱۱: کاربران جدید همان‌جا در جدول «در انتظار ایمپورت» ثبت
+ * می‌شوند — اندپوینت pending لیست ماندگار را می‌دهد.
  */
 import { Body, Controller, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../common/api-response';
 import { PriceUpdateService } from './price-update.service';
-import { ExtractUserDto, FetchPhoneDto, UpdateScanDto } from './dto';
+import { ExtractUserDto, FetchPhoneDto, PendingListDto, UpdateScanDto } from './dto';
 
 @ApiTags('importer')
 @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -20,7 +22,7 @@ export class PriceUpdateController {
   @Post('scan')
   @ApiOperation({
     summary:
-      'یک تکه از جدیدترین آگهی‌های باسکول (بدون کوکی، sort_by=RD) — آپدیت قیمت/موجودی/حداقل‌سفارش آگهی‌های موجود + کاربران تازه‌ثبت‌نامِ غایب؛ بین دو فراخوانی حداقل ۵ ثانیه فاصله باشد (گارد سرور هم هست)',
+      'یک تکه از جدیدترین آگهی‌های باسکول (بدون کوکی، sort_by=RD) — آپدیت قیمت/موجودی/حداقل‌سفارش آگهی‌های موجود + ثبت کاربران تازه‌ثبت‌نامِ غایب در جدول «در انتظار ایمپورت»؛ بین دو فراخوانی حداقل ۵ ثانیه فاصله باشد (گارد سرور هم هست)',
   })
   async scan(@Body() dto: UpdateScanDto) {
     return ok(
@@ -33,13 +35,28 @@ export class PriceUpdateController {
     );
   }
 
+  @Post('pending')
+  @ApiOperation({
+    summary:
+      'لیست «کاربران در انتظار ایمپورت» — ماندگار در دیتابیس (بدون موبایل ثبت شده‌اند)؛ قبل از خواندن، رکوردهای ایمپورت‌شدهٔ کامل خودکار حذف می‌شوند',
+  })
+  async pending(@Body() dto: PendingListDto) {
+    return ok(await this.priceUpdate.pendingUsers(dto.adminPhone));
+  }
+
   @Post('fetch-phone')
   @ApiOperation({
     summary:
-      'شمارهٔ موبایل یک فروشندهٔ باسکول (get_seller_phone_number با کوکی) — هر کوکی فقط ۲۰ شماره؛ سهمیهٔ باقی‌مانده در پاسخ',
+      'شمارهٔ موبایل یک فروشندهٔ باسکول (get_seller_phone_number با کوکی) — هر کوکی فقط ۲۰ شماره؛ با bUserName شماره روی رکورد «در انتظار ایمپورت» هم ذخیره می‌شود؛ سهمیهٔ باقی‌مانده در پاسخ',
   })
   async fetchPhone(@Body() dto: FetchPhoneDto) {
-    return ok(await this.priceUpdate.fetchPhone(dto.adminPhone, { sId: dto.sId, pId: dto.pId }));
+    return ok(
+      await this.priceUpdate.fetchPhone(dto.adminPhone, {
+        sId: dto.sId,
+        pId: dto.pId,
+        bUserName: dto.bUserName,
+      }),
+    );
   }
 
   @Post('extract-user')
