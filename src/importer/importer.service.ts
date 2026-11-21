@@ -730,6 +730,23 @@ export class ImporterService {
     this.log(job, 'success', 'ایمپورت کامل شد ✓');
   }
 
+  /** حذف رکورد «در انتظار ایمپورت» پس از ایمپورت کامل موفق (خواستهٔ مالک
+   *  ۲۲-۱۱): کاربر با زدن دکمهٔ ایمپورت از لیست صفحهٔ آپدیت خارج می‌شود.
+   *  best-effort — خطایش هرگز جاب را نمی‌اندازد؛ لیست علاوه بر این خودترمیم
+   *  هم می‌شود (رکوردهای ایمپورت‌شده هنگام خواندن لیست حذف می‌شوند). */
+  private async dropPendingImport(job: JobInternal, bUserName: string) {
+    try {
+      const del = await this.prisma.pendingImportUser.deleteMany({
+        where: { bUserName },
+      });
+      if (del.count > 0) {
+        this.log(job, 'info', `از لیست «در انتظار ایمپورت» خارج شد (${del.count.toLocaleString('fa-IR')} رکورد)`);
+      }
+    } catch (err) {
+      this.logger.warn(`dropPendingImport(${bUserName}) failed: ${(err as Error).message}`);
+    }
+  }
+
   /** مقاوم‌سازی در برابر قطعی اینترنت (خواستهٔ مالک ۱۵-۱۱ شب): خطای شبکه‌ای
    *  = توقف موقت و بازتلاش همان عملیات بعد از وصل شدن — نه شکستِ کاربر و نه
    *  سوزاندن قانون ۳ شکست پیاپی. عملیات‌های ایمپورتر idempotent هستند. */
@@ -755,6 +772,9 @@ export class ImporterService {
     );
     job.buskoolRequests = bk.requests;
     if (job.stopRequested) throw new Error('JOB_STOPPED');
+    // کاربر از لیست «در انتظار ایمپورت» خارج می‌شود (خواستهٔ مالک ۲۲-۱۱):
+    // ایمپورت کامل شد — رکوردش را حذف کن (best-effort؛ خودترمیمی لیست هم هست)
+    await this.dropPendingImport(job, input.userName);
     job.result = { userName: user.userName, userId: user.id, phone: user.phone };
     this.finishJob(job);
   }
@@ -869,6 +889,8 @@ export class ImporterService {
           failStreakSig = '';
           failStreakCount = 0;
           job.buskoolRequests = bk.requests;
+          // از لیست «در انتظار ایمپورت» هم خارجش کن (خواستهٔ مالک ۲۲-۱۱)
+          await this.dropPendingImport(job, row.userName);
           this.log(
             job,
             'success',

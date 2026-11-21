@@ -487,7 +487,9 @@ export class UpdateScanDto {
 }
 
 /** POST /importer/update/fetch-phone — شمارهٔ موبایل فروشندهٔ باسکول
- *  (get_seller_phone_number با کوکی؛ هر کوکی ۲۰ شماره) */
+ *  (get_seller_phone_number با کوکی؛ هر کوکی ۲۰ شماره).
+ *  bUserName اختیاری: داده شود شماره روی رکورد «در انتظار ایمپورت» ذخیره
+ *  می‌شود (دکمهٔ «گرفتن موبایل» — خواستهٔ مالک ۲۲-۱۱). */
 export class FetchPhoneDto {
   @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
   adminPhone!: string;
@@ -503,6 +505,20 @@ export class FetchPhoneDto {
   @IsInt()
   @Min(1)
   pId!: number;
+
+  /** یوزرنیم باسکول برای ذخیرهٔ شماره روی رکورد «در انتظار ایمپورت» */
+  @IsOptional()
+  @IsString()
+  @Length(2, 64)
+  bUserName?: string;
+}
+
+/** POST /importer/update/pending — لیست «کاربران در انتظار ایمپورت»
+ *  (خواستهٔ مالک ۲۲-۱۱): رکوردهای ماندگار دیتابیس؛ رکورد کاربرِ
+ *  ایمپورت‌شدهٔ کامل موقع خواندن خودکار حذف می‌شود. */
+export class PendingListDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
 }
 
 /** POST /importer/update/extract-user — پیش‌ایمپورت یک یوزرنیم باسکول:
