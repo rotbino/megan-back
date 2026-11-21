@@ -67,6 +67,10 @@ export interface ImportedUserRow {
   /** (۱۹-۱۱) خودش با دکمهٔ «ایمپورت از وب» ایمپورت را انجام داده — ردّ پایهٔ
    *  «کاربر واقعی ایمچ»: حداقل یک جلسهٔ WebImportSession کامل‌شده دارد */
   selfImported: boolean;
+  /** (تسک ۳۵ — ۲۱-۱۱) منبع ایمپورت — 'buskool' | 'daymat' | null (بومی) */
+  importSource: string | null;
+  /** (تسک ۳۵) سند دیمت — { daymatUserId, businessName, … } | null */
+  d: Record<string, unknown> | null;
 }
 
 export interface ImportedUsersSummary {
@@ -77,6 +81,8 @@ export interface ImportedUsersSummary {
   native: number;
   /** کاربرهای کمکی نویسندهٔ کامنت (bk-c*) */
   stub: number;
+  /** (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت (import_source='daymat') */
+  daymat: number;
   /** ویژهٔ باسکول (b.premium.isPremium) */
   premiumBuskool: number;
   /** هرگز وارد نشده‌اند */
@@ -107,7 +113,7 @@ export interface ImportedUsersListResult {
 
 export interface ImportedUsersQuery {
   q?: string;
-  source?: 'buskool' | 'native' | 'stub' | 'all';
+  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
   premium?: 'yes' | 'no';
   packageType?: number;
   login?: 'ever' | 'never' | 'after-contact';
@@ -212,8 +218,10 @@ export class ImportedUsersService {
       const re = { $regex: escapeRegex(q), $options: 'i' };
       filter.$or = [{ phone: re }, { user_name: re }, { first_name: re }, { last_name: re }, { b_user_name: re }];
     }
-    // منبع: باسکول (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها
+    // منبع: باسکول (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها /
+    // دیمت (تسک ۳۵ — import_source='daymat')
     if (query.source === 'buskool') filter.b_user_name = { $ne: null };
+    else if (query.source === 'daymat') filter.import_source = 'daymat';
     else if (query.source === 'native') {
       filter.$and = [
         ...(filter.$and as unknown[] ?? []),
@@ -361,6 +369,8 @@ export class ImportedUsersService {
                 created_at: 1,
                 last_login_at: 1,
                 b: 1,
+                d: 1,
+                import_source: 1,
                 productsCount: 1,
                 selfImported: 1,
               },
@@ -427,6 +437,8 @@ export class ImportedUsersService {
         createdAt: createdIso,
         lastLoginAt: lastLoginIso,
         b: asBUserData(r.b),
+        d: (r.d as Record<string, unknown> | null) ?? null,
+        importSource: (r.import_source as string | null) ?? null,
         productsCount: Number(r.productsCount ?? 0),
         selfImported: r.selfImported === true,
       };
@@ -456,6 +468,8 @@ export class ImportedUsersService {
               { $count: 'n' },
             ],
             stub: [{ $match: { 'profile.bStub': true } }, { $count: 'n' }],
+            // (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت
+            daymat: [{ $match: { import_source: 'daymat' } }, { $count: 'n' }],
             premiumBuskool: [{ $match: { 'b.premium.isPremium': true } }, { $count: 'n' }],
             neverLoggedIn: [{ $match: { last_login_at: null } }, { $count: 'n' }],
             contacted: [{ $match: { 'b.contactedAt': { $ne: null } } }, { $count: 'n' }],
@@ -515,6 +529,7 @@ export class ImportedUsersService {
       buskool: facetCount([f], 'buskool'),
       native: facetCount([f], 'native'),
       stub: facetCount([f], 'stub'),
+      daymat: facetCount([f], 'daymat'),
       premiumBuskool: facetCount([f], 'premiumBuskool'),
       neverLoggedIn: facetCount([f], 'neverLoggedIn'),
       contacted: facetCount([f], 'contacted'),
@@ -554,6 +569,8 @@ export class ImportedUsersService {
         cityId: true,
         profile: true,
         b: true,
+        d: true,
+        importSource: true,
         failedImport: true,
         lastLoginAt: true,
         lastSeenAt: true,
@@ -634,6 +651,8 @@ export class ImportedUsersService {
         cityName: cities?.name ?? null,
         profile: (user.profile ?? null) as Record<string, unknown> | null,
         b: asBUserData(user.b),
+        d: (user.d ?? null) as Record<string, unknown> | null,
+        importSource: (user as { importSource?: string | null }).importSource ?? null,
         failedImport: user.failedImport,
         lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
         lastSeenAt: user.lastSeenAt?.toISOString() ?? null,

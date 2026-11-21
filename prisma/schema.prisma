@@ -126,6 +126,18 @@ model User {
   /// همین مسیرها (b.premium.isPremium و…) انجام می‌شود.
   b Json?
 
+  /// 📦 داده‌های دیمت این کاربر (تسک ۳۵ — ۲۱-۱۱) — همتای b برای مهاجرت دیمت:
+  /// source:'daymat', daymatUserId, businessId/businessName, membershipTier,
+  /// isPhoneVerified, bio, email, createdAt (ثبت‌نام دیمت), importedAt.
+  /// فیلتر منبع صفحهٔ «کاربران ایمپورت‌شده» با importSource انجام می‌شود؛
+  /// داده‌های اختصاصی دیمت در همین فیلد JSON می‌مانند.
+  d Json?
+
+  /// منبع ایمپورت کاربر — 'buskool' | 'daymat' | … (خواستهٔ مالک ۲۱-۱۱:
+  /// فیلتر منبع در مدیریت کاربران ایمپورت‌شده تا کاربران هر سایت جدا فیلتر
+  /// شوند). null = ثبت‌نام بومی خود سایت. بک‌فیل باسکول در مهاجرت دیمت (فاز ۰).
+  importSource String? @map("import_source")
+
   /// بسته فعال آیمچ — ۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله؛ فقط با پرداخت
   /// واقعی در آیمچ پر می‌شود. ⚠️ ایمپورتر باسکول هرگز این فیلد را پر نمی‌کند
   /// (خواستهٔ مالک ۱۳-۱۱) — بستهٔ باسکول در b.premium نگه داشته می‌شود تا بعداً
@@ -210,6 +222,8 @@ model User {
   @@index([lastSeenAt(sort: Desc)])
   /// جستجوی سریع «قبلاً ایمپورت شده؟» در ایمپورت لیستی (b_user_name)
   @@index([bUserName])
+  /// فیلتر منبع در مدیریت کاربران ایمپورت‌شده (تسک ۳۵ — ۲۱-۱۱)
+  @@index([importSource])
   /// دعوت‌شده‌های هر دعوت‌کننده (پنل بازاریابی)
   @@index([referredById])
 }
@@ -544,6 +558,11 @@ model Product {
 
   userId String @map("user_id") @db.ObjectId
   user   User   @relation("ProductOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 📦 پیوند دیمت (تسک ۳۵ — ۲۱-۱۱) — { daymatAdId, daymatBusinessId,
+  /// daymatUserId, title } — کلید idempotency مهاجرت (d.daymatAdId) و ردیابی
+  /// منبع آگهی؛ آگهی‌های باسکولی این فیلد را ندارند.
+  d Json?
 
   // ⚠️ ساختار درست داده: هیچ مشخصات کاربر/نام نمایشی داخل رکورد تکرار نمی‌شود.
   // رابطه یک‌به‌چند User↔Product فقط با user_id برقرار است؛ نام فروشنده/دسته/
