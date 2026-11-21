@@ -99,8 +99,8 @@ export class ImportedUsersQueryDto {
   q?: string;
 
   @IsOptional()
-  @IsIn(['buskool', 'native', 'stub', 'all'])
-  source?: 'buskool' | 'native' | 'stub' | 'all';
+  @IsIn(['buskool', 'native', 'stub', 'daymat', 'all'])
+  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
 
   /** ویژهٔ باسکول (b.premium.isPremium) — نه اعتبار آیمچ */
   @IsOptional()
