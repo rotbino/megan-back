@@ -85,6 +85,10 @@ export interface ImportedUsersSummary {
   daymat: number;
   /** ویژهٔ باسکول (b.premium.isPremium) */
   premiumBuskool: number;
+  /** (۲۲-۱۱ — خواستهٔ مالک) تفکیک ویژه‌های باسکول بر اساس نوع بسته‌ای که
+   *  خریده‌اند (۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) — برای برآورد درآمد باسکول
+   *  در کارت‌های بالای صفحهٔ مدیریت کاربران */
+  premiumPackages: { packageType: number; title: string; count: number }[];
   /** هرگز وارد نشده‌اند */
   neverLoggedIn: number;
   /** با آن‌ها تماس/دعوت گرفته شده */
@@ -471,6 +475,12 @@ export class ImportedUsersService {
             // (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت
             daymat: [{ $match: { import_source: 'daymat' } }, { $count: 'n' }],
             premiumBuskool: [{ $match: { 'b.premium.isPremium': true } }, { $count: 'n' }],
+            // (۲۲-۱۱) تفکیک ویژه‌ها بر اساس نوع بسته — مبنای برآورد درآمد باسکول
+            premiumPackages: [
+              { $match: { 'b.premium.isPremium': true } },
+              { $group: { _id: '$b.premium.packageType', n: { $sum: 1 } } },
+              { $sort: { _id: 1 } },
+            ],
             neverLoggedIn: [{ $match: { last_login_at: null } }, { $count: 'n' }],
             contacted: [{ $match: { 'b.contactedAt': { $ne: null } } }, { $count: 'n' }],
             cameAfterContact: [
@@ -524,6 +534,11 @@ export class ImportedUsersService {
       cursor: {},
     })) as unknown as { cursor?: { firstBatch?: Record<string, unknown>[] } };
     const f = agg?.cursor?.firstBatch?.[0] ?? {};
+    // تفکیک بسته‌ها (۲۲-۱۱) — خروجی $group [{_id: packageType, n}]؛ بستهٔ ۰
+    // (رایگان) و مقادیر ناشناخته کنار گذاشته می‌شوند
+    const pkgRows = ((f.premiumPackages ?? []) as { _id?: number; n?: number }[])
+      .map((r) => ({ packageType: Number(r._id ?? 0), count: Number(r.n ?? 0) }))
+      .filter((r) => r.packageType > 0 && r.count > 0);
     return {
       total: facetCount([f], 'total'),
       buskool: facetCount([f], 'buskool'),
@@ -531,6 +546,11 @@ export class ImportedUsersService {
       stub: facetCount([f], 'stub'),
       daymat: facetCount([f], 'daymat'),
       premiumBuskool: facetCount([f], 'premiumBuskool'),
+      premiumPackages: pkgRows.map((r) => ({
+        packageType: r.packageType,
+        title: bkPackageTitle(r.packageType),
+        count: r.count,
+      })),
       neverLoggedIn: facetCount([f], 'neverLoggedIn'),
       contacted: facetCount([f], 'contacted'),
       cameAfterContact: facetCount([f], 'cameAfterContact'),

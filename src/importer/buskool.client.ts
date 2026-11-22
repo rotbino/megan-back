@@ -33,6 +33,47 @@ import { isNetworkError, waitForOnline } from './net-watch';
 const API = 'https://www.buskool.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+// ─── پاک‌سازی کوکی (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») ────────────────
+//
+// مقدار BUSKOOL_COOKIE ممکن است به‌صورت «هدر Cookie» درست باشد یا این‌که
+// کاربر «Set-Cookie» پاسخ را کپی کرده باشد (با expires/Max-Age/path/httponly).
+// جفت‌های اضافیِ Set-Cookie هدر Cookie را آلوده می‌کنند؛ این‌جا فقط جفت‌های
+// name=value واقعی نگه داشته می‌شوند و مشخصات ذخیره‌شدن حذف می‌شوند.
+// نکتهٔ حیاتی (کشف ۲۲-۱۱): مرورگرِ لاگین‌شده سه کوکی می‌فرستد —
+//   user_phone + user_password (یادآور لاگین باسکول — سشن مرده را زنده می‌کنند)
+//   + laravel_session (فقط ۲ ساعت عمر)
+// اگر فقط laravel_session تنظیم شود و ۲ ساعت بگذرد، باسکول درخواست را به
+// /login ریدایرکت می‌کند و برنامه خطای «کوکی لاگین نیست» می‌دهد؛ با جفتِ
+// user_phone/user_password سشن خودش ترمیم می‌شود. کل هدر cookie مرورگر
+// (فقط جفت‌های name=value) در BUSKOOL_COOKIE گذاشته شود.
+
+const COOKIE_JUNK_NAMES = new Set([
+  'expires',
+  'max-age',
+  'path',
+  'domain',
+  'samesite',
+  'secure',
+  'httponly',
+  'priority',
+  'partitioned',
+  'comment',
+  'version',
+]);
+
+/** پاک‌سازی رشتهٔ کوکی — جفت‌های name=value واقعی؛ حذف مشخصات Set-Cookie */
+export function sanitizeBuskoolCookie(raw: string): string {
+  return raw
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((pair) => {
+      const name = pair.split('=')[0].trim().toLowerCase();
+      return !COOKIE_JUNK_NAMES.has(name);
+    })
+    .join('; ');
+}
+
 /** محدودهٔ مجاز فاصلهٔ شروع درخواست‌ها — حتی اگر env مقدار بزرگ‌تر بدهد
  *  (مثل BUSKOOL_DELAY_MS=5000 قدیمی)، سقف ۱۲۰۰ms اعمال می‌شود تا سرعت
  *  پیش‌فرض پروژه همیشه برقرار بماند. */
@@ -54,7 +95,8 @@ export function buskoolConfig() {
     // فاصلهٔ حداقلی بین «شروع» دو درخواست — نه انتظار برای پایان قبلی
     delayMs: Math.min(Math.max(gap, GAP_MIN_MS), GAP_MAX_MS),
     concurrency: Math.min(Math.max(Math.floor(concurrency), 1), CONCURRENCY_MAX),
-    cookie: (process.env.BUSKOOL_COOKIE ?? '').trim(),
+    // کوکی پاک‌سازی‌شده — حتی اگر Set-Cookie کپی شده باشد درست کار می‌کند
+    cookie: sanitizeBuskoolCookie((process.env.BUSKOOL_COOKIE ?? '').trim()),
   };
 }
 
@@ -80,6 +122,47 @@ export function buskoolPace() {
     concurrency,
     penalty: Math.round(pacePenalty * 100) / 100,
   };
+}
+
+// ─── توکن CSRF باسکول (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») ─────────────
+//
+// مرورگرِ واقعی روی POSTهای باسکول هدر x-csrf-token را می‌فرستد (از متاتگ
+// <meta name="csrf-token"> صفحات، وابسته به سشن). اگر فرستاده نشود لاراول
+// می‌تواند 419 بدهد و آن هم به‌شکل صفحهٔ HTML برمی‌گردد — یعنی دوباره همان
+// خطای گمراه‌کنندهٔ «کوکی لاگین نیست». توکن با همان کوکی از صفحهٔ اصلی گرفته
+// و به‌ازای هر مقدار کوکی کش می‌شود (سشن که عوض شود توکن هم تازه می‌شود).
+
+let csrfProbe: { cookie: string; p: Promise<string | null> } | null = null;
+
+/** توکن CSRF باسول برای سشن کوکی فعلی — null یعنی نتوانستیم بگیریم (بدون
+ *  پرتاب؛ POSTها بدون توکن هم امتحان می‌شوند تا رفتار قبلی حفظ شود) */
+export function buskoolCsrfToken(): Promise<string | null> {
+  const { cookie } = buskoolConfig();
+  if (!cookie) return Promise.resolve(null);
+  if (csrfProbe?.cookie === cookie) return csrfProbe.p;
+  const p = (async (): Promise<string | null> => {
+    try {
+      const res = await fetch(`${API}/`, {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
+          Referer: `${API}/`,
+          Cookie: cookie,
+        },
+        signal: AbortSignal.timeout(10_000),
+        redirect: 'manual',
+      });
+      if (res.status !== 200) return null;
+      const html = await res.text();
+      const m = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i);
+      return m?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  csrfProbe = { cookie, p };
+  return p;
 }
 
 // ─── سلامت سشن: اصلاً لاگین است؟ (کشف ۱۵-۱۱) ─────────────────────────────
@@ -224,20 +307,39 @@ export class BuskoolClient {
           'User-Agent': UA,
           'X-Requested-With': 'XMLHttpRequest',
           Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
           Origin: API,
           Referer: `${API}/`,
         };
         // کوکی فقط وقتی خواسته شده (پیش‌فرض) — لیست عمومی جدیدترین‌ها باید
         // بدون کوکی برود تا شخصی‌سازی‌شدهٔ صاحب کوکی نیاید (۲۱-۱۱)
-        if (cookie && !opts?.noCookie) headers.Cookie = cookie;
+        if (cookie && !opts?.noCookie) {
+          headers.Cookie = cookie;
+          // هدر x-csrf-token مثل مرورگر واقعی (۲۲-۱۱) — POSTهای لاراول بدون
+          // آن 419 می‌گیرند؛ توکن از متاتگ csrf-token صفحهٔ باسول با همین کوکی
+          const csrf = await buskoolCsrfToken();
+          if (csrf) headers['x-csrf-token'] = csrf;
+        }
 
         const res = await fetch(`${API}${path}`, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(30_000),
-          redirect: 'follow',
+          // ریدایرکت دنبال نمی‌شود (۲۲-۱۱) — با کوکی مرده باسکول ۳۰۲ به
+          // /login می‌دهد؛ دنبال‌کردنش فقط صفحهٔ HTML لاگین می‌آورد و علت
+          // واقعی (ریدایرکت سشن) پنهان می‌شود
+          redirect: 'manual',
         });
+        // ریدایرکت = سشن/کوکی قبول نشد (معمولاً ۳۰۲ به /login) — قطعی‌ترین
+        // نشانهٔ «کوکی لاگین نیست»؛ همان‌جا تمام می‌شود نه بعد از پارس HTML
+        if (res.status >= 300 && res.status < 400) {
+          const loc = res.headers.get('location') ?? '';
+          throw Object.assign(
+            new Error(`REDIRECT ${res.status} → ${loc || '?'} on ${path}`),
+            { fatalCall: true, redirectLoc: loc },
+          );
+        }
         if (res.status === 429 || res.status === 403) {
           // نشانهٔ محدودسازی — عقب‌نشینی نمایی؛ شاید درخواست بعدی بلافاصله رد شود
           pacePenalty = Math.min(pacePenalty * 2, PENALTY_MAX);
@@ -247,14 +349,18 @@ export class BuskoolClient {
           // 5xx گذراست (سرور لحظه‌ای خوابیده) → تلاش مجدد؛ بقیهٔ 4xx مالِ همین
           // رکورد/درخواست‌اند — تکرارشان بی‌فایده است، همان‌جا تمام می‌شود
           if (res.status >= 500) throw new Error(`HTTP ${res.status} on ${path}`);
-          throw fatalCallError(`HTTP ${res.status} on ${path}`);
+          // کد وضعیت روی خطا می‌چسبد (۲۲-۱۱) تا لایهٔ سرویس پیام دقیق بدهد
+          throw Object.assign(new Error(`HTTP ${res.status} on ${path}`), {
+            fatalCall: true,
+            status: res.status,
+          });
         }
         const ctype = (res.headers.get('content-type') ?? '').split(';')[0];
         if (ctype.includes('text/html')) {
           // باسکول برای اندپوینت‌های لاگین‌دار (مثل عکس پروفایل) بدون کوکی
           // به /login ریدایرکت می‌کند — پیام روشن بده نه خطای JSON parse.
           // کوکی که نیست نیست؛ تکرارش هم چیزی عوض نمی‌کند → fatalCall
-          throw fatalCallError('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
+          throw fatalCallError('HTML_RESPONSE — پاسخ HTML؛ این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)');
         }
         this.requests++;
         // پاسخ سالم — آرام به سرعت عادی برگرد
@@ -291,7 +397,16 @@ export class BuskoolClient {
         await sleep(1500 * hardFails * Math.min(pacePenalty, 4));
       }
     }
-    throw new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`);
+    // پراپرتی‌های تشخیصی خطا (status/redirectLoc — ۲۲-۱۱) حفظ می‌شوند تا
+    // لایهٔ سرویس بتواند پیام دقیق (کوکی/CSRF/قفل) بدهد
+    const src = (lastErr ?? {}) as { status?: number; redirectLoc?: string };
+    throw Object.assign(
+      new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`),
+      {
+        ...(src.status !== undefined ? { status: src.status } : {}),
+        ...(src.redirectLoc !== undefined ? { redirectLoc: src.redirectLoc } : {}),
+      },
+    );
   }
 }
 

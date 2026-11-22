@@ -42,6 +42,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
+import { AppError } from '../common/errors/app-error';
 import { BuskoolClient, buskoolConfig, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './buskool.client';
 import { importerAdminPhone } from './dto';
 
@@ -517,45 +518,82 @@ export class PriceUpdateService {
    * گرفتن شمارهٔ موبایل یک فروشندهٔ باسکول — کوکی می‌خواهد؛ هر کوکی فقط ۲۰
    * شماره (محدودیت باسکول). پاسخ {phone} یا {data:{phone}} هر دو پذیرفته است.
    *
+   * اندپوینت (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست»): اندپوینت قدیمی
+   * /get_seller_phone_number کنار گذاشته شد؛ خود سایت باسکول از
+   * /get-user-phone-number-for-the-seller با بدنهٔ {user_id, client:"web"}
+   * استفاده می‌کند و مالک همین را در مرورگر خودش تست و تأیید کرده است.
+   * pId دیگر لازم نیست (فقط user_id) ولی در قرارداد API حفظ شده است.
+   *
    * اگر bUserName داده شود (خواستهٔ مالک ۲۲-۱۱ — دکمهٔ «گرفتن موبایل»)، شماره
    * روی رکورد «در انتظار ایمپورت» همان کاربر ذخیره می‌شود تا دفعهٔ بعد ایمپورت
    * بدون مصرف دوبارهٔ سهمیه، مستقیم شروع شود.
    */
   async fetchPhone(
     adminPhone: string,
-    input: { sId: number; pId: number; bUserName?: string },
+    input: { sId: number; pId?: number; bUserName?: string },
   ): Promise<{ phone: string; budget: PhoneBudgetInfo; saved: boolean }> {
     this.assertAdmin(adminPhone);
     const { cookie } = buskoolConfig();
     if (!cookie) {
-      throw new BadRequestException('کوکی باسکول تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است');
+      throw AppError.badRequest(
+        'کوکی باسکول تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است',
+        'BUSKOOL_COOKIE_MISSING',
+      );
     }
     const budget = this.budgetInfo();
     if (budget.remaining <= 0) {
-      throw new BadRequestException(
+      throw AppError.badRequest(
         `سهمیهٔ ${budget.limit} شماره‌ای این کوکی باسکول تمام شده (${budget.used} گرفته شده) — کوکی تازه در BUSKOOL_COOKIE بگذارید`,
+        'BUSKOOL_BUDGET_EXHAUSTED',
       );
     }
 
     const bk = new BuskoolClient(() => false);
     let resp: BkSellerPhoneResp;
     try {
-      resp = await bk.call('/get_seller_phone_number', {
-        s_id: Math.floor(input.sId),
-        p_id: String(Math.floor(input.pId)),
-        item: 'PRODUCT',
+      resp = await bk.call('/get-user-phone-number-for-the-seller', {
+        user_id: Math.floor(input.sId),
         client: 'web',
       });
     } catch (err) {
-      // پیام تمیز برای مالک — پیشوند فنی «buskool … failed:» حذف می‌شود؛
-      // رایج‌ترین حالت: پاسخ HTML یعنی کوکی لاگین نیست/منقضی شده
-      const raw = String((err as Error).message ?? err);
-      const msg = raw.replace(/^buskool \S+ failed:\s*/, '');
-      throw new BadRequestException(
-        msg.includes('HTML')
-          ? 'کوکی باسکول لاگین نیست یا منقضی شده — کوکی تازهٔ لاگین‌شده در BUSKOOL_COOKIE بگذارید'
-          : `گرفتن شماره از باسکول ناموفق بود: ${msg}`,
-      );
+      // پیام تمیز و «دقیق» برای مالک (۲۲-۱۱) — هر علت جای خودش را می‌گوید؛
+      // دیگر همهٔ خطاها به‌نادرست «کوکی منقضی شده» ترجمه نمی‌شوند.
+      // ⚠️ با AppError (کد پایدار) پرتاب می‌شود تا فیلتر مرکزی پیامِ بلند را
+      // با «اطلاعات ارسالی معتبر نیست» جایگزین نکند (تلهٔ ۲۰۰ کاراکتر).
+      const e = err as Error & { status?: number; redirectLoc?: string };
+      const raw = String(e?.message ?? err).replace(/^buskool \S+ failed:\s*/, '');
+      if (
+        (e?.redirectLoc ?? '').includes('/login') ||
+        /^REDIRECT/.test(raw) ||
+        raw.includes('HTML_RESPONSE')
+      ) {
+        throw AppError.badRequest(
+          'کوکی باسکول لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید',
+          'BUSKOOL_COOKIE_INVALID',
+        );
+      }
+      if (e?.status === 419) {
+        throw AppError.badRequest(
+          'باسکول ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید',
+          'BUSKOOL_CSRF',
+        );
+      }
+      if (e?.status === 401) {
+        throw AppError.badRequest('باسکول ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE)', 'BUSKOOL_UNAUTHORIZED');
+      }
+      if (e?.status === 423) {
+        throw AppError.badRequest(
+          'باسکول نمایش این شماره را فعلاً قفل کرده (۴۲۳) — معمولاً چون همین شماره تازه گرفته شده یا سهمیهٔ نمایش پر است؛ کمی بعد دوباره تلاش کنید',
+          'BUSKOOL_LOCKED',
+        );
+      }
+      if (e?.status === 403) {
+        throw AppError.badRequest(
+          'باسکول درخواست را بلاک کرد (۴۰۳) — کمی صبر کنید و دوباره تلاش کنید',
+          'BUSKOOL_BLOCKED',
+        );
+      }
+      throw AppError.badRequest(`گرفتن شماره از باسکول ناموفق بود: ${raw}`, 'BUSKOOL_PHONE_FAILED');
     }
 
     // کد فرانت خود باسکول e.data.phone می‌خواند (chunks/1.js) — {phone}
@@ -634,7 +672,8 @@ export class PriceUpdateService {
       throw new BadRequestException(`کاربر باسکول @${userName} پیدا نشد`);
     }
 
-    // ۳) نمونه‌آگهی — p_id برای گرفتن شماره
+    // ۳) نمونه‌آگهی — سنجش «چیزی برای ایمپورت دارد» (p_id دیگر برای شماره
+    // لازم نیست — اندپوینت جدید فقط user_id می‌خواهد؛ ۲۲-۱۱)
     const list = await bk.call<{ products?: { main: { id: number } }[] }>('/get_product_list_by_user_name', {
       user_name: userName,
       status: 2,
@@ -642,16 +681,16 @@ export class PriceUpdateService {
       from_record_number: 0,
       to_record_number: 20,
     });
-    const pId = list?.products?.find((p) => p?.main?.id)?.main.id;
-    if (!pId) {
+    const hasProduct = list?.products?.find((p) => p?.main?.id);
+    if (!hasProduct) {
       throw new BadRequestException(`@${userName} آگهی عمومی ندارد — چیزی برای ایمپورت نیست`);
     }
 
     // ۴) شمارهٔ موبایل (با کوکی + بودجه) — سپس فرانت startSingle را می‌زند.
-    // خطای کوکی/شبکه همان‌جا پیام تمیز می‌شود؛ بودجه فقط شمارهٔ واقعی مصرف می‌کند.
+    // خطای کوکی/شبکه همان‌جا پیام دقیق می‌شود؛ بودجه فقط شمارهٔ واقعی مصرف می‌کند.
     // bUserName هم پاس می‌شود تا اگر همین کاربر در لیست «در انتظار ایمپورت»
     // هست، شماره‌اش روی رکوردش ذخیره شود (سهمیه دوباره مصرف نشود).
-    const { phone, budget } = await this.fetchPhone(adminPhone, { sId, pId, bUserName: userName });
+    const { phone, budget } = await this.fetchPhone(adminPhone, { sId, bUserName: userName });
     return { exists: false, phone, budget };
   }
 }
