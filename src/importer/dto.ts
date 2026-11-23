@@ -487,7 +487,8 @@ export class UpdateScanDto {
 }
 
 /** POST /importer/update/fetch-phone — شمارهٔ موبایل فروشندهٔ باسکول
- *  (get_seller_phone_number با کوکی؛ هر کوکی ۲۰ شماره).
+ *  (get-user-phone-number-for-the-seller با کوکی؛ هر کوکی ۲۰ شماره — ۲۲-۱۱
+ *  اندپوینت همان چیزی شد که خود باسکول در مرورگر می‌زند).
  *  bUserName اختیاری: داده شود شماره روی رکورد «در انتظار ایمپورت» ذخیره
  *  می‌شود (دکمهٔ «گرفتن موبایل» — خواستهٔ مالک ۲۲-۱۱). */
 export class FetchPhoneDto {
@@ -500,11 +501,13 @@ export class FetchPhoneDto {
   @Min(1)
   sId!: number;
 
-  /** شناسهٔ آگهی باسکول — item=PRODUCT */
+  /** شناسهٔ آگهی باسکول — اختیاری (۲۲-۱۱: اندپوینت جدید فقط user_id می‌خواهد؛
+   *  برای سازگاری فرانتِ فعلی که هنوز می‌فرستد، پذیرفته و نادیده گرفته می‌شود) */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  pId!: number;
+  pId?: number;
 
   /** یوزرنیم باسکول برای ذخیرهٔ شماره روی رکورد «در انتظار ایمپورت» */
   @IsOptional()

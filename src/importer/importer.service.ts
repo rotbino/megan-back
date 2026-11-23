@@ -248,6 +248,15 @@ export class ImporterService {
       // باز نمی‌کند — این فیلد نشان می‌دهد سشن واقعاً لاگین است یا نه
       // (null = بدون کوکی/خطای شبکه؛ یک تماس در عمر پروسه، کش‌شده).
       cookieLoggedIn: await buskoolSessionLoggedIn(),
+      // (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») تشخیص کوکی: آیا جفت‌های
+      // یادآورِ لاگین (user_phone/user_password) هم هستند یا فقط laravel_session
+      // که ۲ ساعت بعد می‌میرد؟ آیا رشته Set-Cookie کپی شده (expires/path داخل
+      // مقدار) که خودکار پاک‌سازی شده است؟
+      cookieDiag: {
+        hasRemember: /(?:^|;\s*)user_phone=/.test(cookie) && /(?:^|;\s*)user_password=/.test(cookie),
+        hasSession: /(?:^|;\s*)laravel_session=/.test(cookie),
+        cleaned: (process.env.BUSKOOL_COOKIE ?? '').trim() !== cookie,
+      },
       adminPhone: importerAdminPhone(),
       // نگهبان شبکه (۱۵-۱۱ شب): آیا همین حالا منتظر بازگشت اینترنت هستیم؟
       // فقط وقتی جابی در حال اجراست معنادار است (کسی سنجش نمی‌کند تا وقتی
