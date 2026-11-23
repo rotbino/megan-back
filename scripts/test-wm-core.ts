@@ -2,7 +2,7 @@
  * تست برابری پورت TS با پایتون — همان ۸ فایل preview را پردازش می‌کند.
  * اجرا: bun scripts/test-wm-core.ts
  */
-import { detectWatermark, isStrong, removeWatermarkRgb, loadMaps } from '../src/importer/buskool-wm-core';
+import { detectWatermark, isStrong, removeWatermarkRgb, loadMaps } from '../src/importer/pascal-wm-core';
 import sharp from 'sharp';
 
 const FILES: Array<{ fid: string; url: string; pyScore: number; pyScale: number; pyX: number; pyY: number }> = [

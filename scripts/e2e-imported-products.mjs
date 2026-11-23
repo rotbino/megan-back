@@ -64,10 +64,10 @@ check('HTTP 200', prodRes.ok, String(prodRes.status));
 const prod = prodBody?.data;
 check('ردیف‌ها و آمار برمی‌گردند', Array.isArray(prod?.rows) && typeof prod?.summary?.total === 'number');
 const liveTotal = await prisma.product.count();
-const liveBuskool = await prisma.product.count({ where: { user: { bUserName: { not: null } } } });
+const livePascal = await prisma.product.count({ where: { user: { bUserName: { not: null } } } });
 check('summary.total با شمارش زنده برابر است', prod?.summary?.total === liveTotal, `${prod?.summary?.total} vs ${liveTotal}`);
-check('summary.buskool با شمارش زنده برابر است', prod?.summary?.buskool === liveBuskool, `${prod?.summary?.buskool} vs ${liveBuskool}`);
-check('total = buskool + native', prod?.summary?.total === (prod?.summary?.buskool ?? 0) + (prod?.summary?.native ?? 0));
+check('summary.pascal با شمارش زنده برابر است', prod?.summary?.pascal === livePascal, `${prod?.summary?.pascal} vs ${livePascal}`);
+check('total = pascal + native', prod?.summary?.total === (prod?.summary?.pascal ?? 0) + (prod?.summary?.native ?? 0));
 const row = prod?.rows?.[0];
 check('ردیف اول شکل کامل دارد', row && row.owner && typeof row.edited === 'boolean' && typeof row.photoCount === 'number', JSON.stringify(row ?? {}).slice(0, 120));
 console.log(`  • نمونه: «${row?.productName}» (#${row?.id}) منبع=${row?.source} عکس=${row?.photoCount} ویرایش=${row?.edited}`);
@@ -108,14 +108,14 @@ const img = imgBody?.data;
 check('ردیف‌ها و آمار برمی‌گردند', Array.isArray(img?.rows) && typeof img?.summary?.total === 'number');
 const liveFiles = await prisma.file.count({ where: { relatedModel: 'Product', fieldKey: 'gallery', relatedId: { not: null } } });
 check('کل تصاویر با شمارش زنده برابر است (تلورانس رشد زنده)', Math.abs((img?.summary?.total ?? 0) - liveFiles) <= 3, `${img?.summary?.total} vs ${liveFiles}`);
-check('باقی‌مانده = پاسکالی (هنوز هیچ تعویضی نمانده)', img?.summary?.buskoolRemaining === img?.summary?.buskool - (img?.summary?.replaced ?? 0) || (img?.summary?.replaced === 0 && img?.summary?.buskoolRemaining === img?.summary?.buskool), JSON.stringify(img?.summary));
+check('باقی‌مانده = پاسکالی (هنوز هیچ تعویضی نمانده)', img?.summary?.pascalRemaining === img?.summary?.pascal - (img?.summary?.replaced ?? 0) || (img?.summary?.replaced === 0 && img?.summary?.pascalRemaining === img?.summary?.pascal), JSON.stringify(img?.summary));
 const imgRow = img?.rows?.[0];
 check('ردیف اول شکل کامل دارد', imgRow && imgRow.product && imgRow.owner && imgRow.url, JSON.stringify(imgRow ?? {}).slice(0, 120));
 console.log(`  • نمونه: آگهی «${imgRow?.product?.name}» فروشنده ${imgRow?.owner?.name} (${imgRow?.width}×${imgRow?.height})`);
 
-const buskoolOnly = await fetchT(`${BASE}/importer/product-images?source=buskool&replaced=no`, { headers: auth });
-const buskoolBody = await buskoolOnly.json().catch(() => null);
-check('فیلتر source=buskool&replaced=no = پاسکالی‌های تعویض‌نشده (تلورانس رشد زنده)', Math.abs((buskoolBody?.data?.total ?? 0) - ((img?.summary?.buskool ?? 0) - (img?.summary?.replaced ?? 0))) <= 3, `total=${buskoolBody?.data?.total}`);
+const pascalOnly = await fetchT(`${BASE}/importer/product-images?source=pascal&replaced=no`, { headers: auth });
+const pascalBody = await pascalOnly.json().catch(() => null);
+check('فیلتر source=pascal&replaced=no = پاسکالی‌های تعویض‌نشده (تلورانس رشد زنده)', Math.abs((pascalBody?.data?.total ?? 0) - ((img?.summary?.pascal ?? 0) - (img?.summary?.replaced ?? 0))) <= 3, `total=${pascalBody?.data?.total}`);
 
 // صفحه‌بندی — نسبت به کل؛ دیتای زنده در حال ایمپورت است پس تلورانس ±۲
 const half = Math.max(1, Math.floor((img?.summary?.total ?? 2) / 2));

@@ -12,9 +12,9 @@ import os
 import numpy as np
 
 BASE = "/home/z/my-project/repos/megan-back/python/image-editing"
-OUT = "/home/z/my-project/repos/megan-back/src/importer/buskool-template.ts"
+OUT = "/home/z/my-project/repos/megan-back/src/importer/pascal-template.ts"
 
-z = np.load(os.path.join(BASE, "templates/buskool-golden.npz"))
+z = np.load(os.path.join(BASE, "templates/pascal-golden.npz"))
 a, c, d = z["a"], z["c"], z["d"]
 H, W = a.shape
 assert c.shape == (H, W, 3) and d.shape == (H, W)
@@ -35,7 +35,7 @@ src = f"""// توسط python/image-editing/export_template.py ساخته شده 
 // تمپلیت دوتنهٔ واترمارک پاسکال (خروجی build_template.py v3 از جفت طلایی).
 // کوانتیزه: a=آلفا×255 | cB/cG/cR=رنگ | d=نقشهٔ تشخیص (−0.65..0.65).
 
-export const BUSKOOL_TEMPLATE = {{
+export const PASCAL_TEMPLATE = {{
   w: {W},
   h: {H},
   a: '{b64['a']}',        // آلفا 0..1 (÷255)

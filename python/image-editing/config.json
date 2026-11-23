@@ -1,5 +1,5 @@
 {
-  "template": "templates/buskool-golden.npz",
+  "template": "templates/pascal-golden.npz",
   "detect": {
     "sigma": 7.0,
     "scales": [0.55, 0.62, 0.7, 0.78, 0.85, 0.92, 1.0, 1.08, 1.15, 1.25, 1.35, 1.5, 1.65],

@@ -94,25 +94,25 @@ check('تعداد کل با prisma.count برابری می‌کند', total === 
 check('ردیف‌ها برمی‌گردند', listRows.length > 0 && listRows.length <= 5);
 check('هر ردیف مالک دارد', listRows.every((r) => r.owner && r.owner.user_name));
 check('source از b_user_name استنتاج می‌شود', listRows.every((r) => r.owner.b_user_name != null || r.owner.b_user_name === null));
-const buskoolRows = listRows.filter((r) => r.owner?.b_user_name != null).length;
-console.log(`  • نمونه: ${listRows.length} ردیف، ${buskoolRows} پاسکالی؛ مثلاً «${listRows[0]?.product_name}» مالک @${listRows[0]?.owner?.user_name}`);
+const pascalRows = listRows.filter((r) => r.owner?.b_user_name != null).length;
+console.log(`  • نمونه: ${listRows.length} ردیف، ${pascalRows} پاسکالی؛ مثلاً «${listRows[0]?.product_name}» مالک @${listRows[0]?.owner?.user_name}`);
 check('فیلد _photos آرایه است', listRows.every((r) => Array.isArray(r._photos)));
 check('فیلد _edits آرایه است', listRows.every((r) => Array.isArray(r._edits)));
 
 // ═════════ ۲. فیلتر منبع پاسکالی ═════════
-console.log('\n— فیلتر source=buskool —');
-const buskoolFilter = await run('Product', [
+console.log('\n— فیلتر source=pascal —');
+const pascalFilter = await run('Product', [
   { $match: {} },
   { $lookup: { from: 'User', localField: 'user_id', foreignField: '_id', as: 'owner' } },
   { $unwind: '$owner' },
   { $match: { 'owner.b_user_name': { $ne: null } } },
   { $count: 'n' },
 ]);
-const buskoolCount = Number(buskoolFilter[0]?.n ?? 0);
-const buskoolUsers = await prisma.user.count({ where: { bUserName: { not: null } } });
-const buskoolExpected = await prisma.product.count({ where: { user: { bUserName: { not: null } } } });
-check('شمارش پاسکالی با prisma رابطه‌ای برابری می‌کند', buskoolCount === buskoolExpected, `${buskoolCount} vs ${buskoolExpected}`);
-console.log(`  • آگهی پاسکالی: ${buskoolCount} (از ${buskoolUsers} کاربر پاسکالی)`);
+const pascalCount = Number(pascalFilter[0]?.n ?? 0);
+const pascalUsers = await prisma.user.count({ where: { bUserName: { not: null } } });
+const pascalExpected = await prisma.product.count({ where: { user: { bUserName: { not: null } } } });
+check('شمارش پاسکالی با prisma رابطه‌ای برابری می‌کند', pascalCount === pascalExpected, `${pascalCount} vs ${pascalExpected}`);
+console.log(`  • آگهی پاسکالی: ${pascalCount} (از ${pascalUsers} کاربر پاسکالی)`);
 
 // ═════════ ۳. آمار کلی (summary) ═════════
 console.log('\n— آمار کلی آگهی‌ها —');
@@ -130,7 +130,7 @@ const sum = (await run('Product', [
   {
     $facet: {
       total: [{ $count: 'n' }],
-      buskool: [{ $match: { 'owner.b_user_name': { $ne: null } } }, { $count: 'n' }],
+      pascal: [{ $match: { 'owner.b_user_name': { $ne: null } } }, { $count: 'n' }],
       native: [{ $match: { 'owner.b_user_name': null } }, { $count: 'n' }],
       ownerLoggedIn: [{ $match: { 'owner.last_login_at': { $ne: null } } }, { $count: 'n' }],
       editedByUser: [{ $match: { _edited: true } }, { $count: 'n' }],
@@ -140,10 +140,10 @@ const sum = (await run('Product', [
   },
 ]))[0] ?? {};
 const cnt = (k) => Number((sum[k] ?? [])[0]?.n ?? 0);
-check('total + buskool + native = کل آگهی‌ها', cnt('total') === cnt('buskool') + cnt('native') || cnt('total') === productCount, `${cnt('total')} = ${cnt('buskool')}+${cnt('native')}`);
+check('total + pascal + native = کل آگهی‌ها', cnt('total') === cnt('pascal') + cnt('native') || cnt('total') === productCount, `${cnt('total')} = ${cnt('pascal')}+${cnt('native')}`);
 const editedExpected = await prisma.productEditHistory.groupBy({ by: ['productId'], where: { action: 'edit' } });
 check('editedByUser = تعداد آگهی‌های دارای action=edit', cnt('editedByUser') === editedExpected.length, `${cnt('editedByUser')} vs ${editedExpected.length}`);
-console.log(`  • کل=${cnt('total')} پاسکال=${cnt('buskool')} خودی=${cnt('native')} ورود‌کرده=${cnt('ownerLoggedIn')} ویرایش‌شده=${cnt('editedByUser')} بدون‌عکس=${cnt('withoutPhotos')} در‌انتظار=${cnt('pending')}`);
+console.log(`  • کل=${cnt('total')} پاسکال=${cnt('pascal')} خودی=${cnt('native')} ورود‌کرده=${cnt('ownerLoggedIn')} ویرایش‌شده=${cnt('editedByUser')} بدون‌عکس=${cnt('withoutPhotos')} در‌انتظار=${cnt('pending')}`);
 
 // ═════════ ۴. آلبوم تصاویر ═════════
 console.log('\n— آلبوم تصاویر آگهی‌ها —');
@@ -182,7 +182,7 @@ const withProduct = imgRows.filter((r) => r.product?._id != null).length;
 check('تقریباً همهٔ ردیف‌ها آگهی دارند', withProduct >= imgRows.length - 1, `${withProduct}/${imgRows.length}`);
 const withOwner = imgRows.filter((r) => (r.ownerUser ?? []).length > 0).length;
 check('تقریباً همهٔ ردیف‌ها فروشنده دارند', withOwner >= imgRows.length - 1, `${withOwner}/${imgRows.length}`);
-const importedCount = imgRows.filter((r) => r.metadata?.importedFrom === 'buskool').length;
+const importedCount = imgRows.filter((r) => r.metadata?.importedFrom === 'pascal').length;
 console.log(`  • نمونهٔ آلبوم: ${imgRows.length} تصویر، ${importedCount} پاسکالی؛ مثلاً «${imgRows[0]?.product?.product_name}» فروشنده @${imgRows[0]?.ownerUser?.[0]?.user_name}`);
 check('url همهٔ ردیف‌ها پر است', imgRows.every((r) => typeof r.url === 'string' && r.url));
 
@@ -193,15 +193,15 @@ const imgSum = (await run('File', [
   {
     $facet: {
       total: [{ $count: 'n' }],
-      buskool: [{ $match: { 'metadata.importedFrom': 'buskool' } }, { $count: 'n' }],
+      pascal: [{ $match: { 'metadata.importedFrom': 'pascal' } }, { $count: 'n' }],
       replaced: [{ $match: { 'metadata.replacedAt': { $ne: null } } }, { $count: 'n' }],
-      buskoolRemaining: [{ $match: { 'metadata.importedFrom': 'buskool', 'metadata.replacedAt': null } }, { $count: 'n' }],
+      pascalRemaining: [{ $match: { 'metadata.importedFrom': 'pascal', 'metadata.replacedAt': null } }, { $count: 'n' }],
     },
   },
 ]))[0] ?? {};
 const ic = (k) => Number((imgSum[k] ?? [])[0]?.n ?? 0);
-check('buskoolRemaining = buskool - replaced (تفکیک درست)', ic('buskoolRemaining') === ic('buskool') - Math.min(ic('replaced'), ic('buskool')) || ic('replaced') === 0, `remaining=${ic('buskoolRemaining')} buskool=${ic('buskool')} replaced=${ic('replaced')}`);
-console.log(`  • کل=${ic('total')} پاسکالی=${ic('buskool')} تعویض‌شده=${ic('replaced')} باقی‌مانده=${ic('buskoolRemaining')}`);
+check('pascalRemaining = pascal - replaced (تفکیک درست)', ic('pascalRemaining') === ic('pascal') - Math.min(ic('replaced'), ic('pascal')) || ic('replaced') === 0, `remaining=${ic('pascalRemaining')} pascal=${ic('pascal')} replaced=${ic('replaced')}`);
+console.log(`  • کل=${ic('total')} پاسکالی=${ic('pascal')} تعویض‌شده=${ic('replaced')} باقی‌مانده=${ic('pascalRemaining')}`);
 
 // ═════════ ۶. جستجو با شناسهٔ عددی (پیش‌حل) ═════════
 console.log('\n— جستجوی q عددی (شناسهٔ آگهی) —');

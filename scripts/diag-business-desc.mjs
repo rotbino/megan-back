@@ -48,9 +48,9 @@ console.log(`کل کاربران ایمپورت‌شده: ${users.length}`);
 const withDesc = users.filter((u) => (u.businessDesc ?? '').trim());
 console.log(`دارای businessDesc غیرخالی: ${withDesc.length}`);
 
-const hasBuskool = withDesc.filter((u) => norm(u.businessDesc).includes('پاسکال'));
+const hasPascal = withDesc.filter((u) => norm(u.businessDesc).includes('پاسکال'));
 const hasInkubak = withDesc.filter((u) => norm(u.businessDesc).includes('اینکوباک'));
-console.log(`  شامل «پاسکال»: ${hasBuskool.length}`);
+console.log(`  شامل «پاسکال»: ${hasPascal.length}`);
 console.log(`  شامل «اینکوباک»: ${hasInkubak.length}`);
 
 const autoOld = withDesc.filter((u) => isAutoOld(u.businessDesc));
@@ -61,7 +61,7 @@ console.log(`  خودکارِ جدید که منطق فعلی می‌انداز�
 
 // متن‌های شامل برند که «خودکار» تشخیص داده نشدند — یعنی متن واقعی با واژهٔ برند
 const realWithBrand = withDesc.filter(
-  (u) => (hasBuskool.includes(u) || hasInkubak.includes(u)) && !isAutoNew(u.businessDesc),
+  (u) => (hasPascal.includes(u) || hasInkubak.includes(u)) && !isAutoNew(u.businessDesc),
 );
 console.log(`\nمتن واقعی (غیرقالبی) شامل پاسکال/اینکوباک: ${realWithBrand.length}`);
 

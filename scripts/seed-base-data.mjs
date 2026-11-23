@@ -59,7 +59,7 @@ async function main() {
   // ── لوکیشن‌ها — درخت واحد (استان + شهر در یک کالکشن با type) ──
   // کلید _id ترکیبی است («province:4» / «city:230») چون id های عددی پاسکالِ
   // استان و شهر از دو فضای جدا هستند و برخورد دارند (شهر ۴ ≠ استان ۴).
-  // عدد خام پاسکال در buskool_id ذخیره می‌شود — API همان عدد را برمی‌گرداند.
+  // عدد خام پاسکال در pascal_id ذخیره می‌شود — API همان عدد را برمی‌گرداند.
   // (بخشِ جدا از upsertAll چون فیلتر _id باید همان کلید ترکیبی باشد)
   const provinces = readJson('provinces.json');
   const provOps = provinces.map((p) => ({
@@ -67,7 +67,7 @@ async function main() {
       filter: { _id: `province:${p.id}` },
       replacement: {
         _id: `province:${p.id}`,
-        buskool_id: p.id,
+        pascal_id: p.id,
         type: 'province',
         parent_id: null,
         name: (p.province_name ?? '').trim(),
@@ -87,7 +87,7 @@ async function main() {
       filter: { _id: `city:${c.id}` },
       replacement: {
         _id: `city:${c.id}`,
-        buskool_id: c.id,
+        pascal_id: c.id,
         type: 'city',
         parent_id: `province:${c.province_id}`,
         name: (c.city_name ?? '').trim(),

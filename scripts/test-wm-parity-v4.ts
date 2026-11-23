@@ -5,7 +5,7 @@
  * سنجه: هم‌خوانی باکس تشخیص + MAE خروجی نهایی (پس از decode هر دو JPEG).
  * اجرا: bun scripts/test-wm-parity-v4.ts
  */
-import { detectWatermark, isStrong, removeWatermarkRgb, loadMaps } from '../src/importer/buskool-wm-core';
+import { detectWatermark, isStrong, removeWatermarkRgb, loadMaps } from '../src/importer/pascal-wm-core';
 import sharp from 'sharp';
 
 import { execFileSync } from 'node:child_process';

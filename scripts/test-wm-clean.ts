@@ -1,7 +1,7 @@
-/* تست مستقل پاک‌کنندهٔ ایمپورت — همان مسیر واقعی: cleanBuskoolWatermark */
+/* تست مستقل پاک‌کنندهٔ ایمپورت — همان مسیر واقعی: cleanPascalWatermark */
 import * as fs from 'fs';
-import { cleanBuskoolWatermark } from '../src/importer/buskool-wm-clean';
-import { detectWatermark, isStrong } from '../src/importer/buskool-wm-core';
+import { cleanPascalWatermark } from '../src/importer/pascal-wm-clean';
+import { detectWatermark, isStrong } from '../src/importer/pascal-wm-core';
 
 async function grayOf(buf: Buffer): Promise<{ gray: Float32Array; w: number; h: number }> {
   const sharp = (await import('sharp')).default;
@@ -24,7 +24,7 @@ async function main() {
   let pass = 0, fail = 0;
   for (const [name, path] of cases) {
     const buf = fs.readFileSync(path);
-    const r = await cleanBuskoolWatermark(buf);
+    const r = await cleanPascalWatermark(buf);
     console.log(`\n[${name}] status=${r.status} score=${r.score} ms=${r.ms} in=${buf.length}B out=${r.buf.length}B mime=${r.mimetype}`);
     if (r.status === 'removed') {
       const out = `/tmp/wm-clean-test/${name}-clean.jpg`;

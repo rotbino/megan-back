@@ -20,7 +20,7 @@ dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
 // APP_PROFILE=local → seed به مونگوی لوکال می‌رود، نه Atlas
 applyProfile();
 
-const SOURCE = '/home/z/my-project/scripts/buskool-data/buyads.json';
+const SOURCE = '/home/z/my-project/scripts/pascal-data/buyads.json';
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
   console.error('✖ DATABASE_URL در .env تعریف نشده است');
@@ -32,13 +32,13 @@ await client.connect();
 const db = client.db();
 
 // ── نقشه شهرها (نام → گره Location نوع شهر با استان) ─────────────────────────
-// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام پاسکال در buskool_id.
+// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام پاسکال در pascal_id.
 const buyads = JSON.parse(readFileSync(SOURCE, 'utf8'));
 const cityNames = [...new Set(buyads.map((b) => b.city).filter(Boolean))];
 const cityRows = await db
   .collection('Location')
   .find({ type: 'city', name: { $in: cityNames } })
-  .project({ buskool_id: 1, parent_id: 1 })
+  .project({ pascal_id: 1, parent_id: 1 })
   .toArray();
 // نام تکراری بین استان‌ها → اولین استان (دقت seed کافی است)
 const cityByName = new Map();
@@ -50,7 +50,7 @@ const provinceKeys = [...new Set(cityRows.map((r) => r.parent_id).filter(Boolean
 const provinceNum = (key) => Number(key?.split(':')[1]);
 
 // ── خریداران: upsert با user_name یکتا ─────────────────────────────────────
-const usersById = new Map(); // buskool myuser_id → ObjectId
+const usersById = new Map(); // pascal myuser_id → ObjectId
 const seenNames = new Set();
 let userUpserts = 0;
 for (const b of buyads) {
@@ -98,7 +98,7 @@ for (const b of buyads) {
     requirement_amount: b.requirement_amount,
     unit: b.unit ?? 'کیلوگرم',
     province_id: city ? provinceNum(city.parent_id) : null,
-    city_id: city?.buskool_id ?? null,
+    city_id: city?.pascal_id ?? null,
     goal: 'price_and_buy',
     has_history: false,
     status: 'confirmed', // روی پاسکال زنده است

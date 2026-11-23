@@ -14,7 +14,7 @@
     python3 build_template.py \\
         --a A.jpg --b B.jpg \\
         --box-a 433,201,543,239 --box-b 97,344,207,375 \\
-        --out templates/buskool-golden.npz
+        --out templates/pascal-golden.npz
 """
 import argparse
 import os

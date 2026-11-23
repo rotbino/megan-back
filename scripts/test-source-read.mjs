@@ -1,8 +1,8 @@
-// تست E2E خواندن کالکشن منبع user-buskool — همان مسیر ImporterService
+// تست E2E خواندن کالکشن منبع user-pascal — همان مسیر ImporterService
 // (تشخیص ستون + find/sort/skip/limit از طریق $runCommandRaw).
 // فقط خواندنی: هیچ نوشتنی روی دیتابیس انجام نمی‌شود.
 // اجرا: node scripts/test-source-read.mjs
-// پس‌زمینه: باگ ۱۳-۱۱ «ردیفی در کالکشن user-buskool از offset=1 نبود» —
+// پس‌زمینه: باگ ۱۳-۱۱ «ردیفی در کالکشن user-pascal از offset=1 نبود» —
 // دامپ واقعی فیلد userName (camelCase) دارد ولی پیش‌فرض قبلی user_name بود.
 import { config } from 'dotenv';
 config({ override: true });
@@ -10,7 +10,7 @@ config({ override: true });
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const TABLE = process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
+const TABLE = process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-pascal';
 const ENV_USER = process.env.IMPORT_SOURCE_USERNAME_COLUMN?.trim();
 const ENV_PHONE = process.env.IMPORT_SOURCE_PHONE_COLUMN?.trim();
 

@@ -24,7 +24,7 @@ dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
 applyProfile();
 
 const SKIP_PHOTOS = process.argv.includes('--skip-photos');
-const SOURCE = '/home/z/my-project/scripts/buskool-data/products.json';
+const SOURCE = '/home/z/my-project/scripts/pascal-data/products.json';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const {
@@ -129,7 +129,7 @@ async function main() {
   const db = client.db();
 
   // ── ۱. فروشنده‌ها (upsert با user_name یکتا) ─────────────────────────────
-  const usersById = new Map(); // buskool user id → ObjectId مگان (نه رشته!)
+  const usersById = new Map(); // pascal user id → ObjectId مگان (نه رشته!)
   const seenUserNames = new Set();
   let userUpserts = 0;
   for (const term of Object.keys(raw)) {

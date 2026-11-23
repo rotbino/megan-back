@@ -328,7 +328,7 @@ export class AdminBaseDataService {
   async getLocations(provinceId?: number) {
     const [provinces, cities, cityCounts, userCounts, productCounts] = await Promise.all([
       this.prisma.location.findMany({
-        where: { type: 'province', ...(provinceId != null ? { buskolId: provinceId } : {}) },
+        where: { type: 'province', ...(provinceId != null ? { pascalId: provinceId } : {}) },
         orderBy: { name: 'asc' },
       }),
       this.prisma.location.findMany({
@@ -355,20 +355,20 @@ export class AdminBaseDataService {
 
     return {
       provinces: provinces.map((p) => ({
-        id: p.buskolId,
+        id: p.pascalId,
         name: p.name,
         enName: p.enName ?? null,
         isActive: p.isActive,
-        cityCount: cityCountByProvince.get(p.buskolId) ?? 0,
+        cityCount: cityCountByProvince.get(p.pascalId) ?? 0,
       })),
       cities: cities.map((c) => ({
-        id: c.buskolId,
+        id: c.pascalId,
         name: c.name,
         enName: c.enName ?? null,
         isActive: c.isActive,
         provinceId: Number(c.parentId?.split(':')[1] ?? 0),
-        userCount: userCountByCity.get(c.buskolId) ?? 0,
-        productCount: productCountByCity.get(c.buskolId) ?? 0,
+        userCount: userCountByCity.get(c.pascalId) ?? 0,
+        productCount: productCountByCity.get(c.pascalId) ?? 0,
       })),
     };
   }
@@ -385,13 +385,13 @@ export class AdminBaseDataService {
         where: {
           type: 'province',
           name,
-          ...(dto.buskolId != null ? { buskolId: { not: dto.buskolId } } : {}),
+          ...(dto.pascalId != null ? { pascalId: { not: dto.pascalId } } : {}),
         },
       });
       if (duplicate) throw AppError.conflict('استانی با همین نام وجود دارد.', 'DUPLICATE_NAME');
 
-      if (dto.buskolId != null) {
-        const key = `province:${dto.buskolId}`;
+      if (dto.pascalId != null) {
+        const key = `province:${dto.pascalId}`;
         const exists = await this.prisma.location.findUnique({ where: { id: key } });
         if (!exists || exists.type !== 'province') {
           throw AppError.notFound('استان مورد نظر پیدا نشد.');
@@ -404,9 +404,9 @@ export class AdminBaseDataService {
         return this.locationDto(updated);
       }
 
-      const buskolId = await this.nextId('location', LOCATION_COUNTER_START);
+      const pascalId = await this.nextId('location', LOCATION_COUNTER_START);
       const created = await this.prisma.location.create({
-        data: { id: `province:${buskolId}`, buskolId, type: 'province', name, enName: dto.enName?.trim() || null },
+        data: { id: `province:${pascalId}`, pascalId, type: 'province', name, enName: dto.enName?.trim() || null },
       });
       this.invalidateLocationCaches();
       return this.locationDto(created);
@@ -427,13 +427,13 @@ export class AdminBaseDataService {
         type: 'city',
         parentId: parentKey,
         name,
-        ...(dto.buskolId != null ? { buskolId: { not: dto.buskolId } } : {}),
+        ...(dto.pascalId != null ? { pascalId: { not: dto.pascalId } } : {}),
       },
     });
     if (duplicate) throw AppError.conflict('شهری با همین نام در این استان وجود دارد.', 'DUPLICATE_NAME');
 
-    if (dto.buskolId != null) {
-      const key = `city:${dto.buskolId}`;
+    if (dto.pascalId != null) {
+      const key = `city:${dto.pascalId}`;
       const exists = await this.prisma.location.findUnique({ where: { id: key } });
       if (!exists || exists.type !== 'city') throw AppError.notFound('شهر مورد نظر پیدا نشد.');
 
@@ -445,9 +445,9 @@ export class AdminBaseDataService {
       return this.locationDto(updated);
     }
 
-    const buskolId = await this.nextId('location', LOCATION_COUNTER_START);
+    const pascalId = await this.nextId('location', LOCATION_COUNTER_START);
     const created = await this.prisma.location.create({
-      data: { id: `city:${buskolId}`, buskolId, type: 'city', parentId: parentKey, name, enName: dto.enName?.trim() || null },
+      data: { id: `city:${pascalId}`, pascalId, type: 'city', parentId: parentKey, name, enName: dto.enName?.trim() || null },
     });
     this.invalidateLocationCaches();
     return this.locationDto(created);
@@ -458,8 +458,8 @@ export class AdminBaseDataService {
    * مکان غیرفعال از لیست‌های عمومی پنهان می‌شود و ثبت آگهی/درخواست جدید روی آن
    * رد می‌شود؛ آگهی‌های قدیمی نامشان را همچنان resolve می‌کنند (join با id).
    */
-  async setLocationActive(buskolId: number, type: 'province' | 'city', active: boolean) {
-    const key = `${type}:${buskolId}`;
+  async setLocationActive(pascalId: number, type: 'province' | 'city', active: boolean) {
+    const key = `${type}:${pascalId}`;
     const exists = await this.prisma.location.findUnique({ where: { id: key } });
     if (!exists || exists.type !== type) throw AppError.notFound('مکان مورد نظر پیدا نشد.');
 
@@ -470,9 +470,9 @@ export class AdminBaseDataService {
 
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
-  private locationDto(l: { id: string; buskolId: number; type: string; parentId: string | null; name: string; enName: string | null; isActive: boolean }) {
+  private locationDto(l: { id: string; pascalId: number; type: string; parentId: string | null; name: string; enName: string | null; isActive: boolean }) {
     return {
-      id: l.buskolId,
+      id: l.pascalId,
       type: l.type,
       parentId: l.parentId != null ? Number(l.parentId.split(':')[1]) : null,
       name: l.name,

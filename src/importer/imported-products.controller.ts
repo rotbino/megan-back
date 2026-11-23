@@ -5,7 +5,7 @@ import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagg
 import { ok } from '../common/api-response';
 import { AdminJwtAuthGuard } from '../admin/admin-auth/admin-jwt.guard';
 import { UploadsService } from '../uploads/uploads.service';
-import { BuskoolWatermarkService } from './buskool-wm.service';
+import { PascalWatermarkService } from './pascal-wm.service';
 import { ImportedProductsService } from './imported-products.service';
 import {
   ImportedListingsQueryDto,
@@ -36,7 +36,7 @@ export class ImportedProductsController {
   constructor(
     private readonly listings: ImportedProductsService,
     private readonly uploads: UploadsService,
-    private readonly wm: BuskoolWatermarkService,
+    private readonly wm: PascalWatermarkService,
   ) {}
 
   @Get('products')
@@ -130,7 +130,7 @@ export class ImportedProductsController {
   })
   async wmApply(@Param('id') id: string, @Req() req: FastifyRequest) {
     const adminReq = req as FastifyRequest & { adminUsername?: string };
-    const r = await this.wm.applyOne(id, `${adminReq.adminUsername ?? 'admin'} · buskool-wm`);
+    const r = await this.wm.applyOne(id, `${adminReq.adminUsername ?? 'admin'} · pascal-wm`);
     return ok(
       r,
       r.status === 'removed' && r.file
@@ -153,7 +153,7 @@ export class ImportedProductsController {
     return ok(
       await this.wm.batch(
         dto.limit ?? 5,
-        `${adminReq.adminUsername ?? 'admin'} · buskool-wm`,
+        `${adminReq.adminUsername ?? 'admin'} · pascal-wm`,
         dto.exclude,
       ),
     );

@@ -1,7 +1,7 @@
 {
   "name": "megan-back",
   "version": "1.0.0",
-  "description": "Megan (iMach) B2B wholesale marketplace API — NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas (Buskool-compatible data, imach-back file-management doctrine)",
+  "description": "Megan (iMach) B2B wholesale marketplace API — NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas (Pascal-compatible data, imach-back file-management doctrine)",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -11,8 +11,9 @@
     "postinstall": "node scripts/vercel-postinstall.js",
     "db:generate": "prisma generate",
     "db:push": "node scripts/db-push.mjs",
-    "fetch:base-data": "node scripts/fetch-buskool-base-data.mjs",
+    "fetch:base-data": "node scripts/fetch-pascal-base-data.mjs",
     "seed:base-data": "node scripts/seed-base-data.mjs",
+    "rename:pascal": "node scripts/rename-to-pascal.mjs",
     "seed:buy-requests": "node scripts/seed-buy-requests.mjs",
     "seed:products": "node scripts/seed-products.mjs",
     "make-admin": "node scripts/make-admin.mjs",

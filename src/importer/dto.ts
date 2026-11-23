@@ -99,8 +99,8 @@ export class ImportedUsersQueryDto {
   q?: string;
 
   @IsOptional()
-  @IsIn(['buskool', 'native', 'stub', 'daymat', 'all'])
-  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
+  @IsIn(['pascal', 'native', 'stub', 'daymat', 'all'])
+  source?: 'pascal' | 'native' | 'stub' | 'daymat' | 'all';
 
   /** ویژهٔ پاسکال (b.premium.isPremium) — نه اعتبار آیمچ */
   @IsOptional()
@@ -151,8 +151,8 @@ export class ImportedUsersQueryDto {
   createdTo?: string;
 
   @IsOptional()
-  @IsIn(['lastLogin', 'createdAt', 'products', 'buskoolCreated', 'imported', 'contacted'])
-  sort?: 'lastLogin' | 'createdAt' | 'products' | 'buskoolCreated' | 'imported' | 'contacted';
+  @IsIn(['lastLogin', 'createdAt', 'products', 'pascalCreated', 'imported', 'contacted'])
+  sort?: 'lastLogin' | 'createdAt' | 'products' | 'pascalCreated' | 'imported' | 'contacted';
 
   @IsOptional()
   @IsIn(['asc', 'desc'])
@@ -211,8 +211,8 @@ export class ImportedListingsQueryDto {
 
   /** منبع: پاسکالی (فروشنده سند b دارد) / ثبت‌نام خودی فروشنده */
   @IsOptional()
-  @IsIn(['buskool', 'native', 'all'])
-  source?: 'buskool' | 'native' | 'all';
+  @IsIn(['pascal', 'native', 'all'])
+  source?: 'pascal' | 'native' | 'all';
 
   /** رفتار ورود فروشنده: ever / never */
   @IsOptional()
@@ -281,10 +281,10 @@ export class ProductImagesQueryDto {
   @Length(1, 60)
   q?: string;
 
-  /** منبع تصویر: metadata.importedFrom=buskool / بقیه */
+  /** منبع تصویر: metadata.importedFrom=pascal / بقیه */
   @IsOptional()
-  @IsIn(['buskool', 'native', 'all'])
-  source?: 'buskool' | 'native' | 'all';
+  @IsIn(['pascal', 'native', 'all'])
+  source?: 'pascal' | 'native' | 'all';
 
   /** تعویض‌شده توسط ادمین (metadata.replacedAt) */
   @IsOptional()

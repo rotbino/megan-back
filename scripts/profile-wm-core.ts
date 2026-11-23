@@ -1,6 +1,6 @@
 /* پروفایل زمانی موتور TS — decode/detect/remove/encode جداگانه */
 import * as fs from 'fs';
-import { detectWatermark, isStrong } from '../src/importer/buskool-wm-core';
+import { detectWatermark, isStrong } from '../src/importer/pascal-wm-core';
 
 async function main() {
   const sharp = (await import('sharp')).default;

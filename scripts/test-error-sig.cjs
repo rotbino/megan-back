@@ -9,7 +9,7 @@ const cases = [
   [new Error('کاربر پاسکال @baker پیدا نشد'), 'user-not-found'],
   [new Error('کاربر پاسکال @ali_reza1374 پیدا نشد'), 'user-not-found'],
   [
-    new Error('buskool /load_profile_by_user_name failed: HTTP 403 on /load_profile_by_user_name (backoff ×4)'),
+    new Error('pascal /load_profile_by_user_name failed: HTTP 403 on /load_profile_by_user_name (backoff ×4)'),
     'http-403',
   ],
   [new Error('HTTP 404 on /get_product_by_id'), 'http-404'],
@@ -31,8 +31,8 @@ const b = importErrorSignature(new Error("Cannot read properties of undefined (r
 assert.strictEqual(a, b, `امضای دو خطای هم‌نوع فرق دارد: «${a}» ≠ «${b}»`);
 assert.ok(a.startsWith('cannot read properties'), a);
 
-const c = importErrorSignature(new Error('buskool /x failed: timeout after 30000ms'));
-const d = importErrorSignature(new Error('buskool /y failed: timeout after 45000ms'));
+const c = importErrorSignature(new Error('pascal /x failed: timeout after 30000ms'));
+const d = importErrorSignature(new Error('pascal /y failed: timeout after 45000ms'));
 assert.strictEqual(c, d, `اعداد نباید در امضا بمانند: «${c}» ≠ «${d}»`);
 
 // دو خطای کاملاً متفاوتِ ناشناخته نباید هم‌امضا شوند

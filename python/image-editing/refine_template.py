@@ -11,7 +11,7 @@
 رگرسیون خطی robust (حذف پرت‌های ۲٫۵σ) روی K نمونه → (a، c) دقیق per-pixel.
 نقشهٔ تشخیص d دست نمی‌خورد (تشخیص پایدار می‌ماند).
 
-خروجی: templates/buskool-golden-v4.npz + گزارش بصری + اعتبارسنجی.
+خروجی: templates/pascal-golden-v4.npz + گزارش بصری + اعتبارسنجی.
 """
 import os
 import sys
@@ -135,7 +135,7 @@ def main():
 
     # ذخیرهٔ npz جدید: a و c پالایش‌شده، d و متا قدیمی
     z = np.load(tpl.path, allow_pickle=False)
-    out = os.path.join(TOOL, "templates", "buskool-golden-v4.npz")
+    out = os.path.join(TOOL, "templates", "pascal-golden-v4.npz")
     np.savez(out, a=a, c=c, d=z["d"],
              **{k: z[k] for k in z.files if k not in ("a", "c", "d")})
     print("ذخیره شد:", out)

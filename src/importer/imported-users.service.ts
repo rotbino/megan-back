@@ -67,7 +67,7 @@ export interface ImportedUserRow {
   /** (۱۹-۱۱) خودش با دکمهٔ «ایمپورت از وب» ایمپورت را انجام داده — ردّ پایهٔ
    *  «کاربر واقعی ایمچ»: حداقل یک جلسهٔ WebImportSession کامل‌شده دارد */
   selfImported: boolean;
-  /** (تسک ۳۵ — ۲۱-۱۱) منبع ایمپورت — 'buskool' | 'daymat' | null (بومی) */
+  /** (تسک ۳۵ — ۲۱-۱۱) منبع ایمپورت — 'pascal' | 'daymat' | null (بومی) */
   importSource: string | null;
   /** (تسک ۳۵) سند دیمت — { daymatUserId, businessName, … } | null */
   d: Record<string, unknown> | null;
@@ -76,7 +76,7 @@ export interface ImportedUserRow {
 export interface ImportedUsersSummary {
   total: number;
   /** ایمپورت‌شده از پاسکال (bUserName پر) */
-  buskool: number;
+  pascal: number;
   /** خودشان ثبت‌نام کرده‌اند */
   native: number;
   /** کاربرهای کمکی نویسندهٔ کامنت (bk-c*) */
@@ -84,7 +84,7 @@ export interface ImportedUsersSummary {
   /** (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت (import_source='daymat') */
   daymat: number;
   /** ویژهٔ پاسکال (b.premium.isPremium) */
-  premiumBuskool: number;
+  premiumPascal: number;
   /** (۲۲-۱۱ — خواستهٔ مالک) تفکیک ویژه‌های پاسکال بر اساس نوع بسته‌ای که
    *  خریده‌اند (۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) — برای برآورد درآمد پاسکال
    *  در کارت‌های بالای صفحهٔ مدیریت کاربران */
@@ -117,7 +117,7 @@ export interface ImportedUsersListResult {
 
 export interface ImportedUsersQuery {
   q?: string;
-  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
+  source?: 'pascal' | 'native' | 'stub' | 'daymat' | 'all';
   premium?: 'yes' | 'no';
   packageType?: number;
   login?: 'ever' | 'never' | 'after-contact';
@@ -129,7 +129,7 @@ export interface ImportedUsersQuery {
   /** بازهٔ تاریخ ثبت‌نام — ISO میلادی (خواستهٔ مالک ۱۵-۱۱) */
   createdFrom?: string;
   createdTo?: string;
-  sort?: 'lastLogin' | 'createdAt' | 'products' | 'buskoolCreated' | 'imported' | 'contacted';
+  sort?: 'lastLogin' | 'createdAt' | 'products' | 'pascalCreated' | 'imported' | 'contacted';
   dir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
@@ -224,7 +224,7 @@ export class ImportedUsersService {
     }
     // منبع: پاسکال (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها /
     // دیمت (تسک ۳۵ — import_source='daymat')
-    if (query.source === 'buskool') filter.b_user_name = { $ne: null };
+    if (query.source === 'pascal') filter.b_user_name = { $ne: null };
     else if (query.source === 'daymat') filter.import_source = 'daymat';
     else if (query.source === 'native') {
       filter.$and = [
@@ -304,7 +304,7 @@ export class ImportedUsersService {
       lastLogin: 'last_login_at',
       createdAt: 'created_at',
       products: 'productsCount',
-      buskoolCreated: 'b.createdAt',
+      pascalCreated: 'b.createdAt',
       imported: 'b.importedAt',
       contacted: 'b.contactedAt',
     };
@@ -400,19 +400,19 @@ export class ImportedUsersService {
     const [provs, cities] = await Promise.all([
       provIds.length
         ? this.prisma.location.findMany({
-            where: { buskolId: { in: provIds } },
-            select: { buskolId: true, name: true, type: true },
+            where: { pascalId: { in: provIds } },
+            select: { pascalId: true, name: true, type: true },
           })
         : [],
       cityIds.length
         ? this.prisma.location.findMany({
-            where: { buskolId: { in: cityIds } },
-            select: { buskolId: true, name: true, type: true },
+            where: { pascalId: { in: cityIds } },
+            select: { pascalId: true, name: true, type: true },
           })
         : [],
     ]);
-    const provName = new Map(provs.filter((p) => p.type === 'province').map((p) => [p.buskolId, p.name]));
-    const cityName = new Map(cities.filter((c) => c.type === 'city').map((c) => [c.buskolId, c.name]));
+    const provName = new Map(provs.filter((p) => p.type === 'province').map((p) => [p.pascalId, p.name]));
+    const cityName = new Map(cities.filter((c) => c.type === 'city').map((c) => [c.pascalId, c.name]));
 
     const rows: ImportedUserRow[] = rawRows.map((r) => {
       const lastLoginIso = toIso(r.last_login_at);
@@ -466,7 +466,7 @@ export class ImportedUsersService {
         {
           $facet: {
             total: [{ $count: 'n' }],
-            buskool: [{ $match: { b_user_name: { $ne: null } } }, { $count: 'n' }],
+            pascal: [{ $match: { b_user_name: { $ne: null } } }, { $count: 'n' }],
             native: [
               { $match: { b_user_name: null, 'profile.bStub': { $ne: true } } },
               { $count: 'n' },
@@ -474,7 +474,7 @@ export class ImportedUsersService {
             stub: [{ $match: { 'profile.bStub': true } }, { $count: 'n' }],
             // (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت
             daymat: [{ $match: { import_source: 'daymat' } }, { $count: 'n' }],
-            premiumBuskool: [{ $match: { 'b.premium.isPremium': true } }, { $count: 'n' }],
+            premiumPascal: [{ $match: { 'b.premium.isPremium': true } }, { $count: 'n' }],
             // (۲۲-۱۱) تفکیک ویژه‌ها بر اساس نوع بسته — مبنای برآورد درآمد پاسکال
             premiumPackages: [
               { $match: { 'b.premium.isPremium': true } },
@@ -541,11 +541,11 @@ export class ImportedUsersService {
       .filter((r) => r.packageType > 0 && r.count > 0);
     return {
       total: facetCount([f], 'total'),
-      buskool: facetCount([f], 'buskool'),
+      pascal: facetCount([f], 'pascal'),
       native: facetCount([f], 'native'),
       stub: facetCount([f], 'stub'),
       daymat: facetCount([f], 'daymat'),
-      premiumBuskool: facetCount([f], 'premiumBuskool'),
+      premiumPascal: facetCount([f], 'premiumPascal'),
       premiumPackages: pkgRows.map((r) => ({
         packageType: r.packageType,
         title: bkPackageTitle(r.packageType),
@@ -635,13 +635,13 @@ export class ImportedUsersService {
         : [],
       user.provinceId
         ? this.prisma.location.findFirst({
-            where: { buskolId: user.provinceId, type: 'province' },
+            where: { pascalId: user.provinceId, type: 'province' },
             select: { name: true },
           })
         : null,
       user.cityId
         ? this.prisma.location.findFirst({
-            where: { buskolId: user.cityId, type: 'city' },
+            where: { pascalId: user.cityId, type: 'city' },
             select: { name: true },
           })
         : null,
@@ -763,20 +763,20 @@ export class ImportedUsersService {
       const [prov, city] = await Promise.all([
         u.provinceId
           ? this.prisma.location.findFirst({
-              where: { buskolId: u.provinceId, type: 'province' },
+              where: { pascalId: u.provinceId, type: 'province' },
               select: { name: true },
             })
           : null,
         u.cityId
           ? this.prisma.location.findFirst({
-              where: { buskolId: u.cityId, type: 'city' },
+              where: { pascalId: u.cityId, type: 'city' },
               select: { name: true },
             })
           : null,
       ]);
 
       const b: BUserData = {
-        source: 'buskool',
+        source: 'pascal',
         userName: u.bUserName as string,
         userId: (pj.bUserId as number) ?? 0,
         profileId: (pj.bProfileId as number) ?? null,

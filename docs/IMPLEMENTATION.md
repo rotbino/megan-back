@@ -134,7 +134,7 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 
 | اسکریپت | کار |
 |---|---|
-| `scripts/fetch-buskool-base-data.mjs` | کراول `POST /get_category_list` (BFS کل درخت) + `POST /location/get_location_info` → JSON خام در `scripts/data/` |
+| `scripts/fetch-pascal-base-data.mjs` | کراول `POST /get_category_list` (BFS کل درخت) + `POST /location/get_location_info` → JSON خام در `scripts/data/` |
 | `scripts/seed-base-data.mjs` | آپسرت ۶۹۵ دسته + ۵۰۵ لوکیشن (۳۱ استان + ۴۷۴ شهر) در کالکشن درخت واحد `Location` با کلید ترکیبی «province:4»/«city:230» (trim نام شهرها) |
 | `scripts/seed-products.mjs` | ۲۶ فروشنده واقعی + ۶۰ آگهی واقعی (id پاسکال) + **rehost عکس‌ها از CDN پاسکال به باکت آروان** (پاین‌لاین sharp: اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + هدر immutable) + Counter؛ `--skip-photos` → URL پاسکال می‌ماند |
 | `scripts/db-drop-all.mjs` | پاک‌سازی کامل (شروع تازه) |
@@ -143,7 +143,6 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 
 - اجرا: `npm run seed:base-data` سپس `npm run seed:products` (یا bun/yarn — اسکریپت‌ها همه node خالص‌اند)
 - اجرای مجدد هر seed ایمن است (upsert + ردشدن rehostهای موجود + fixer ObjectId).
-- منبع محصولات: `/home/z/my-project/scripts/buskool-data/products.json` (۶۰ آگهی واقعی ۵ کالا).
 
 ---
 
@@ -224,7 +223,7 @@ id محصول عدد پاسکال؛ هر دو به شکل رشته ذخیره/ک
   کالکشن `Location` با `type` (province/city/region/neighborhood…) + `parentId`
   خودارجاع. ⚠️ کشف مهم: id های عددی پاسکالِ استان و شهر از دو فضای جدا هستند و
   برخورد دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان) → کلید یکتای درخت رشتهٔ ترکیبی
-  «province:4»/«city:230» + `buskolId` عددی + `@@unique([type, buskolId])`.
+  «province:4»/«city:230» + `pascalId` عددی + `@@unique([type, pascalId])`.
   API ها همان id عددی خام پاسکال را برمی‌گردانند (فرانت و آگهی‌های موجود بدون
   تغییر). اندپوینت عمومی جدید `getLocationsByParent` (کلید والد → فرزندان) برای
   سطح‌های آینده (منطقه/محله) بدون مهاجرت. seed+drop+reseed اجرا شد؛ تست

@@ -21,7 +21,7 @@
  *     مؤثر به‌صورت نمایی زیاد می‌شود (تا ۱۰ برابر) و با هر موفقیت آرام
  *     به حالت عادی برمی‌گردد — یعنی هرگز «به‌انگازانه» به سرور فشار
  *     نمی‌آید و خودش را از بلاک خارج می‌کند.
- *   • retry با backoff خطی (۳ تلاش) مثل scripts/fetch-buskool-base-data.mjs.
+ *   • retry با backoff خطی (۳ تلاش) مثل scripts/fetch-pascal-base-data.mjs.
  *   • کوکی اختیاری BUSKOOL_COOKIE — سنجش زندهٔ ۱۵-۱۱: قیمت‌ها و متنِ
  *     کامنت‌های confirmed=1 کاملاً عمومی‌اند و بدون هیچ کوکی‌ای برمی‌گردند؛
  *     فقط متنِ کامنت‌های confirmed=0 پشت سنجش لاگین است — کوکی «مهمان»
@@ -62,7 +62,7 @@ const COOKIE_JUNK_NAMES = new Set([
 ]);
 
 /** پاک‌سازی رشتهٔ کوکی — جفت‌های name=value واقعی؛ حذف مشخصات Set-Cookie */
-export function sanitizeBuskoolCookie(raw: string): string {
+export function sanitizePascalCookie(raw: string): string {
   return raw
     .split(';')
     .map((s) => s.trim())
@@ -86,7 +86,7 @@ const CONCURRENCY_MAX = 8;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function buskoolConfig() {
+export function pascalConfig() {
   const raw = Number(process.env.BUSKOOL_DELAY_MS ?? GAP_DEFAULT_MS);
   const gap = Number.isFinite(raw) ? raw : GAP_DEFAULT_MS;
   const rawC = Number(process.env.BUSKOOL_CONCURRENCY ?? CONCURRENCY_DEFAULT);
@@ -96,7 +96,7 @@ export function buskoolConfig() {
     delayMs: Math.min(Math.max(gap, GAP_MIN_MS), GAP_MAX_MS),
     concurrency: Math.min(Math.max(Math.floor(concurrency), 1), CONCURRENCY_MAX),
     // کوکی پاک‌سازی‌شده — حتی اگر Set-Cookie کپی شده باشد درست کار می‌کند
-    cookie: sanitizeBuskoolCookie((process.env.BUSKOOL_COOKIE ?? '').trim()),
+    cookie: sanitizePascalCookie((process.env.BUSKOOL_COOKIE ?? '').trim()),
   };
 }
 
@@ -109,13 +109,13 @@ const PENALTY_MAX = 10;
 const EFFECTIVE_GAP_MAX_MS = 12_000;
 
 function effectiveGapMs(): number {
-  const { delayMs } = buskoolConfig();
+  const { delayMs } = pascalConfig();
   return Math.min(Math.round(delayMs * pacePenalty), EFFECTIVE_GAP_MAX_MS);
 }
 
 /** وضعیت گام فعلی — برای ping و مشاهدهٔ زندهٔ رفتار ایمپورتر */
-export function buskoolPace() {
-  const { delayMs, concurrency } = buskoolConfig();
+export function pascalPace() {
+  const { delayMs, concurrency } = pascalConfig();
   return {
     gapMs: delayMs,
     effectiveGapMs: effectiveGapMs(),
@@ -136,8 +136,8 @@ let csrfProbe: { cookie: string; p: Promise<string | null> } | null = null;
 
 /** توکن CSRF باسول برای سشن کوکی فعلی — null یعنی نتوانستیم بگیریم (بدون
  *  پرتاب؛ POSTها بدون توکن هم امتحان می‌شوند تا رفتار قبلی حفظ شود) */
-export function buskoolCsrfToken(): Promise<string | null> {
-  const { cookie } = buskoolConfig();
+export function pascalCsrfToken(): Promise<string | null> {
+  const { cookie } = pascalConfig();
   if (!cookie) return Promise.resolve(null);
   if (csrfProbe?.cookie === cookie) return csrfProbe.p;
   const p = (async (): Promise<string | null> => {
@@ -179,8 +179,8 @@ let sessionProbe: { cookie: string; p: Promise<boolean | null> } | null = null;
 
 /** آیا کوکی تنظیم‌شده سشنِ لاگین‌شده است؟
  *  true = لاگین، false = مهمان/بی‌اثر، null = کوکی خالی یا خطای شبکه */
-export function buskoolSessionLoggedIn(): Promise<boolean | null> {
-  const { cookie } = buskoolConfig();
+export function pascalSessionLoggedIn(): Promise<boolean | null> {
+  const { cookie } = pascalConfig();
   if (!cookie) return Promise.resolve(false);
   if (sessionProbe?.cookie === cookie) return sessionProbe.p;
   const p = (async (): Promise<boolean | null> => {
@@ -218,7 +218,7 @@ class PaceGate {
   private readonly waiters: Array<() => void> = [];
 
   private tryStart(): boolean {
-    const { concurrency } = buskoolConfig();
+    const { concurrency } = pascalConfig();
     if (this.active >= concurrency) return false;
     const now = Date.now();
     if (now < this.nextStart) return false;
@@ -271,7 +271,7 @@ function fatalCallError(message: string): Error {
   return Object.assign(new Error(message), { fatalCall: true });
 }
 
-export class BuskoolClient {
+export class PascalClient {
   /** آخرین مهر یک درخواست موفق — برای گزارش تعداد تماس با پاسکال */
   public requests = 0;
   private readonly stop: () => boolean;
@@ -301,7 +301,7 @@ export class BuskoolClient {
       let released = false;
       let netErr = false;
       try {
-        const { cookie } = buskoolConfig();
+        const { cookie } = pascalConfig();
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           'User-Agent': UA,
@@ -317,7 +317,7 @@ export class BuskoolClient {
           headers.Cookie = cookie;
           // هدر x-csrf-token مثل مرورگر واقعی (۲۲-۱۱) — POSTهای لاراول بدون
           // آن 419 می‌گیرند؛ توکن از متاتگ csrf-token صفحهٔ باسول با همین کوکی
-          const csrf = await buskoolCsrfToken();
+          const csrf = await pascalCsrfToken();
           if (csrf) headers['x-csrf-token'] = csrf;
         }
 
@@ -401,7 +401,7 @@ export class BuskoolClient {
     // لایهٔ سرویس بتواند پیام دقیق (کوکی/CSRF/قفل) بدهد
     const src = (lastErr ?? {}) as { status?: number; redirectLoc?: string };
     throw Object.assign(
-      new Error(`buskool ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`),
+      new Error(`pascal ${path} failed: ${(lastErr as Error)?.message ?? lastErr}`),
       {
         ...(src.status !== undefined ? { status: src.status } : {}),
         ...(src.redirectLoc !== undefined ? { redirectLoc: src.redirectLoc } : {}),

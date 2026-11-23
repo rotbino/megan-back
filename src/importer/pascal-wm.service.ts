@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { UploadsService } from '../uploads/uploads.service';
 import { AppError } from '../common/errors/app-error';
-import { detectWatermark, isStrong, removeWatermarkRgb, type WmDetection } from './buskool-wm-core';
+import { detectWatermark, isStrong, removeWatermarkRgb, type WmDetection } from './pascal-wm-core';
 
 /**
  * حذف خودکار واترمارک پاسکال — سرویس UI (خواستهٔ مالک ۱۹-۱۱).
@@ -64,8 +64,8 @@ interface DecodedImage {
 }
 
 @Injectable()
-export class BuskoolWatermarkService {
-  private readonly logger = new Logger(BuskoolWatermarkService.name);
+export class PascalWatermarkService {
+  private readonly logger = new Logger(PascalWatermarkService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -188,7 +188,7 @@ export class BuskoolWatermarkService {
     }
     const buf = await this.fetchImage(file.url);
     const { rgb, w, h } = await this.decodeImage(buf);
-    const det: WmDetection | null = await detectWatermark(BuskoolWatermarkService.grayOf(rgb, w, h), w, h);
+    const det: WmDetection | null = await detectWatermark(PascalWatermarkService.grayOf(rgb, w, h), w, h);
     const ms = Date.now() - t0;
     // فیلدهای گزارش پیش از هر narrowing محاسبه می‌شوند
     const score = det ? Math.round(det.score * 1000) / 1000 : null;

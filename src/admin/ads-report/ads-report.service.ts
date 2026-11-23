@@ -434,8 +434,8 @@ export class AdsReportService {
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
   /** resolve یک دستهٔ پاسکال → کلید v2 (id، بعد نام — مقاوم در برابر ایمپورت‌های تازه) */
-  private resolveKey(buskolId: number, name?: string): string | null {
-    return BUSKOL_TO_V2[buskolId] ?? (name ? BUSKOL_NAME_TO_V2[normalizeFa(name)] ?? null : null);
+  private resolveKey(pascalId: number, name?: string): string | null {
+    return BUSKOL_TO_V2[pascalId] ?? (name ? BUSKOL_NAME_TO_V2[normalizeFa(name)] ?? null : null);
   }
 
   private parseSelection(nodeKey?: string): NodeSelection {

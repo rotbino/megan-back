@@ -5,9 +5,9 @@
  * ایمپورت (پنل ادمین دیتا-ایمپورت + پنل کاربر «ایمپورت از وب») تصویر بلافاصله
  * بعد از دانلود و قبل از ingestExternal از همین تابع رد می‌شود —
  *
- *   دانلود پاسکال → normalizeImage → cleanBuskoolWatermark → ingestExternal → آروان
+ *   دانلود پاسکال → normalizeImage → cleanPascalWatermark → ingestExternal → آروان
  *
- * همان موتور اثبات‌شدهٔ buskool-wm-core (پورت TS پایتون v4)؛ بدون DI و بدون
+ * همان موتور اثبات‌شدهٔ pascal-wm-core (پورت TS پایتون v4)؛ بدون DI و بدون
  * تغییر ماژول‌ها تا هر دو سرویس (ImporterService و WebImportService) مستقیم
  * import کنند.
  *
@@ -19,7 +19,7 @@
  *                    برمی‌گردد و فایل باید در صف اصلاح بماند (hasWatermark=true).
  */
 
-import { detectWatermark, isStrong, removeWatermarkRgb } from './buskool-wm-core';
+import { detectWatermark, isStrong, removeWatermarkRgb } from './pascal-wm-core';
 
 export type WmCleanStatus = 'removed' | 'not_found' | 'failed';
 
@@ -34,7 +34,7 @@ export interface WmCleanResult {
   ms: number;
 }
 
-/** خاکستری‌سازی RGB درهم — همان فرمول buskool-wm.service. */
+/** خاکستری‌سازی RGB درهم — همان فرمول pascal-wm.service. */
 function grayOf(rgb: Uint8Array, w: number, h: number): Float32Array {
   const gray = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) {
@@ -48,7 +48,7 @@ function grayOf(rgb: Uint8Array, w: number, h: number): Float32Array {
  * هرگز استثنا نمی‌اندازد؛ در بدترین حالت ورودی را دست‌نخورده برمی‌گرداند
  * (ایمپورت هرگز به‌خاطر پاک‌سازی نمی‌شکند — سیاست «خطای رکورد رد می‌شود»).
  */
-export async function cleanBuskoolWatermark(buf: Buffer): Promise<WmCleanResult> {
+export async function cleanPascalWatermark(buf: Buffer): Promise<WmCleanResult> {
   const t0 = Date.now();
   const untouched = (status: WmCleanStatus, score: number | null = null): WmCleanResult => ({
     buf,

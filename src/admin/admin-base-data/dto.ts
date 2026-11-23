@@ -88,11 +88,11 @@ export class DeleteGoodDto {
 }
 
 export class UpsertLocationDto {
-  /** buskolId موجود = ویرایش؛ خالی = ایجاد (id تازه از Counter) */
+  /** pascalId موجود = ویرایش؛ خالی = ایجاد (id تازه از Counter) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  buskolId?: number;
+  pascalId?: number;
 
   @IsEnum(LocationType, { message: 'نوع مکان باید استان یا شهر باشد.' })
   type!: LocationType;
@@ -106,7 +106,7 @@ export class UpsertLocationDto {
   @Length(1, 50)
   enName?: string;
 
-  /** برای شهر: buskolId استان والد */
+  /** برای شهر: pascalId استان والد */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -116,7 +116,7 @@ export class UpsertLocationDto {
 export class SetLocationActiveDto {
   @Type(() => Number)
   @IsInt()
-  buskolId!: number;
+  pascalId!: number;
 
   @IsEnum(LocationType)
   type!: LocationType;

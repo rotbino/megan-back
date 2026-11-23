@@ -7,7 +7,7 @@ import { ImportedUsersController } from './imported-users.controller';
 import { ImportedUsersService } from './imported-users.service';
 import { ImportedProductsController } from './imported-products.controller';
 import { ImportedProductsService } from './imported-products.service';
-import { BuskoolWatermarkService } from './buskool-wm.service';
+import { PascalWatermarkService } from './pascal-wm.service';
 import { PriceUpdateController } from './price-update.controller';
 import { PriceUpdateService } from './price-update.service';
 import { DaymatController } from './daymat.controller';
@@ -27,8 +27,8 @@ import { DaymatService } from './daymat.service';
 @Module({
   imports: [UploadsModule, AdminAuthModule],
   controllers: [ImporterController, ImportedUsersController, ImportedProductsController, PriceUpdateController, DaymatController],
-  providers: [ImporterService, ImportedUsersService, ImportedProductsService, BuskoolWatermarkService, PriceUpdateService, DaymatService],
-  exports: [ImporterService, ImportedUsersService, ImportedProductsService, BuskoolWatermarkService],
+  providers: [ImporterService, ImportedUsersService, ImportedProductsService, PascalWatermarkService, PriceUpdateService, DaymatService],
+  exports: [ImporterService, ImportedUsersService, ImportedProductsService, PascalWatermarkService],
 })
 export class ImporterModule {}
 

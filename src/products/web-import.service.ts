@@ -31,15 +31,15 @@ import { PrismaService } from '../common/prisma/prisma.module';
 import { UploadsService } from '../uploads/uploads.service';
 import { AppError } from '../common/errors/app-error';
 import type { AuthUser } from '../common/guards';
-import { BuskoolClient, type BkProductDetailResp, type BkProfileResp, type BkStatsResp } from '../importer/buskool.client';
+import { PascalClient, type BkProductDetailResp, type BkProfileResp, type BkStatsResp } from '../importer/pascal.client';
 import {
   aimchifyBrandMentions,
   fetchImage,
-  isBuskoolAutoDesc,
+  isPascalAutoDesc,
   normalizeImage,
   runPool,
 } from '../importer/importer.service';
-import { cleanBuskoolWatermark } from '../importer/buskool-wm-clean';
+import { cleanPascalWatermark } from '../importer/pascal-wm-clean';
 import { descToText } from '../importer/desc-text';
 import { asBUserData, bkPackageTitle, type BUserData } from '../importer/b-user-data';
 
@@ -205,7 +205,7 @@ export class WebImportService {
   }
 
   private sourceTable(): string {
-    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
+    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-pascal';
   }
 
   /** تشخیص یوزرنیم منبع کاربر — مسیر ۱: حساب خودش؛ مسیر ۲: شماره در دامپ */
@@ -316,7 +316,7 @@ export class WebImportService {
     const log = readLog(session.log);
     const mode = session.mode as WebImportMode;
     const items = readItems(session.items);
-    const bk = new BuskoolClient(() => false);
+    const bk = new PascalClient(() => false);
 
     // ── فاز ۱: جستجو — یک صفحهٔ لیست کالاها ──
     if (session.phase === 'search') {
@@ -452,7 +452,7 @@ export class WebImportService {
   // ─── تماس با منبع ─────────────────────────────────────────────────────────
 
   /** تماس با منبع با پیام خطای داخلی (نشت URL/کد HTTP به کاربر ممنوع) */
-  private async callSource<T>(bk: BuskoolClient, path: string, body: Record<string, unknown>): Promise<T> {
+  private async callSource<T>(bk: PascalClient, path: string, body: Record<string, unknown>): Promise<T> {
     try {
       return await bk.call<T>(path, body);
     } catch (err) {
@@ -462,7 +462,7 @@ export class WebImportService {
 
   // ─── فاز پروفایل: پر کردن جاهای خالی (هرگز بازنویسی دادهٔ کاربر) ─────────
 
-  private async syncProfile(session: WebImportSession, bk: BuskoolClient, log: LogLine[]): Promise<boolean> {
+  private async syncProfile(session: WebImportSession, bk: PascalClient, log: LogLine[]): Promise<boolean> {
     const user = await this.prisma.user.findUnique({ where: { id: session.userId } });
     if (!user) return false;
 
@@ -484,9 +484,9 @@ export class WebImportService {
     const relatedUrls = (profile.relateds ?? [])
       .map((r) => (typeof r === 'string' ? r.trim() : (r?.name ?? '').trim()))
       .filter(Boolean);
-    const descAuto = isBuskoolAutoDesc(pf?.description);
+    const descAuto = isPascalAutoDesc(pf?.description);
     const bData: BUserData = {
-      source: 'buskool',
+      source: 'pascal',
       userName: session.sourceUserName,
       userId: ui.id,
       profileId: pf?.id ?? null,
@@ -544,14 +544,14 @@ export class WebImportService {
     let provinceId = user.provinceId;
     if (provinceId == null && ui.province) {
       const loc = await this.findLocation('province', ui.province);
-      if (loc?.buskolId != null) {
-        provinceId = loc.buskolId;
-        data.provinceId = loc.buskolId;
+      if (loc?.pascalId != null) {
+        provinceId = loc.pascalId;
+        data.provinceId = loc.pascalId;
       }
     }
     if (user.cityId == null && ui.city && provinceId != null) {
       const loc = await this.findLocation('city', ui.city, provinceId);
-      if (loc?.buskolId != null) data.cityId = loc.buskolId;
+      if (loc?.pascalId != null) data.cityId = loc.pascalId;
     }
 
     if (!user.businessDesc && !descAuto && (pf?.description ?? '').trim()) {
@@ -823,7 +823,7 @@ export class WebImportService {
 
   /** تصاویر کالای جدید — از جزئیات منبع؛ همان مسیر/پردازش/واترمارک آپلود عادی */
   private async fetchItemPhotos(
-    bk: BuskoolClient,
+    bk: PascalClient,
     session: WebImportSession,
     it: ImportItem,
     counters: WebImportCounters,
@@ -858,7 +858,7 @@ export class WebImportService {
         }
         // (۲۰-۱۱) پاک‌سازی واترمارک در لحظهٔ ایمپورت — نسخهٔ تمیز بالا
         // می‌رود؛ نتیجهٔ بررسی در ردیف File مهر می‌خورد. بی‌صدا برای کاربر.
-        const wm = await cleanBuskoolWatermark(norm.buf);
+        const wm = await cleanPascalWatermark(norm.buf);
         if (wm.status === 'removed') counters.imagesWmCleaned++;
         const res = await this.uploads
           .ingestExternal({
@@ -911,10 +911,10 @@ export class WebImportService {
   }
 
   private async findLocation(type: 'province' | 'city', name: string, parentBuskolId?: number) {
-    const parent = parentBuskolId != null ? await this.prisma.location.findFirst({ where: { type: 'province', buskolId: parentBuskolId }, select: { id: true } }) : null;
+    const parent = parentBuskolId != null ? await this.prisma.location.findFirst({ where: { type: 'province', pascalId: parentBuskolId }, select: { id: true } }) : null;
     return this.prisma.location.findFirst({
       where: { type, name, ...(parent ? { parentId: parent.id } : {}) },
-      select: { buskolId: true },
+      select: { pascalId: true },
     });
   }
 

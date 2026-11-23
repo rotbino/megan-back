@@ -20,8 +20,8 @@ export class LocationsService {
   ) {}
 
   /** «4» → «province:4» */
-  private key(type: string, buskolId: number): string {
-    return `${type}:${buskolId}`;
+  private key(type: string, pascalId: number): string {
+    return `${type}:${pascalId}`;
   }
 
   /** عدد استان از کلید والد شهر («province:4» → 4) */
@@ -42,7 +42,7 @@ export class LocationsService {
           orderBy: { name: 'asc' },
         });
         return list.map((p) => ({
-          id: p.buskolId,
+          id: p.pascalId,
           province_name: p.name,
           province_en_name: p.enName ?? null,
           country_id: 1,
@@ -71,7 +71,7 @@ export class LocationsService {
           orderBy: { name: 'asc' },
         });
         return list.map((c) => ({
-          id: c.buskolId,
+          id: c.pascalId,
           province_id: this.parentBuskolId(c.parentId),
           city_name: c.name,
           city_en_name: c.enName ?? null,
@@ -99,7 +99,7 @@ export class LocationsService {
         });
         return list.map((l) => ({
           id: l.id,
-          buskool_id: l.buskolId,
+          pascal_id: l.pascalId,
           parent_id: l.parentId,
           name: l.name,
           en_name: l.enName ?? null,
@@ -140,17 +140,17 @@ export class LocationsService {
           .slice(0, Math.max(take * 2, take)); // کمی اضافه برای حذف شهرهای بی‌نام پایین‌تر
         if (top.length === 0) return [];
         const cityRows = await this.prisma.location.findMany({
-          where: { type: 'city', buskolId: { in: top.map((g) => g.cityId) } },
-          select: { buskolId: true, name: true, parentId: true, isActive: true },
+          where: { type: 'city', pascalId: { in: top.map((g) => g.cityId) } },
+          select: { pascalId: true, name: true, parentId: true, isActive: true },
         });
-        const byId = new Map(cityRows.map((c) => [c.buskolId, c]));
+        const byId = new Map(cityRows.map((c) => [c.pascalId, c]));
         // فقط شهرهای موجود و فعال — آگهی‌های شهر پاک‌شده/غیرفعال بی‌نام می‌مانند
         return top
           .map((g) => {
             const loc = byId.get(g.cityId);
             if (!loc || !loc.isActive) return null;
             return {
-              id: loc.buskolId,
+              id: loc.pascalId,
               city_name: loc.name,
               province_id: this.parentBuskolId(loc.parentId),
               count: g._count._all,
@@ -168,13 +168,13 @@ export class LocationsService {
   }
 
   /** یافتن شهر با id عددی پاسکال — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
-  async getCityById(buskolId: number) {
+  async getCityById(pascalId: number) {
     const hit = await this.prisma.location.findUnique({
-      where: { id: this.key('city', buskolId) },
+      where: { id: this.key('city', pascalId) },
     });
     if (!hit || hit.type !== 'city') return null;
     return {
-      id: hit.buskolId,
+      id: hit.pascalId,
       province_id: this.parentBuskolId(hit.parentId),
       city_name: hit.name,
       is_active: hit.isActive,
@@ -182,12 +182,12 @@ export class LocationsService {
   }
 
   /** یافتن استان با id عددی پاسکال — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
-  async getProvinceById(buskolId: number) {
+  async getProvinceById(pascalId: number) {
     const hit = await this.prisma.location.findUnique({
-      where: { id: this.key('province', buskolId) },
+      where: { id: this.key('province', pascalId) },
     });
     if (!hit || hit.type !== 'province') return null;
-    return { id: hit.buskolId, province_name: hit.name, is_active: hit.isActive };
+    return { id: hit.pascalId, province_name: hit.name, is_active: hit.isActive };
   }
 
   /**
@@ -204,15 +204,15 @@ export class LocationsService {
     const rows = await this.prisma.location.findMany({
       where: {
         OR: [
-          ...(hasP ? [{ type: 'province', buskolId: { in: provinceIds } }] : []),
-          ...(hasC ? [{ type: 'city', buskolId: { in: cityIds } }] : []),
+          ...(hasP ? [{ type: 'province', pascalId: { in: provinceIds } }] : []),
+          ...(hasC ? [{ type: 'city', pascalId: { in: cityIds } }] : []),
         ],
       },
-      select: { type: true, buskolId: true, name: true },
+      select: { type: true, pascalId: true, name: true },
     });
     for (const r of rows) {
-      if (r.type === 'province') provs.set(r.buskolId, r.name);
-      else if (r.type === 'city') cities.set(r.buskolId, r.name);
+      if (r.type === 'province') provs.set(r.pascalId, r.name);
+      else if (r.type === 'city') cities.set(r.pascalId, r.name);
     }
     return { provinces: provs, cities };
   }

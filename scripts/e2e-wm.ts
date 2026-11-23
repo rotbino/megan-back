@@ -8,13 +8,13 @@
 import { PrismaService } from '../src/common/prisma/prisma.module';
 import { CacheService } from '../src/common/cache/cache.module';
 import { UploadsService } from '../src/uploads/uploads.service';
-import { BuskoolWatermarkService } from '../src/importer/buskool-wm.service';
+import { PascalWatermarkService } from '../src/importer/pascal-wm.service';
 
 async function main() {
   const prisma = new PrismaService();
   const cache = new CacheService();
   const uploads = new UploadsService(prisma, cache);
-  const wm = new BuskoolWatermarkService(prisma, uploads);
+  const wm = new PascalWatermarkService(prisma, uploads);
 
   const queue = await prisma.file.findMany({
     where: {

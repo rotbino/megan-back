@@ -5,7 +5,7 @@
  *   - POST /location/get_location_info {city_id}      → همه استان‌ها (۳۱)
  *   - POST /location/get_location_info {province_id}  → شهرهای هر استان
  * خروجی: scripts/data/{categories,provinces,cities}.json
- * اجرا: node scripts/fetch-buskool-base-data.mjs   (یا bun run seed:base-data)
+ * اجرا: node scripts/fetch-pascal-base-data.mjs   (یا bun run seed:base-data)
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

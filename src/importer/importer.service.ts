@@ -20,7 +20,7 @@
  *   • پروفایل کسب‌وکار (خواستهٔ مالک ۱۳-۱۱): توضیحات به ستون businessDesc
  *     می‌رود (همان فرم ویرایش/کاتالوگ عمومی) و address/isCompany/companyName
  *     با همان کلیدهای استاندارد profile embedded ذخیره می‌شوند؛ متن خودکار
- *     پاسکال/اینکوباک (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک
+ *     پاسکال/اینکوباک (isPascalAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک
  *     خودش (lib/seller-text فرانت) را نشان می‌دهد، نه کپی پاسکال را.
  *   • برندگذاری قدیمی (خواستهٔ مالک ۱۳-۱۱): نام قدیمی سایت «اینکوباک» بوده و
  *     متن‌های خودکار با آن ساخته می‌شده‌اند؛ در متن‌های «خودِ کاربر» هر
@@ -42,7 +42,7 @@
  *   • سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن پاسکال»):
  *     درخواست‌های مستقل پاسکال هم‌زمان شروع می‌شوند (گیت نرخ با فاصلهٔ
  *     کوتاه بین «شروع» درخواست‌ها + سقف هم‌زمانی + عقب‌نشینی خودکار روی
- *     429/403 — buskool.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
+ *     429/403 — pascal.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
  *     همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
  *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
  *   • سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر کاربر (مثل حساب
@@ -61,10 +61,10 @@ import { UploadsService } from '../uploads/uploads.service';
 import sharp from 'sharp';
 import { storage } from '../common/config/env';
 import {
-  BuskoolClient,
-  buskoolConfig,
-  buskoolPace,
-  buskoolSessionLoggedIn,
+  PascalClient,
+  pascalConfig,
+  pascalPace,
+  pascalSessionLoggedIn,
   type BkAvatarResp,
   type BkCommentsResp,
   type BkProductDetailResp,
@@ -72,10 +72,10 @@ import {
   type BkProductListResp,
   type BkProfileResp,
   type BkStatsResp,
-} from './buskool.client';
+} from './pascal.client';
 import { importerAdminPhone } from './dto';
 import { descToText } from './desc-text';
-import { cleanBuskoolWatermark } from './buskool-wm-clean';
+import { cleanPascalWatermark } from './pascal-wm-clean';
 import { asBUserData, bkPackageTitle, type BUserData } from './b-user-data';
 import {
   isNetworkError,
@@ -138,7 +138,7 @@ interface JobInternal extends ImportJob {
   stopRequested: boolean;
   /** (۱۶-۱۱) درخواست توقف موقت — در ایستگاه‌های امن برسی می‌شود */
   pauseRequested: boolean;
-  buskoolRequests: number;
+  pascalRequests: number;
 }
 
 const STEP_DEFS: { key: string; label: string }[] = [
@@ -210,7 +210,7 @@ export class ImporterService {
   private catCache: Map<number, { parentId: number | null }> | null = null;
   /** کش استان/شهر به نام — جدول locations تغییرناپذیر است؛ findFirst های
    *  تکراری هر کاربر (۲ تا) در جاب لیستی حذف می‌شود */
-  private readonly locCache = new Map<string, { id: string; buskolId: number | null } | null>();
+  private readonly locCache = new Map<string, { id: string; pascalId: number | null } | null>();
   private readonly logger = new Logger(ImporterService.name);
   private readonly jobs = new Map<string, JobInternal>();
 
@@ -238,7 +238,7 @@ export class ImporterService {
   // ═══════════════════════════ وضعیت ‌و آمار ═══════════════════════════
 
   async ping() {
-    const { delayMs, cookie } = buskoolConfig();
+    const { delayMs, cookie } = pascalConfig();
     return {
       ok: true,
       delayMs,
@@ -247,7 +247,7 @@ export class ImporterService {
       // سلامت سشن (۱۵-۱۱): کوکی مهمان هم cookieSet:true می‌دهد ولی چیزی
       // باز نمی‌کند — این فیلد نشان می‌دهد سشن واقعاً لاگین است یا نه
       // (null = بدون کوکی/خطای شبکه؛ یک تماس در عمر پروسه، کش‌شده).
-      cookieLoggedIn: await buskoolSessionLoggedIn(),
+      cookieLoggedIn: await pascalSessionLoggedIn(),
       // (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») تشخیص کوکی: آیا جفت‌های
       // یادآورِ لاگین (user_phone/user_password) هم هستند یا فقط laravel_session
       // که ۲ ساعت بعد می‌میرد؟ آیا رشته Set-Cookie کپی شده (expires/path داخل
@@ -267,7 +267,7 @@ export class ImporterService {
       storageDriver: storage.DRIVER,
       // وضعیت گامِ فعلی پاسکال (۱۴-۱۱): فاصلهٔ مؤثر (بعد از عقب‌نشینی‌ها)،
       // هم‌زمانی و ضریب ادب — برای مشاهدهٔ زندهٔ رفتار ایمپورتر در پنل
-      pace: buskoolPace(),
+      pace: pascalPace(),
     };
   }
 
@@ -288,13 +288,13 @@ export class ImporterService {
   }
 
   /**
-   * دیتابیس منبع — کالکشن user-buskool در «همان دیتابیس» ایمچ (خواستهٔ مالک
+   * دیتابیس منبع — کالکشن user-pascal در «همان دیتابیس» ایمچ (خواستهٔ مالک
    * ۱۳-۱۱: جدول را خودش با دامپ کاربران پاسکال ساخته؛ دیگر دیتابیس جانبی
    * لازم نیست). خواندن با $runCommandRaw تا شکل سندهای دامپ (فیلدهای اضافی)
    * مهم نباشد و فقط ستون‌های یوزرنیم/تلفن خوانده شود.
    */
   private sourceTable() {
-    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
+    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-pascal';
   }
 
   /** کش ستون‌های تشخیص‌داده‌شدهٔ کالکشن منبع — هر جدول یک‌بار در عمر پروسه */
@@ -594,7 +594,7 @@ export class ImporterService {
       job.netWaiting = false;
       job.netWaitSince = null;
       job.finishedAt = Date.now();
-      job.counters['buskoolRequests'] = job.buskoolRequests;
+      job.counters['pascalRequests'] = job.pascalRequests;
       this.log(job, 'warn', 'توقف فوری — جاب همین‌جا قطع شد (داده‌های ثبت‌شده حفظ شدند)');
       return { stopped: true, status: job.status, mode: 'forced' };
     }
@@ -684,7 +684,7 @@ export class ImporterService {
       stopRequested: false,
       pauseRequested: false,
       paused: false,
-      buskoolRequests: 0,
+      pascalRequests: 0,
     };
     this.jobs.set(id, job);
     // فقط آخرین MAX_JOBS جاب نگه داشته می‌شود
@@ -727,7 +727,7 @@ export class ImporterService {
       this.log(job, 'error', `خطا: ${msg}`);
       this.logger.error(`job ${job.id} failed: ${msg}`);
     }
-    job.buskoolRequests > 0 && (job.counters[`buskoolRequests`] = job.buskoolRequests);
+    job.pascalRequests > 0 && (job.counters[`pascalRequests`] = job.pascalRequests);
   }
 
   private finishJob(job: JobInternal) {
@@ -735,7 +735,7 @@ export class ImporterService {
     job.netWaiting = false;
     job.netWaitSince = null;
     job.finishedAt = Date.now();
-    job.counters['buskoolRequests'] = job.buskoolRequests;
+    job.counters['pascalRequests'] = job.pascalRequests;
     this.log(job, 'success', 'ایمپورت کامل شد ✓');
   }
 
@@ -774,12 +774,12 @@ export class ImporterService {
   // ═══════════════════════════ اجرا ═══════════════════════════
 
   private async runSingle(job: JobInternal, input: { userName: string; phone?: string; maxProducts?: number }) {
-    const bk = new BuskoolClient(() => job.stopRequested);
+    const bk = new PascalClient(() => job.stopRequested);
     await this.waitWhilePaused(job);
     const user = await this.netRetry(job, () =>
       this.importOneUser(job, bk, input.userName, input.phone, input.maxProducts ?? 0),
     );
-    job.buskoolRequests = bk.requests;
+    job.pascalRequests = bk.requests;
     if (job.stopRequested) throw new Error('JOB_STOPPED');
     // کاربر از لیست «در انتظار ایمپورت» خارج می‌شود (خواستهٔ مالک ۲۲-۱۱):
     // ایمپورت کامل شد — رکوردش را حذف کن (best-effort؛ خودترمیمی لیست هم هست)
@@ -792,7 +792,7 @@ export class ImporterService {
     job: JobInternal,
     input: { offset?: number; limit?: number; maxProductsPerUser?: number },
   ) {
-    // خواندن لیست از کالکشن user-buskool — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
+    // خواندن لیست از کالکشن user-pascal — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 5;
 
@@ -814,7 +814,7 @@ export class ImporterService {
       `ایمپورت ${job.totalUsers.toLocaleString('fa-IR')} کاربر از ردیف ${offset} کالکشن ${this.sourceTable()} — در قطعه‌های ${CHUNK}تایی`,
     );
 
-    const bk = new BuskoolClient(() => job.stopRequested);
+    const bk = new PascalClient(() => job.stopRequested);
     // سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر رکورد جاب را
     // نمی‌اندازد — ذخیره و رد می‌شود؛ فقط تکرار پیاپیِ «همین خطا» (یا
     // موج پیاپی خطاهای گوناگون) مشکل سیستمی تلقی می‌شود و جاب را
@@ -897,7 +897,7 @@ export class ImporterService {
           consecutiveFails = 0;
           failStreakSig = '';
           failStreakCount = 0;
-          job.buskoolRequests = bk.requests;
+          job.pascalRequests = bk.requests;
           // از لیست «در انتظار ایمپورت» هم خارجش کن (خواستهٔ مالک ۲۲-۱۱)
           await this.dropPendingImport(job, row.userName);
           this.log(
@@ -946,7 +946,7 @@ export class ImporterService {
 
       cursor += rawCount;
       consumed += rawCount;
-      job.buskoolRequests = bk.requests;
+      job.pascalRequests = bk.requests;
       // نوار پیشرفت با واقعیت هم‌قدم بماند (آخرین قطعه ممکن است ناقص باشد)
       if (consumed > job.totalUsers) job.totalUsers = consumed;
     }
@@ -958,13 +958,13 @@ export class ImporterService {
    * معماری سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن پاسکال»):
    * درخواست‌های مستقل پاسکال (آمار، کامنت‌ها، لیست آگهی‌ها، آواتارِ
    * fallback) بلافاصله پس از پروفایل «هم‌زمان» شروع می‌شوند — گیتِ نرخِ
-   * BuskoolClient خودش فاصلهٔ ادب و سقف هم‌زمانی را رعایت می‌کند. کارهای
+   * PascalClient خودش فاصلهٔ ادب و سقف هم‌زمانی را رعایت می‌کند. کارهای
    * دیتابیس در همین حین انجام می‌شوند، جزئیات آگهی‌ها موازی گرفته می‌شوند
    * و همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
    * دانلود/پردازش/ذخیره می‌شوند. نتیجه: همان داده، چند برابر سریع‌تر. */
   private async importOneUser(
     job: JobInternal,
-    bk: BuskoolClient,
+    bk: PascalClient,
     userName: string,
     phoneHint: string | undefined,
     maxProducts: number,
@@ -1018,7 +1018,7 @@ export class ImporterService {
     // خودکار پاسکال/اینکوباک (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن
     // پارامتریک آیمچ را نشان دهد (lib/seller-text در فرانت). در متن خودِ
     // کاربر هم نام پاسکال/اینکوباک با آیمچ جایگزین می‌شود (خواستهٔ مالک).
-    const descAuto = isBuskoolAutoDesc(pf?.description);
+    const descAuto = isPascalAutoDesc(pf?.description);
     const descClean = aimchifyBrandMentions((pf?.description ?? '').trim());
     const businessDesc = descAuto ? null : descClean || null;
 
@@ -1046,7 +1046,7 @@ export class ImporterService {
       .map((r) => (typeof r === 'string' ? r.trim() : (r?.name ?? '').trim()))
       .filter(Boolean);
     const bData: BUserData = {
-      source: 'buskool',
+      source: 'pascal',
       userName,
       userId: ui.id,
       profileId: pf?.id ?? null,
@@ -1121,8 +1121,8 @@ export class ImporterService {
       sex: ui.sex ?? null,
       isBuyer: ui.is_buyer === 1,
       isSeller: true,
-      provinceId: provinceLoc?.buskolId ?? null,
-      cityId: cityLoc?.buskolId ?? null,
+      provinceId: provinceLoc?.pascalId ?? null,
+      cityId: cityLoc?.pascalId ?? null,
       profile: profileJson as object,
       b: bData as object,
       businessDesc,
@@ -1256,8 +1256,8 @@ export class ImporterService {
         .update({
           where: { id: user.id },
           data: {
-            provinceId: provinceLoc?.buskolId ?? items[0].main.province_id,
-            cityId: cityLoc?.buskolId ?? items[0].main.city_id,
+            provinceId: provinceLoc?.pascalId ?? items[0].main.province_id,
+            cityId: cityLoc?.pascalId ?? items[0].main.city_id,
           },
         })
         .catch(() => undefined);
@@ -1399,12 +1399,12 @@ export class ImporterService {
     this.step(job, 'reviews', 'done');
     {
       const empty = list.filter((c) => !c.text).length;
-      if (empty > 0 && !buskoolConfig().cookie) {
+      if (empty > 0 && !pascalConfig().cookie) {
         this.log(job, 'warn', `${empty} کامنت بدون متن است — با BUSKOOL_COOKIE متن کامل گرفته می‌شود`);
       } else if (empty > 0) {
         // کوکی هست ولی باز متن خالی آمد — علت را دقیق بگوییم (کشف ۱۵-۱۱:
         // کوکیِ مهمان از سمت پاسکال پذیرفته می‌شود ولی چیزی باز نمی‌کند)
-        const loggedIn = await buskoolSessionLoggedIn();
+        const loggedIn = await pascalSessionLoggedIn();
         const why =
           loggedIn === false
             ? 'کوکی لاگین نیست (سشن مهمان) — بعد از ورود به حساب در buskool.com کوکی تازه بگیرید'
@@ -1511,7 +1511,7 @@ export class ImporterService {
       let uploadMime = norm.mime;
       let wmOutcome: 'removed' | 'not_found' | 'failed' | undefined;
       if (t.kind === 'product') {
-        const wm = await cleanBuskoolWatermark(norm.buf);
+        const wm = await cleanPascalWatermark(norm.buf);
         wmOutcome = wm.status;
         if (wm.status === 'removed') {
           uploadBuf = wm.buf;
@@ -1532,9 +1532,9 @@ export class ImporterService {
               fieldKey: 'avatar',
               buffer: norm.buf,
               mimetype: norm.mime,
-              filename: t.url.split('/').pop() || `buskool-avatar-${userName}`,
+              filename: t.url.split('/').pop() || `pascal-avatar-${userName}`,
               replace: true, // اسلات تک‌فایلی — عین پنل کاربر
-              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+              metadata: { importedFrom: 'pascal', originalUrl: t.url },
             }),
           );
           if (res.ok) {
@@ -1557,9 +1557,9 @@ export class ImporterService {
               fieldKey: 'gallery',
               buffer: norm.buf,
               mimetype: norm.mime,
-              filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
+              filename: t.url.split('/').pop() || `pascal-related-${t.i + 1}`,
               replace: false, // گالری چندفایلی
-              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+              metadata: { importedFrom: 'pascal', originalUrl: t.url },
             }),
           );
           if (res.ok) {
@@ -1582,9 +1582,9 @@ export class ImporterService {
               fieldKey: 'gallery',
               buffer: uploadBuf,
               mimetype: uploadMime,
-              filename: t.url.split('/').pop() || `buskool-${t.pid}-${t.i}`,
+              filename: t.url.split('/').pop() || `pascal-${t.pid}-${t.i}`,
               replace: false, // گالری چندفایلی
-              metadata: { importedFrom: 'buskool', originalUrl: t.url },
+              metadata: { importedFrom: 'pascal', originalUrl: t.url },
               watermarkOutcome: wmOutcome,
             }),
           );
@@ -1691,9 +1691,9 @@ export class ImporterService {
             fieldKey: 'gallery',
             buffer: norm.buf,
             mimetype: norm.mime,
-            filename: t.url.split('/').pop() || `buskool-related-${t.i + 1}`,
+            filename: t.url.split('/').pop() || `pascal-related-${t.i + 1}`,
             replace: false, // گالری چندفایلی
-            metadata: { importedFrom: 'buskool', originalUrl: t.url },
+            metadata: { importedFrom: 'pascal', originalUrl: t.url },
           }),
         );
         if (res.ok) {
@@ -1717,7 +1717,7 @@ export class ImporterService {
    *  بقیهٔ درخواست‌های کاربر در پرواز است. */
   private async fetchProductItems(
     job: JobInternal,
-    bk: BuskoolClient,
+    bk: PascalClient,
     userName: string,
     maxProducts: number,
   ): Promise<BkProductItem[]> {
@@ -1853,12 +1853,12 @@ export class ImporterService {
     type: 'province' | 'city',
     name: string,
     parentId?: string,
-  ): Promise<{ id: string; buskolId: number | null } | null> {
+  ): Promise<{ id: string; pascalId: number | null } | null> {
     const key = `${type}:${name}:${parentId ?? ''}`;
     if (this.locCache.has(key)) return this.locCache.get(key) ?? null;
     const row = await this.prisma.location.findFirst({
       where: { type, name, ...(parentId ? { parentId } : {}) },
-      select: { id: true, buskolId: true },
+      select: { id: true, pascalId: true },
     });
     this.locCache.set(key, row);
     return row;
@@ -1930,7 +1930,7 @@ export class ImporterService {
           failedImport: true,
           profile: {
             bStub: true,
-            importedFrom: 'buskool-failed',
+            importedFrom: 'pascal-failed',
             importedAt: new Date().toISOString(),
             ...(errDoc ? { bImportError: errDoc } : {}),
           } as object,
@@ -2069,9 +2069,9 @@ export class ImporterService {
     // پوشهٔ قدیمی buskool/ (ایمپورت‌های پیش از ۱۳-۱۱) — دیگر استفاده نمی‌شود؛
     // آبجکت‌های جامانده در آروان/دیسک یک‌جا جمع می‌شوند.
     try {
-      counts.legacyBuskoolObjects = await this.store.deletePrefix('buskool/');
+      counts.legacyPascalObjects = await this.store.deletePrefix('buskool/');
     } catch (err) {
-      counts.legacyBuskoolObjects = `خطا: ${(err as Error).message}`;
+      counts.legacyPascalObjects = `خطا: ${(err as Error).message}`;
     }
     counts.adminPhone = adminPhone;
     return counts;
@@ -2130,12 +2130,12 @@ export class ImporterService {
     const [cats, provs] = await Promise.all([
       this.prisma.category.findMany({ where: { id: { in: catIds } }, select: { id: true, categoryName: true } }),
       this.prisma.location.findMany({
-        where: { type: 'province', buskolId: { in: provIds } },
-        select: { buskolId: true, name: true },
+        where: { type: 'province', pascalId: { in: provIds } },
+        select: { pascalId: true, name: true },
       }),
     ]);
     const catName = new Map(cats.map((c) => [c.id, c.categoryName]));
-    const provName = new Map(provs.map((p) => [p.buskolId, p.name]));
+    const provName = new Map(provs.map((p) => [p.pascalId, p.name]));
 
     const pj = (user.profile ?? {}) as Record<string, unknown>;
     const b = asBUserData(user.b);
@@ -2162,7 +2162,7 @@ export class ImporterService {
         bResponseRate: b?.responseRate ?? ((pj.bResponseRate as number) ?? null),
         bReputationScore: b?.reputationScore ?? ((pj.bReputationScore as string) ?? null),
         bActivityDomain: b?.activityDomain ?? ((pj.activityDomain as string) ?? null),
-        bBuskoolCreatedAt: b?.createdAt ?? null,
+        bPascalCreatedAt: b?.createdAt ?? null,
       },
       profile: user.profile
         ? {
@@ -2263,7 +2263,7 @@ function normalizeFa(text: string | null | undefined): string {
  * محصول خودِ کاربر نیست → در businessDesc نمی‌نشیند تا صفحهٔ آیمچ متن
  * پارامتریک خودش (lib/seller-text فرانت) را نشان دهد (خواستهٔ مالک).
  */
-export function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
+export function isPascalAutoDesc(desc: string | null | undefined): boolean {
   if (!desc) return false;
   const t = normalizeFa(desc);
   const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');

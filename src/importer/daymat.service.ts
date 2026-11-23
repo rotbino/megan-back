@@ -336,9 +336,9 @@ export class DaymatService {
       // (درس اجرای اول: ۰ ردیف با updateMany پریمیا) — درایور خام مستقیم.
       const backfill = await mdb.collection('User').updateMany(
         { b_user_name: { $ne: null }, import_source: { $in: [null] } },
-        { $set: { import_source: 'buskool' } },
+        { $set: { import_source: 'pascal' } },
       );
-      this.log('info', `بک‌فیل منبع: ${backfill.modifiedCount} کاربر پاسکالی برچسب «buskool» گرفتند`);
+      this.log('info', `بک‌فیل منبع: ${backfill.modifiedCount} کاربر پاسکالی برچسب «pascal» گرفتند`);
 
       // ── فاز ۱: کاربران ──
       this.setPhase('users', 'کاربران دیمت');
@@ -440,8 +440,8 @@ export class DaymatService {
         if (l.cityCode) dmCityByCode.set(l.cityCode, l.title ?? '');
       }
       const imachCityByName = new Map<string, number>();
-      for (const l of await this.prisma.location.findMany({ where: { type: 'city' }, select: { name: true, buskolId: true } })) {
-        imachCityByName.set(l.name.trim(), l.buskolId);
+      for (const l of await this.prisma.location.findMany({ where: { type: 'city' }, select: { name: true, pascalId: true } })) {
+        imachCityByName.set(l.name.trim(), l.pascalId);
       }
       const resolveCity = (ad: DmAd): number => {
         const name = dmCityByCode.get(String(ad.cityCode ?? '')) ?? '';

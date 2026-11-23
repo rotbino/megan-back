@@ -14,7 +14,7 @@
  * همهٔ ثابت‌ها عین python/image-editing/config.json هستند.
  */
 
-import { BUSKOOL_TEMPLATE } from './buskool-template';
+import { PASCAL_TEMPLATE } from './pascal-template';
 
 // ─── تنظیمات (همان config.json پایتون) ──────────────────────────────────────
 const DOG_SIGMA = 7.0;
@@ -68,16 +68,16 @@ function b64ToU8(b64: string): Uint8Array {
 
 export function loadMaps(): WmMaps {
   if (cachedMaps) return cachedMaps;
-  const { w, h } = BUSKOOL_TEMPLATE;
+  const { w, h } = PASCAL_TEMPLATE;
   const n = w * h;
   const a = new Float32Array(n);
   const c = new Float32Array(n * 3);
   const d = new Float32Array(n);
-  const qa = b64ToU8(BUSKOOL_TEMPLATE.a);
-  const qB = b64ToU8(BUSKOOL_TEMPLATE.cB);
-  const qG = b64ToU8(BUSKOOL_TEMPLATE.cG);
-  const qR = b64ToU8(BUSKOOL_TEMPLATE.cR);
-  const qd = b64ToU8(BUSKOOL_TEMPLATE.d);
+  const qa = b64ToU8(PASCAL_TEMPLATE.a);
+  const qB = b64ToU8(PASCAL_TEMPLATE.cB);
+  const qG = b64ToU8(PASCAL_TEMPLATE.cG);
+  const qR = b64ToU8(PASCAL_TEMPLATE.cR);
+  const qd = b64ToU8(PASCAL_TEMPLATE.d);
   for (let i = 0; i < n; i++) {
     a[i] = qa[i] / 255;
     // ترتیب RGB — هماهنگ با خروجی raw شارپ (تمپلیت مبنا BGR بود)
@@ -181,8 +181,8 @@ function gaussKernel(ksize: number, sigma: number): Float32Array {
  * برای کوچک‌شده (s<1) قالب با گاوسی پیش‌تار می‌شود (ضدآلیاسینگ).
  */
 function sampleMap2D(base: Float32Array, bw: number, bh: number, s: number, ox: number, oy: number): Float32Array {
-  const th_ = (base.length / (BUSKOOL_TEMPLATE.w)) | 0; // h مبنا
-  const tw_ = BUSKOOL_TEMPLATE.w;
+  const th_ = (base.length / (PASCAL_TEMPLATE.w)) | 0; // h مبنا
+  const tw_ = PASCAL_TEMPLATE.w;
   let src = base;
   if (s < 0.995) {
     const sig = 0.55 * (1.0 / s - 1.0);

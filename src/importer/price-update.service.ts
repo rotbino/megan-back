@@ -43,7 +43,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from '@ne
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
-import { BuskoolClient, buskoolConfig, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './buskool.client';
+import { PascalClient, pascalConfig, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './pascal.client';
 import { importerAdminPhone } from './dto';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -178,7 +178,7 @@ export class PriceUpdateService {
   }
 
   private budgetInfo(): PhoneBudgetInfo {
-    const { cookie } = buskoolConfig();
+    const { cookie } = pascalConfig();
     if (this.phoneUse.cookie !== cookie) this.phoneUse = { cookie, used: 0 };
     const limit = Math.max(1, toCount(process.env.BUSKOOL_PHONE_BUDGET, 20));
     return { limit, used: this.phoneUse.used, remaining: Math.max(0, limit - this.phoneUse.used) };
@@ -207,7 +207,7 @@ export class PriceUpdateService {
     if (wait > 0) await sleep(wait);
     this.lastScanAt = Date.now();
 
-    const bk = new BuskoolClient(() => false);
+    const bk = new PascalClient(() => false);
     const resp: BkLatestListResp = await bk.call(
       '/user/get_product_list',
       {
@@ -533,7 +533,7 @@ export class PriceUpdateService {
     input: { sId: number; pId?: number; bUserName?: string },
   ): Promise<{ phone: string; budget: PhoneBudgetInfo; saved: boolean }> {
     this.assertAdmin(adminPhone);
-    const { cookie } = buskoolConfig();
+    const { cookie } = pascalConfig();
     if (!cookie) {
       throw AppError.badRequest(
         'کوکی پاسکال تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است',
@@ -548,7 +548,7 @@ export class PriceUpdateService {
       );
     }
 
-    const bk = new BuskoolClient(() => false);
+    const bk = new PascalClient(() => false);
     let resp: BkSellerPhoneResp;
     try {
       resp = await bk.call('/get-user-phone-number-for-the-seller', {
@@ -561,7 +561,7 @@ export class PriceUpdateService {
       // ⚠️ با AppError (کد پایدار) پرتاب می‌شود تا فیلتر مرکزی پیامِ بلند را
       // با «اطلاعات ارسالی معتبر نیست» جایگزین نکند (تلهٔ ۲۰۰ کاراکتر).
       const e = err as Error & { status?: number; redirectLoc?: string };
-      const raw = String(e?.message ?? err).replace(/^buskool \S+ failed:\s*/, '');
+      const raw = String(e?.message ?? err).replace(/^pascal \S+ failed:\s*/, '');
       if (
         (e?.redirectLoc ?? '').includes('/login') ||
         /^REDIRECT/.test(raw) ||
@@ -663,7 +663,7 @@ export class PriceUpdateService {
     }
 
     // ۲) پروفایل پاسکال — s_id (= user_info.id) برای گرفتن شماره
-    const bk = new BuskoolClient(() => false);
+    const bk = new PascalClient(() => false);
     const profile = await bk.call<{ user_info?: { id: number; user_name?: string } }>('/load_profile_by_user_name', {
       user_name: userName,
     });

@@ -4,7 +4,7 @@
 //      خودش را می‌سازد — lib/seller-text) + b.descriptionIsAuto=true + b.descriptionRaw=null
 //   ۲) متن واقعی شامل «پاسکال»/«اینکوباک» → جایگزینی با «آیمچ»
 //   ۳) همین جایگزینی در توضیحات محصولات همین کاربران
-// منطق عیناً همان isBuskoolAutoDesc/aimchifyBrandMentions سرویس است.
+// منطق عیناً همان isPascalAutoDesc/aimchifyBrandMentions سرویس است.
 // اجرا:  node scripts/fix-business-desc.mjs           → فقط گزارش (خشک)
 //        node scripts/fix-business-desc.mjs --apply   → اعمال
 import { config } from 'dotenv';
@@ -23,7 +23,7 @@ const normalizeFa = (t) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-function isBuskoolAutoDesc(desc) {
+function isPascalAutoDesc(desc) {
   if (!desc) return false;
   const t = normalizeFa(desc);
   const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');
@@ -54,7 +54,7 @@ for (const u of users) {
   const raw = (u.businessDesc ?? '').trim();
   if (!raw) continue;
 
-  if (isBuskoolAutoDesc(raw)) {
+  if (isPascalAutoDesc(raw)) {
     // ۱) متن خودکار → حذف از ستون نمایشی + فلگ در سند b
     nAuto++;
     const b = { ...(u.b ?? {}) };
