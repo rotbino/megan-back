@@ -518,10 +518,36 @@ export class FetchPhoneDto {
 
 /** POST /importer/update/pending — لیست «کاربران در انتظار ایمپورت»
  *  (خواستهٔ مالک ۲۲-۱۱): رکوردهای ماندگار دیتابیس؛ رکورد کاربرِ
- *  ایمپورت‌شدهٔ کامل موقع خواندن خودکار حذف می‌شود. */
+ *  ایمپورت‌شدهٔ کامل موقع خواندن خودکار حذف می‌شود.
+ *  نوسازی ۲۳-۱۱ (خواستهٔ مالک): صفحه‌بندی ۵۰تایی + فیلتر روزِ ثبت‌نام —
+ *  days=0 امروز، ۱ دیروز، … ; غایب/null یعنی همهٔ روزها. */
 export class PendingListDto {
   @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
   adminPhone!: string;
+
+  /** شمارهٔ صفحه — ۱-بنیاد؛ پیش‌فرض ۱ */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  page?: number;
+
+  /** تعداد ردیف هر صفحه — پیش‌فرض ۵۰ (خواستهٔ مالک ۲۳-۱۱) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(10)
+  @Max(100)
+  pageSize?: number;
+
+  /** فقط ثبت‌نام‌های «همین روز تقویمی تهرانِ N روز پیش» — نزول=همهٔ روزها */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(3650)
+  days?: number;
 }
 
 /** POST /importer/update/extract-user — پیش‌ایمپورت یک یوزرنیم پاسکال:

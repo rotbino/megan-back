@@ -43,7 +43,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from '@ne
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
-import { PascalClient, pascalConfig, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './pascal.client';
+import { PascalClient, pascalBudgetKey, pascalConfig, pascalSessionLoggedIn, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './pascal.client';
 import { importerAdminPhone } from './dto';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -178,7 +178,9 @@ export class PriceUpdateService {
   }
 
   private budgetInfo(): PhoneBudgetInfo {
-    const { cookie } = pascalConfig();
+    // هویت کوکی = جفت‌های یادآور (user_phone/user_password) — laravel_session با
+    // هر پاسخ تمدید می‌شود و نباید سهمیهٔ ۲۰ شماره‌ای را صفر کند (۲۳-۱۱)
+    const cookie = pascalBudgetKey();
     if (this.phoneUse.cookie !== cookie) this.phoneUse = { cookie, used: 0 };
     const limit = Math.max(1, toCount(process.env.BUSKOOL_PHONE_BUDGET, 20));
     return { limit, used: this.phoneUse.used, remaining: Math.max(0, limit - this.phoneUse.used) };
@@ -452,8 +454,22 @@ export class PriceUpdateService {
 
   // ═══════════════════════════ لیست انتظار ایمپورت ═══════════════════════════
 
-  /** سقف لیست برگشتی — لیست صفحه خوانا بماند */
-  private static readonly PENDING_LIST_CAP = 500;
+  /** تعداد ردیف هر صفحه — خواستهٔ مالک ۲۳-۱۱: «صفحه بندی 50 تایی» */
+  private static readonly PENDING_PAGE_SIZE = 50;
+
+  /** اختلاف زمانی تهران — UTC+3:30 ثابت (ساعت تابستانی از ۱۴۰۱ لغو شده) */
+  private static readonly TEHRAN_OFFSET_MS = 3.5 * 3_600_000;
+
+  /** بازهٔ «روزِ N روز پیش» به وقت UTC — [from, to) همان روز تقویمی تهران
+   *  (days=0 امروز، ۱ دیروز، …)؛ مبنای فیلتر روز لیست «در انتظار ایمپورت» */
+  private static tehranDayRange(daysAgo: number): { from: Date; to: Date } {
+    const tehranNow = new Date(Date.now() + PriceUpdateService.TEHRAN_OFFSET_MS);
+    tehranNow.setUTCHours(0, 0, 0, 0); // نیمه‌شب به وقت دیوار تهران
+    const dayStart = new Date(tehranNow.getTime() - daysAgo * 86_400_000);
+    const from = new Date(dayStart.getTime() - PriceUpdateService.TEHRAN_OFFSET_MS);
+    const to = new Date(from.getTime() + 86_400_000);
+    return { from, to };
+  }
 
   /**
    * لیست «کاربران در انتظار ایمپورت» (خواستهٔ مالک ۲۲-۱۱) — منبع جدول صفحهٔ
@@ -464,7 +480,19 @@ export class PriceUpdateService {
    * حذف نمی‌شود چون کاربر هنوز «کامل» ایمپورت نشده و مالک باید بتواند دوباره
    * ایمپورتش کند (موبایلش هم که گرفته شده حفظ شده — سهمیه دوباره مصرف نمی‌شود).
    */
-  async pendingUsers(adminPhone: string): Promise<{ users: PendingImportUserRow[]; removedImported: number }> {
+  async pendingUsers(
+    adminPhone: string,
+    input: { page?: number; pageSize?: number; days?: number | null } = {},
+  ): Promise<{
+    users: PendingImportUserRow[];
+    total: number;
+    page: number;
+    pageSize: number;
+    pages: number;
+    /** فیلتر روز جاری — null یعنی همهٔ روزها */
+    days: number | null;
+    removedImported: number;
+  }> {
     this.assertAdmin(adminPhone);
 
     // ── خودترمیمی: ایمپورت‌شده‌های کامل را از لیست بگیر ──
@@ -486,10 +514,29 @@ export class PriceUpdateService {
       }
     }
 
+    // ── فیلتر روز (خواستهٔ مالک ۲۳-۱۱): ثبت‌نام پاسکال در همان روز تقویمی
+    // تهران + صفحه‌بندی ۵۰تایی — days=null یعنی همهٔ روزها؛ رکوردهای بی‌تاریخ
+    // فقط در «همه» دیده می‌شوند ──
+    const pageSize = Math.min(
+      100,
+      Math.max(10, Math.floor(input.pageSize ?? PriceUpdateService.PENDING_PAGE_SIZE)),
+    );
+    const days = input.days == null ? null : Math.max(0, Math.floor(input.days));
+    const where: Prisma.PendingImportUserWhereInput = {};
+    if (days != null) {
+      const { from, to } = PriceUpdateService.tehranDayRange(days);
+      where.bCreatedAt = { gte: from, lt: to };
+    }
+    const total = await this.prisma.pendingImportUser.count({ where });
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(pages, Math.max(1, Math.floor(input.page ?? 1)));
+
     // مرتب: تازه‌ثبت‌نام‌تر اول — در سورت مونگو nullها در desc خودشان آخر می‌افتند
     const rows = await this.prisma.pendingImportUser.findMany({
+      where,
       orderBy: [{ bCreatedAt: 'desc' }, { createdAt: 'desc' }],
-      take: PriceUpdateService.PENDING_LIST_CAP,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
     const users: PendingImportUserRow[] = rows.map((r) => ({
       bUserId: r.bUserId,
@@ -509,7 +556,7 @@ export class PriceUpdateService {
       lastSeenAt: r.lastSeenAt.toISOString(),
       registeredAt: r.createdAt.toISOString(),
     }));
-    return { users, removedImported };
+    return { users, total, page, pageSize, pages, days, removedImported };
   }
 
   // ═══════════════════════════ شمارهٔ موبایل فروشنده ═══════════════════════════
@@ -567,8 +614,17 @@ export class PriceUpdateService {
         /^REDIRECT/.test(raw) ||
         raw.includes('HTML_RESPONSE')
       ) {
+        // سنجش زندهٔ وضعیت سشن (۲۳-۱۱): ترمیم خودکار (گرم‌کردن سشن) هم جواب
+        // نداد؛ حالا دقیق بگوییم سرور ما را مهمان می‌بیند یا مشکل جای دیگر است
+        const authed = await pascalSessionLoggedIn();
+        const diag =
+          authed === false
+            ? 'سنجش زنده: سرور پاسکال این کوکی را «مهمان» می‌شناسد (401) — یعنی laravel_sessionِ کپی‌شده از پیش مُرده بوده است'
+            : authed === true
+              ? 'سنجش زنده: سشن لاگین است ولی اندپوینت گوشی ریدایرکت می‌کند — شاید پاسکال درخواست را از IP بک‌اند قبول نمی‌کند؛ از همان ماشینی که با آن در باسکول لاگین هستید امتحان کنید'
+              : 'سنجش زنده ناموفق بود (خطای شبکه)';
         throw AppError.badRequest(
-          'کوکی پاسکال لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید',
+          `کوکی پاسکال لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید. از این پس سشنِ تازه‌شده خودکار نگه داشته می‌شود و تا وقتی هر کمتر از ۲ ساعت یک بار گوشی بگیرید دیگر لازم نیست کوکی تازه کپی کنید. (${diag})`,
           'BUSKOOL_COOKIE_INVALID',
         );
       }

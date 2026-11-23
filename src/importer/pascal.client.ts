@@ -31,7 +31,29 @@
 import { isNetworkError, waitForOnline } from './net-watch';
 
 const API = 'https://www.buskool.com';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+// همان UA مرورگر مالک (دمپ شبکه ۲۳-۱۱ — Edge 158) تا اثر انگشت درخواست‌های
+// ما تا جای ممکن با مرورگر واقعی یکی باشد
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0';
+
+// ─── هدرهای «مثل مرورگر» (۲۳-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») ────────
+// دمپ شبکهٔ خود مالک نشان داد مرورگر این هدرها را می‌فرستد؛ برای پاسکال
+// (و WAF ابرآروان جلویش) هرچه شبیه‌تر، کمتر قابل تفکیک از مرورگر واقعی.
+function browserHeaders(cookie: string): Record<string, string> {
+  const h: Record<string, string> = {
+    'User-Agent': UA,
+    'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
+    'sec-ch-ua': '"Chromium";v="158", "Not.A/Brand";v="24", "Microsoft Edge";v="158"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    Referer: `${API}/`,
+  };
+  if (cookie) h.Cookie = cookie;
+  return h;
+}
 
 // ─── پاک‌سازی کوکی (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») ────────────────
 //
@@ -74,6 +96,89 @@ export function sanitizePascalCookie(raw: string): string {
     .join('; ');
 }
 
+// ─── ظرف کوکی زنده (۲۳-۱۱ — ریشه‌یابی نهایی خطای «کوکی لاگین نیست») ─────────
+//
+// کشف کلیدی با دمپ شبکهٔ خود مالک: پاسخِ موفقِ گوشی‌گیری همیشه
+// `Set-Cookie: laravel_session=<همان شناسه>; Max-Age=7200` می‌دهد — یعنی
+// سشن پاسکال با هر درخواست «تمدید» می‌شود. مرورگر به همین دلیل هرگز از
+// لاگین نمی‌افتد؛ ولی بک‌اند ما تا حالا کوکی را فقط از env می‌خواند و
+// Set-Cookie پاسخ‌ها را دور می‌ریخت — پس سشن ۲ساعتهٔ کپی‌شده در BUSKOOL_COOKIE
+// بعد از دو ساعت بی‌کاری می‌مُرد و خطای «کوکی لاگین نیست» می‌آمد.
+//
+// راه‌حل: BUSKOOL_COOKIE فقط «نقطهٔ شروع» ظرف است؛ از این به بعد Set-Cookie
+// هر پاسخ پاسکال در ظرف پذیرفته می‌شود و درخواست‌های بعدی همان را می‌فرستند
+// — دقیقاً مثل مرورگر. تا وقتی فاصلهٔ استفاده‌ها کمتر از ۲ ساعت باشد سشن
+// زنده می‌ماند و دیگر لازم نیست کوکی تازه کپی شود.
+
+interface PascalJar {
+  /** مقدار env که این ظرف از آن ساخته شده — عوض شدن env یعنی ظرف تازه */
+  env: string;
+  /** کوکی جاری (جفت‌های name=value به‌ترتیب مرورگر: user_phone; user_password; laravel_session) */
+  cookie: string;
+}
+let jar: PascalJar | null = null;
+
+/** کوکی env پاک‌سازی‌شده — نقطهٔ شروع ظرف */
+function envCookie(): string {
+  return sanitizePascalCookie((process.env.BUSKOOL_COOKIE ?? '').trim());
+}
+
+/** کوکی جاری — BUSKOOL_COOKIE + هر Set-Cookie‌ای که پاسکال از این به بعد داده */
+export function currentPascalCookie(): string {
+  const env = envCookie();
+  if (!jar || jar.env !== env) jar = { env, cookie: env };
+  return jar.cookie;
+}
+
+/** کوکی را به جفت‌های name=value بشکن */
+function parsePairs(cookie: string): Map<string, string> {
+  const pairs = new Map<string, string>();
+  for (const pair of cookie.split(';').map((s) => s.trim()).filter(Boolean)) {
+    const i = pair.indexOf('=');
+    if (i > 0) pairs.set(pair.slice(0, i), pair.slice(i + 1));
+  }
+  return pairs;
+}
+
+/** کلید هویت کوکی برای بودجهٔ شماره‌ها — جفت‌های یادآور (user_phone/user_password)
+ *  ثابت می‌مانند در حالی که laravel_session هر بار تمدید/عوض می‌شود؛ سهمیهٔ ۲۰
+ *  شماره‌ای مالِ همین جفت‌های یادآور است، نه کل رشتهٔ کوکی */
+export function pascalBudgetKey(): string {
+  const pairs = parsePairs(currentPascalCookie());
+  const key = `${pairs.get('user_phone') ?? ''}|${pairs.get('user_password') ?? ''}`;
+  return key.trim() === '|' ? currentPascalCookie() : key;
+}
+
+/** پذیرش Set-Cookie پاسخ در ظرف — مثل مرورگر: کوکی laravel_session تازه جای
+ *  قدیمی را می‌گیرد؛ مقدار «deleted» یعنی حذف کوکی. */
+function adoptSetCookie(res: Response): void {
+  const raws: string[] =
+    (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+  if (!raws.length) return;
+  const pairs = parsePairs(currentPascalCookie());
+  let changed = false;
+  for (const sc of raws) {
+    // فقط جفت اولِ هر Set-Cookie (بقیهٔ مشخصات ذخیره‌شدن‌اند)
+    const first = sc.split(';')[0].trim();
+    const i = first.indexOf('=');
+    if (i <= 0) continue;
+    const name = first.slice(0, i).trim();
+    if (COOKIE_JUNK_NAMES.has(name.toLowerCase())) continue;
+    const value = first.slice(i + 1).trim();
+    if (!value || value === 'deleted') {
+      if (pairs.delete(name)) changed = true;
+      continue;
+    }
+    if (pairs.get(name) !== value) {
+      pairs.set(name, value);
+      changed = true;
+    }
+  }
+  if (changed && jar) {
+    jar = { env: jar.env, cookie: [...pairs.entries()].map(([k, v]) => `${k}=${v}`).join('; ') };
+  }
+}
+
 /** محدودهٔ مجاز فاصلهٔ شروع درخواست‌ها — حتی اگر env مقدار بزرگ‌تر بدهد
  *  (مثل BUSKOOL_DELAY_MS=5000 قدیمی)، سقف ۱۲۰۰ms اعمال می‌شود تا سرعت
  *  پیش‌فرض پروژه همیشه برقرار بماند. */
@@ -95,8 +200,9 @@ export function pascalConfig() {
     // فاصلهٔ حداقلی بین «شروع» دو درخواست — نه انتظار برای پایان قبلی
     delayMs: Math.min(Math.max(gap, GAP_MIN_MS), GAP_MAX_MS),
     concurrency: Math.min(Math.max(Math.floor(concurrency), 1), CONCURRENCY_MAX),
-    // کوکی پاک‌سازی‌شده — حتی اگر Set-Cookie کپی شده باشد درست کار می‌کند
-    cookie: sanitizePascalCookie((process.env.BUSKOOL_COOKIE ?? '').trim()),
+    // کوکی زندهٔ ظرف — Set-Cookie‌های پاسخ پاسکال در آن پذیرفته می‌شود (۲۳-۱۱);
+    // BUSKOOL_COOKIE که عوض شود ظرف از همان مقدار تازه شروع می‌شود
+    cookie: currentPascalCookie(),
   };
 }
 
@@ -124,39 +230,50 @@ export function pascalPace() {
   };
 }
 
-// ─── توکن CSRF پاسکال (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست») ─────────────
+// ─── توکن CSRF پاسکال (۲۲-۱۱؛ نوسازی ظرف کوکی ۲۳-۱۱) ─────────────────────
 //
 // مرورگرِ واقعی روی POSTهای پاسکال هدر x-csrf-token را می‌فرستد (از متاتگ
 // <meta name="csrf-token"> صفحات، وابسته به سشن). اگر فرستاده نشود لاراول
-// می‌تواند 419 بدهد و آن هم به‌شکل صفحهٔ HTML برمی‌گردد — یعنی دوباره همان
-// خطای گمراه‌کنندهٔ «کوکی لاگین نیست». توکن با همان کوکی از صفحهٔ اصلی گرفته
-// و به‌ازای هر مقدار کوکی کش می‌شود (سشن که عوض شود توکن هم تازه می‌شود).
+// می‌تواند 419 بدهد.
+//
+// ⚠️ باگ قبلی (کشف ۲۳-۱۱): اگر laravel_sessionِ env مُرده باشد، سرور موقع
+// این GET یک سشن «تازه» می‌سازد و توکنِ همان سشنِ تازه را در صفحه می‌گذارد —
+// ولی ما هنوز کوکیِ سشنِ مرده را می‌فرستادیم → توکن به سشنِ دیگری تعلق داشت
+// و POST همیشه شکست می‌خورد. حالا Set-Cookie همین پاسخ در ظرف پذیرفته می‌شود
+// و اگر سشن عوض شد، صفحه یک بار دیگر با کوکی تازه خوانده می‌شود تا توکنِ
+ // همان سشنی باشد که واقعاً می‌فرستیم.
 
 let csrfProbe: { cookie: string; p: Promise<string | null> } | null = null;
 
-/** توکن CSRF باسول برای سشن کوکی فعلی — null یعنی نتوانستیم بگیریم (بدون
- *  پرتاب؛ POSTها بدون توکن هم امتحان می‌شوند تا رفتار قبلی حفظ شود) */
+/** توکن CSRF برای کوکی جاری — null یعنی نتوانستیم بگیریم (بدون پرتاب؛
+ *  POSTها بدون توکن هم امتحان می‌شوند) */
 export function pascalCsrfToken(): Promise<string | null> {
-  const { cookie } = pascalConfig();
+  const cookie = currentPascalCookie();
   if (!cookie) return Promise.resolve(null);
   if (csrfProbe?.cookie === cookie) return csrfProbe.p;
   const p = (async (): Promise<string | null> => {
     try {
-      const res = await fetch(`${API}/`, {
-        headers: {
-          'User-Agent': UA,
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
-          Referer: `${API}/`,
-          Cookie: cookie,
-        },
-        signal: AbortSignal.timeout(10_000),
-        redirect: 'manual',
-      });
-      if (res.status !== 200) return null;
-      const html = await res.text();
-      const m = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i);
-      return m?.[1] ?? null;
+      // تا دو hop: اگر سشنِ کوکی مُرده بود، hop اول Set-Cookie سشن تازه می‌دهد
+      // و hop دوم توکنِ همان سشن تازه را از صفحه می‌خواند
+      for (let hop = 0; hop < 2; hop++) {
+        const res = await fetch(`${API}/`, {
+          headers: {
+            ...browserHeaders(currentPascalCookie()),
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'manual',
+        });
+        adoptSetCookie(res);
+        if (res.status !== 200) return null;
+        const html = await res.text();
+        const m = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i);
+        const token = m?.[1] ?? null;
+        // سشن حین این GET عوض شد؟ توکنِ سشنِ تازه را بخوان (hop بعدی)
+        if (hop === 0 && token && currentPascalCookie() !== cookie) continue;
+        return token;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -178,31 +295,64 @@ export function pascalCsrfToken(): Promise<string | null> {
 let sessionProbe: { cookie: string; p: Promise<boolean | null> } | null = null;
 
 /** آیا کوکی تنظیم‌شده سشنِ لاگین‌شده است؟
- *  true = لاگین، false = مهمان/بی‌اثر، null = کوکی خالی یا خطای شبکه */
-export function pascalSessionLoggedIn(): Promise<boolean | null> {
-  const { cookie } = pascalConfig();
-  if (!cookie) return Promise.resolve(false);
-  if (sessionProbe?.cookie === cookie) return sessionProbe.p;
+ *  true = لاگین، false = مهمان/بی‌اثر، null = کوکی خالی یا خطای شبکه
+ *  فقط نتیجهٔ مثابت کش می‌شود (۲۳-۱۱): سشنِ «مهمان» بعد از گرم‌کردن می‌تواند
+ *  لاگین شود، پس دفعهٔ بعد دوباره سنجیده می‌شود. */
+export async function pascalSessionLoggedIn(): Promise<boolean | null> {
+  const cookie = currentPascalCookie();
+  if (!cookie) return false;
+  if (sessionProbe?.cookie === cookie && (await sessionProbe.p) === true) return true;
   const p = (async (): Promise<boolean | null> => {
     try {
       const res = await fetch(`${API}/api/user`, {
         headers: {
-          'User-Agent': UA,
+          ...browserHeaders(currentPascalCookie()),
           'X-Requested-With': 'XMLHttpRequest',
           Accept: 'application/json, text/plain, */*',
-          Referer: `${API}/`,
-          Cookie: cookie,
         },
         signal: AbortSignal.timeout(10_000),
       });
       return res.status !== 401;
     } catch {
-      sessionProbe = null; // تلاش مجدد در سنجش بعدی
       return null;
     }
   })();
   sessionProbe = { cookie, p };
   return p;
+}
+
+// ─── گرم‌کردن سشن (۲۳-۱۱ — ریشه‌یابی نهایی «کوکی لاگین نیست») ─────────────
+//
+// وقتی POST ریدایرکت به /login داد (سشن مُرده/مهمان)، مثل مرورگر یک GET
+// صفحهٔ اصلی با ریدایرکت‌های دنبال‌شده می‌زنیم: هر Set-Cookie مسیر (از جمله
+// سشن تازهٔ سمت سرور و لاگین مجدد با جفت‌های یادآور، اگر سرور چنین کند)
+// در ظرف پذیرفته می‌شود. آخر وضعیت لاگین با /api/user سنجیده و برمی‌گردد.
+async function pascalWarmUp(): Promise<boolean> {
+  let url = `${API}/`;
+  for (let hop = 0; hop < 4; hop++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          ...browserHeaders(currentPascalCookie()),
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(10_000),
+        redirect: 'manual',
+      });
+      adoptSetCookie(res);
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) break;
+        url = new URL(loc, url).toString();
+        continue;
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+  sessionProbe = null; // نتیجهٔ تازه بسنجیم
+  return (await pascalSessionLoggedIn()) === true;
 }
 
 // ─── گیت نرخ سراسری ─────────────────────────────────────────────────────────
@@ -294,6 +444,7 @@ export class PascalClient {
     let lastErr: unknown;
     let hardFails = 0; // شکست‌های غیرشبکه‌ای (HTTP 4xx/5xx، HTML، …)
     let firstNetErrAt = 0; // شروع پنجرهٔ شبکه‌ای همین تماس
+    let sessionRepairTried = false; // ترمیم سشن (گرم‌کردن + تلاش مجدد) فقط یک بار در هر تماس
 
     for (;;) {
       if (this.stop()) throw new Error('JOB_STOPPED');
@@ -301,22 +452,22 @@ export class PascalClient {
       let released = false;
       let netErr = false;
       try {
-        const { cookie } = pascalConfig();
         const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'User-Agent': UA,
+          // مثل مرورگر خود مالک (دمپ ۲۳-۱۱): charset در Content-Type هم یکی
+          'Content-Type': 'application/json;charset=UTF-8',
+          ...browserHeaders(''),
           'X-Requested-With': 'XMLHttpRequest',
           Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8',
           Origin: API,
-          Referer: `${API}/`,
         };
         // کوکی فقط وقتی خواسته شده (پیش‌فرض) — لیست عمومی جدیدترین‌ها باید
         // بدون کوکی برود تا شخصی‌سازی‌شدهٔ صاحب کوکی نیاید (۲۱-۱۱)
-        if (cookie && !opts?.noCookie) {
+        const cookie = currentPascalCookie();
+        const sentCookie = !!cookie && !opts?.noCookie;
+        if (sentCookie) {
           headers.Cookie = cookie;
           // هدر x-csrf-token مثل مرورگر واقعی (۲۲-۱۱) — POSTهای لاراول بدون
-          // آن 419 می‌گیرند؛ توکن از متاتگ csrf-token صفحهٔ باسول با همین کوکی
+          // آن 419 می‌گیرند؛ توکن از متاتگ csrf-token صفحهٔ پاسکال با همین کوکی
           const csrf = await pascalCsrfToken();
           if (csrf) headers['x-csrf-token'] = csrf;
         }
@@ -331,10 +482,23 @@ export class PascalClient {
           // واقعی (ریدایرکت سشن) پنهان می‌شود
           redirect: 'manual',
         });
-        // ریدایرکت = سشن/کوکی قبول نشد (معمولاً ۳۰۲ به /login) — قطعی‌ترین
-        // نشانهٔ «کوکی لاگین نیست»؛ همان‌جا تمام می‌شود نه بعد از پارس HTML
+        // Set-Cookie پاسخ در ظرف پذیرفته می‌شود (۲۳-۱۱) — سشن پاسکال با هر
+        // درخواست تمدید می‌شود؛ مثل مرورگر همان تمدیدشده را نگه می‌داریم
+        adoptSetCookie(res);
+        // ریدایرکت = سشن/کوکی قبول نشد (معمولاً ۳۰۲ به /login). اگر کوکی
+        // فرستاده‌ایم و هنوز ترمیم نکرده‌ایم: مثل مرورگر سشن را «گرم» می‌کنیم
+        // (GET صفحهٔ اصلی + پذیرش Set-Cookie) و اگر لاگین برگشت، همین POST
+        // یک بار دیگر با سشن تازه امتحان می‌شود (۲۳-۱۱)
         if (res.status >= 300 && res.status < 400) {
           const loc = res.headers.get('location') ?? '';
+          if (sentCookie && !sessionRepairTried && (loc.includes('/login') || loc === '')) {
+            sessionRepairTried = true;
+            const authed = await pascalWarmUp();
+            if (authed) {
+              csrfProbe = null; // توکنِ سشنِ تازه
+              continue; // همان درخواست با سشن تازه
+            }
+          }
           throw Object.assign(
             new Error(`REDIRECT ${res.status} → ${loc || '?'} on ${path}`),
             { fatalCall: true, redirectLoc: loc },
@@ -344,6 +508,13 @@ export class PascalClient {
           // نشانهٔ محدودسازی — عقب‌نشینی نمایی؛ شاید درخواست بعدی بلافاصله رد شود
           pacePenalty = Math.min(pacePenalty * 2, PENALTY_MAX);
           throw new Error(`HTTP ${res.status} on ${path} (backoff ×${Math.round(pacePenalty)})`);
+        }
+        if (res.status === 419 && sentCookie && !sessionRepairTried) {
+          // توکن CSRF با سشن جور نبود — سشن را گرم کن و با توکن تازه دوباره (۲۳-۱۱)
+          sessionRepairTried = true;
+          await pascalWarmUp();
+          csrfProbe = null;
+          continue;
         }
         if (!res.ok) {
           // 5xx گذراست (سرور لحظه‌ای خوابیده) → تلاش مجدد؛ بقیهٔ 4xx مالِ همین

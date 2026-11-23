@@ -38,10 +38,16 @@ export class PriceUpdateController {
   @Post('pending')
   @ApiOperation({
     summary:
-      'لیست «کاربران در انتظار ایمپورت» — ماندگار در دیتابیس (بدون موبایل ثبت شده‌اند)؛ قبل از خواندن، رکوردهای ایمپورت‌شدهٔ کامل خودکار حذف می‌شوند',
+      'لیست «کاربران در انتظار ایمپورت» — ماندگار در دیتابیس؛ صفحه‌بندی ۵۰تایی + فیلتر روزِ ثبت‌نام (days=0 امروز، ۱ دیروز، …؛ خالی = همه)؛ رکوردهای ایمپورت‌شدهٔ کامل خودکار حذف می‌شوند',
   })
   async pending(@Body() dto: PendingListDto) {
-    return ok(await this.priceUpdate.pendingUsers(dto.adminPhone));
+    return ok(
+      await this.priceUpdate.pendingUsers(dto.adminPhone, {
+        page: dto.page,
+        pageSize: dto.pageSize,
+        days: dto.days ?? null,
+      }),
+    );
   }
 
   @Post('fetch-phone')
