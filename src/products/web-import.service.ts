@@ -205,7 +205,7 @@ export class WebImportService {
   }
 
   private sourceTable(): string {
-    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-pascal';
+    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
   }
 
   /** تشخیص یوزرنیم منبع کاربر — مسیر ۱: حساب خودش؛ مسیر ۲: شماره در دامپ */
@@ -486,7 +486,7 @@ export class WebImportService {
       .filter(Boolean);
     const descAuto = isPascalAutoDesc(pf?.description);
     const bData: BUserData = {
-      source: 'pascal',
+      source: 'buskool',
       userName: session.sourceUserName,
       userId: ui.id,
       profileId: pf?.id ?? null,
@@ -544,14 +544,14 @@ export class WebImportService {
     let provinceId = user.provinceId;
     if (provinceId == null && ui.province) {
       const loc = await this.findLocation('province', ui.province);
-      if (loc?.pascalId != null) {
-        provinceId = loc.pascalId;
-        data.provinceId = loc.pascalId;
+      if (loc?.buskolId != null) {
+        provinceId = loc.buskolId;
+        data.provinceId = loc.buskolId;
       }
     }
     if (user.cityId == null && ui.city && provinceId != null) {
       const loc = await this.findLocation('city', ui.city, provinceId);
-      if (loc?.pascalId != null) data.cityId = loc.pascalId;
+      if (loc?.buskolId != null) data.cityId = loc.buskolId;
     }
 
     if (!user.businessDesc && !descAuto && (pf?.description ?? '').trim()) {
@@ -911,10 +911,10 @@ export class WebImportService {
   }
 
   private async findLocation(type: 'province' | 'city', name: string, parentBuskolId?: number) {
-    const parent = parentBuskolId != null ? await this.prisma.location.findFirst({ where: { type: 'province', pascalId: parentBuskolId }, select: { id: true } }) : null;
+    const parent = parentBuskolId != null ? await this.prisma.location.findFirst({ where: { type: 'province', buskolId: parentBuskolId }, select: { id: true } }) : null;
     return this.prisma.location.findFirst({
       where: { type, name, ...(parent ? { parentId: parent.id } : {}) },
-      select: { pascalId: true },
+      select: { buskolId: true },
     });
   }
 

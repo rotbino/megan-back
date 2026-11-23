@@ -409,13 +409,13 @@ model Good {
 /// ⚠️ چرا id رشتهٔ ترکیبی است؟ چون id های عددی پاسکال در دو فضای جدا هستند و
 /// برخورد عددی دارند (شهر ۴ = بستان‌آبادِ آذربایجان شرقی، استان ۴ = اصفهان) —
 /// یعنی «عدد + نوع» با هم یکتا هستند. کلید یکتا: «province:4» / «city:230».
-/// عدد خام پاسکال در pascalId حفظ می‌شود و در API ها همان id عددی برمی‌گردد؛
+/// عدد خام پاسکال در buskolId حفظ می‌شود و در API ها همان id عددی برمی‌گردد؛
 /// آگهی‌ها/درخواست‌ها به همان اعداد خام اشاره می‌کنند (بدون تغییر).
 model Location {
   /// کلید یکتای سراسری — «province:4» | «city:230» | «region:…"
   id        String  @id @map("_id")
   /// id عددی پاسکال در نوع خودش — یکتا فقط با هم type
-  pascalId  Int     @map("pascal_id")
+  buskolId  Int     @map("buskool_id")
   /// province | city | region | neighborhood
   type      String
   /// کلید گره والد («province:4») — null یعنی ریشه (استان)
@@ -429,7 +429,7 @@ model Location {
   /// ثبت آگهی/درخواست جدید روی آن ممکن نیست؛ آگهی‌های قدیمی نامشان را همچنان resolve می‌کنند
   isActive  Boolean @default(true) @map("is_active")
 
-  @@unique([type, pascalId])
+  @@unique([type, buskolId])
   @@index([type, parentId])
   @@index([type, name])
 }
@@ -671,7 +671,7 @@ model ProductEditHistory {
 /// دکمه/متن‌های روبروی کاربر هرگز نام منبع را نمی‌گویند؛ فقط «از وب».
 /// منطق عضویت: مالک باید از قبل (بدون اطلاع خودش) در سیستم ثبت شده باشد —
 /// یا حسابش b_user_name دارد (حسابِ ایمپورت‌شده) یا شماره‌اش در کالکشن
-/// منبع (user-pascal) هست؛ در غیر این صورت دکمه اصلاً دیده نمی‌شود.
+/// منبع (user-buskool) هست؛ در غیر این صورت دکمه اصلاً دیده نمی‌شود.
 model WebImportSession {
   id String @id @default(auto()) @map("_id") @db.ObjectId
 

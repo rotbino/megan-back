@@ -69,7 +69,7 @@ const data2 = (await res2.json())?.data;
 console.log('\nphotoCount-desc top10:', (data2?.rows ?? []).map((r) => r.photos.length).join(','));
 
 // تست سورت size + فیلتر source=pascal + replaced=no
-const qs3 = new URLSearchParams({ group: 'product', page: '1', pageSize: '10', sort: 'size', dir: 'desc', source: 'pascal', replaced: 'no' });
+const qs3 = new URLSearchParams({ group: 'product', page: '1', pageSize: '10', sort: 'size', dir: 'desc', source: 'buskool', replaced: 'no' });
 const res3 = await fetch(`${BASE}/importer/product-images?${qs3}`, { headers: auth });
 const data3 = (await res3.json())?.data;
 console.log('size-desc pascal unreplaced top10 (KB):', (data3?.rows ?? []).map((r) => (r.totalSize / 1024).toFixed(0)).join(','));

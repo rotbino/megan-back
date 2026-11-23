@@ -21,7 +21,7 @@ export function bkPackageTitle(type: number): string {
 
 export interface BUserData {
   /** منبع داده — پس از ایمپورترهای آیندهٔ سایت‌های دیگر هم همین فیلد کلید تشخیص است */
-  source: 'pascal';
+  source: 'buskool';
   /** یوزرنیم پاسکال (همان bUserName) */
   userName: string;
   /** id عددی پاسکال (myuser_id) */
@@ -104,6 +104,6 @@ export interface BUserData {
 export function asBUserData(raw: unknown): BUserData | null {
   if (!raw || typeof raw !== 'object') return null;
   const b = raw as Partial<BUserData>;
-  if (b.source !== 'pascal') return null;
+  if (b.source !== 'buskool') return null;
   return raw as BUserData;
 }

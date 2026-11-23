@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../common/api-response';
 import { PriceUpdateService } from './price-update.service';
-import { ExtractUserDto, FetchPhoneDto, PendingListDto, UpdateScanDto } from './dto';
+import { ExtractUserDto, FetchPhoneDto, PendingListDto, SetPascalCookieDto, UpdateScanDto } from './dto';
 
 @ApiTags('importer')
 @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -48,6 +48,15 @@ export class PriceUpdateController {
         days: dto.days ?? null,
       }),
     );
+  }
+
+  @Post('pascal-cookie')
+  @ApiOperation({
+    summary:
+      'ستِ کوکی پاسکال از مودال پنل — پاک‌سازی هر سبک کپی، ستِ ران‌تایم (بدون ری‌استارت)، ذخیره در .env و سنجش زندهٔ لاگین؛ پاسخ hints/loggedIn/persisted/message دارد',
+  })
+  async setPascalCookie(@Body() dto: SetPascalCookieDto) {
+    return ok(await this.priceUpdate.setPascalCookieFromUi(dto.adminPhone, dto.cookie));
   }
 
   @Post('fetch-phone')

@@ -49,11 +49,11 @@ function pick(arr, seed, salt) {
 // ─── استان/شهرهای فعال ───────────────────────────────────────────────────────
 const provinces = await p.location.findMany({
   where: { type: 'province', isActive: true },
-  select: { id: true, pascalId: true, name: true },
+  select: { id: true, buskolId: true, name: true },
 });
 const cities = await p.location.findMany({
   where: { type: 'city', isActive: true },
-  select: { id: true, pascalId: true, parentId: true, name: true },
+  select: { id: true, buskolId: true, parentId: true, name: true },
 });
 const citiesByParent = new Map();
 for (const c of cities) {
@@ -121,13 +121,13 @@ for (const u of nameless) {
     provBuskolId = [...own.entries()].sort((a, b) => b[1] - a[1])[0][0];
   } else {
     provBuskolId = provinces.length
-      ? pick(provinces, u.phone, 'p').pascalId
+      ? pick(provinces, u.phone, 'p').buskolId
       : null;
   }
-  const prov = provinces.find((x) => x.pascalId === provBuskolId) ?? null;
+  const prov = provinces.find((x) => x.buskolId === provBuskolId) ?? null;
 
   // شهری از همان استان
-  const provCities = prov ? (citiesByParent.get(String(prov.pascalId)) ?? []) : [];
+  const provCities = prov ? (citiesByParent.get(String(prov.buskolId)) ?? []) : [];
   const city = provCities.length ? pick(provCities, u.phone, 'c') : null;
 
   tasks.push({
@@ -137,8 +137,8 @@ for (const u of nameless) {
     data: {
       // نام فقط برای بی‌نام‌ها — دارنده نام دست نمی‌خورد
       ...(u.firstName === '' ? { firstName: first, lastName: last } : {}),
-      ...(prov ? { provinceId: prov.pascalId } : {}),
-      ...(city ? { cityId: city.pascalId } : {}),
+      ...(prov ? { provinceId: prov.buskolId } : {}),
+      ...(city ? { cityId: city.buskolId } : {}),
       ...(u._count.products > 0 ? { isSeller: true } : {}),
     },
   });

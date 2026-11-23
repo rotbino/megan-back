@@ -1224,15 +1224,15 @@ export class BuyersService {
     return good.id;
   }
 
-  /** نام استان/شهر — پیشوند p (استان) و c (شهر) برای تفکیک pascalId */
+  /** نام استان/شهر — پیشوند p (استان) و c (شهر) برای تفکیک buskolId */
   private async locationNames(ids: number[]) {
     if (ids.length === 0) return new Map<string, string>();
     const uniq = [...new Set(ids)];
     const rows = await this.prisma.location.findMany({
-      where: { pascalId: { in: uniq }, type: { in: ['province', 'city'] } },
-      select: { type: true, pascalId: true, name: true },
+      where: { buskolId: { in: uniq }, type: { in: ['province', 'city'] } },
+      select: { type: true, buskolId: true, name: true },
     });
-    return new Map(rows.map((r) => [`${r.type === 'province' ? 'p' : 'c'}${r.pascalId}`, r.name]));
+    return new Map(rows.map((r) => [`${r.type === 'province' ? 'p' : 'c'}${r.buskolId}`, r.name]));
   }
 }
 

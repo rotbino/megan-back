@@ -210,7 +210,7 @@ export class ImporterService {
   private catCache: Map<number, { parentId: number | null }> | null = null;
   /** کش استان/شهر به نام — جدول locations تغییرناپذیر است؛ findFirst های
    *  تکراری هر کاربر (۲ تا) در جاب لیستی حذف می‌شود */
-  private readonly locCache = new Map<string, { id: string; pascalId: number | null } | null>();
+  private readonly locCache = new Map<string, { id: string; buskolId: number | null } | null>();
   private readonly logger = new Logger(ImporterService.name);
   private readonly jobs = new Map<string, JobInternal>();
 
@@ -288,13 +288,13 @@ export class ImporterService {
   }
 
   /**
-   * دیتابیس منبع — کالکشن user-pascal در «همان دیتابیس» ایمچ (خواستهٔ مالک
+   * دیتابیس منبع — کالکشن user-buskool در «همان دیتابیس» ایمچ (خواستهٔ مالک
    * ۱۳-۱۱: جدول را خودش با دامپ کاربران پاسکال ساخته؛ دیگر دیتابیس جانبی
    * لازم نیست). خواندن با $runCommandRaw تا شکل سندهای دامپ (فیلدهای اضافی)
    * مهم نباشد و فقط ستون‌های یوزرنیم/تلفن خوانده شود.
    */
   private sourceTable() {
-    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-pascal';
+    return process.env.IMPORT_SOURCE_TABLE?.trim() || 'user-buskool';
   }
 
   /** کش ستون‌های تشخیص‌داده‌شدهٔ کالکشن منبع — هر جدول یک‌بار در عمر پروسه */
@@ -792,7 +792,7 @@ export class ImporterService {
     job: JobInternal,
     input: { offset?: number; limit?: number; maxProductsPerUser?: number },
   ) {
-    // خواندن لیست از کالکشن user-pascal — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
+    // خواندن لیست از کالکشن user-buskool — همان دیتابیس ایمچ (خواستهٔ مالک ۱۳-۱۱)
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 5;
 
@@ -1046,7 +1046,7 @@ export class ImporterService {
       .map((r) => (typeof r === 'string' ? r.trim() : (r?.name ?? '').trim()))
       .filter(Boolean);
     const bData: BUserData = {
-      source: 'pascal',
+      source: 'buskool',
       userName,
       userId: ui.id,
       profileId: pf?.id ?? null,
@@ -1121,8 +1121,8 @@ export class ImporterService {
       sex: ui.sex ?? null,
       isBuyer: ui.is_buyer === 1,
       isSeller: true,
-      provinceId: provinceLoc?.pascalId ?? null,
-      cityId: cityLoc?.pascalId ?? null,
+      provinceId: provinceLoc?.buskolId ?? null,
+      cityId: cityLoc?.buskolId ?? null,
       profile: profileJson as object,
       b: bData as object,
       businessDesc,
@@ -1256,8 +1256,8 @@ export class ImporterService {
         .update({
           where: { id: user.id },
           data: {
-            provinceId: provinceLoc?.pascalId ?? items[0].main.province_id,
-            cityId: cityLoc?.pascalId ?? items[0].main.city_id,
+            provinceId: provinceLoc?.buskolId ?? items[0].main.province_id,
+            cityId: cityLoc?.buskolId ?? items[0].main.city_id,
           },
         })
         .catch(() => undefined);
@@ -1534,7 +1534,7 @@ export class ImporterService {
               mimetype: norm.mime,
               filename: t.url.split('/').pop() || `pascal-avatar-${userName}`,
               replace: true, // اسلات تک‌فایلی — عین پنل کاربر
-              metadata: { importedFrom: 'pascal', originalUrl: t.url },
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
             }),
           );
           if (res.ok) {
@@ -1559,7 +1559,7 @@ export class ImporterService {
               mimetype: norm.mime,
               filename: t.url.split('/').pop() || `pascal-related-${t.i + 1}`,
               replace: false, // گالری چندفایلی
-              metadata: { importedFrom: 'pascal', originalUrl: t.url },
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
             }),
           );
           if (res.ok) {
@@ -1584,7 +1584,7 @@ export class ImporterService {
               mimetype: uploadMime,
               filename: t.url.split('/').pop() || `pascal-${t.pid}-${t.i}`,
               replace: false, // گالری چندفایلی
-              metadata: { importedFrom: 'pascal', originalUrl: t.url },
+              metadata: { importedFrom: 'buskool', originalUrl: t.url },
               watermarkOutcome: wmOutcome,
             }),
           );
@@ -1693,7 +1693,7 @@ export class ImporterService {
             mimetype: norm.mime,
             filename: t.url.split('/').pop() || `pascal-related-${t.i + 1}`,
             replace: false, // گالری چندفایلی
-            metadata: { importedFrom: 'pascal', originalUrl: t.url },
+            metadata: { importedFrom: 'buskool', originalUrl: t.url },
           }),
         );
         if (res.ok) {
@@ -1853,12 +1853,12 @@ export class ImporterService {
     type: 'province' | 'city',
     name: string,
     parentId?: string,
-  ): Promise<{ id: string; pascalId: number | null } | null> {
+  ): Promise<{ id: string; buskolId: number | null } | null> {
     const key = `${type}:${name}:${parentId ?? ''}`;
     if (this.locCache.has(key)) return this.locCache.get(key) ?? null;
     const row = await this.prisma.location.findFirst({
       where: { type, name, ...(parentId ? { parentId } : {}) },
-      select: { id: true, pascalId: true },
+      select: { id: true, buskolId: true },
     });
     this.locCache.set(key, row);
     return row;
@@ -1930,7 +1930,7 @@ export class ImporterService {
           failedImport: true,
           profile: {
             bStub: true,
-            importedFrom: 'pascal-failed',
+            importedFrom: 'buskool-failed',
             importedAt: new Date().toISOString(),
             ...(errDoc ? { bImportError: errDoc } : {}),
           } as object,
@@ -2130,12 +2130,12 @@ export class ImporterService {
     const [cats, provs] = await Promise.all([
       this.prisma.category.findMany({ where: { id: { in: catIds } }, select: { id: true, categoryName: true } }),
       this.prisma.location.findMany({
-        where: { type: 'province', pascalId: { in: provIds } },
-        select: { pascalId: true, name: true },
+        where: { type: 'province', buskolId: { in: provIds } },
+        select: { buskolId: true, name: true },
       }),
     ]);
     const catName = new Map(cats.map((c) => [c.id, c.categoryName]));
-    const provName = new Map(provs.map((p) => [p.pascalId, p.name]));
+    const provName = new Map(provs.map((p) => [p.buskolId, p.name]));
 
     const pj = (user.profile ?? {}) as Record<string, unknown>;
     const b = asBUserData(user.b);

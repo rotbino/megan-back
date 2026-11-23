@@ -76,6 +76,6 @@ export class AdminBaseDataController {
   @Post('setLocationActive')
   @ApiOperation({ summary: 'فعال/غیرفعال کردن مکان (غیرفعال = پنهان از لیست‌ها)' })
   async setLocationActive(@Body() dto: SetLocationActiveDto) {
-    return ok(await this.baseData.setLocationActive(dto.pascalId, dto.type, dto.active));
+    return ok(await this.baseData.setLocationActive(dto.buskolId, dto.type, dto.active));
   }
 }

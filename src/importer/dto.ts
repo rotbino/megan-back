@@ -99,8 +99,8 @@ export class ImportedUsersQueryDto {
   q?: string;
 
   @IsOptional()
-  @IsIn(['pascal', 'native', 'stub', 'daymat', 'all'])
-  source?: 'pascal' | 'native' | 'stub' | 'daymat' | 'all';
+  @IsIn(['buskool', 'native', 'stub', 'daymat', 'all'])
+  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
 
   /** ویژهٔ پاسکال (b.premium.isPremium) — نه اعتبار آیمچ */
   @IsOptional()
@@ -211,8 +211,8 @@ export class ImportedListingsQueryDto {
 
   /** منبع: پاسکالی (فروشنده سند b دارد) / ثبت‌نام خودی فروشنده */
   @IsOptional()
-  @IsIn(['pascal', 'native', 'all'])
-  source?: 'pascal' | 'native' | 'all';
+  @IsIn(['buskool', 'native', 'all'])
+  source?: 'buskool' | 'native' | 'all';
 
   /** رفتار ورود فروشنده: ever / never */
   @IsOptional()
@@ -283,8 +283,8 @@ export class ProductImagesQueryDto {
 
   /** منبع تصویر: metadata.importedFrom=pascal / بقیه */
   @IsOptional()
-  @IsIn(['pascal', 'native', 'all'])
-  source?: 'pascal' | 'native' | 'all';
+  @IsIn(['buskool', 'native', 'all'])
+  source?: 'buskool' | 'native' | 'all';
 
   /** تعویض‌شده توسط ادمین (metadata.replacedAt) */
   @IsOptional()
@@ -567,4 +567,21 @@ export class ExtractUserDto {
   @IsString()
   @Length(2, 64)
   userName!: string;
+}
+
+/** POST /importer/update/pascal-cookie — ستِ کوکی پاسکال از مودال پنل
+ *  (خواستهٔ مالک ۲۳-۱۱ عصر: «اگر خطا داد یه مدال باز کن و از من بخوای کوکی
+ *  رو اونجا پیست کنم و خودت پشت صحنه ست کنی» — بدون .env دستی/ری‌استارت).
+ *  متن چسبانده‌شده هر شکلی باشد (هدر کامل/خط‌به‌خط/با Cookie:/رمزگشایی‌شده)
+ *  پاک‌سازی می‌شود؛ بعد از ذخیره سنجش زندهٔ لاگین (/api/user) برگردانده
+ *  می‌شود تا فرانت نتیجه را همان‌جا نشان دهد و در صورت موفقیت، عملِ شکست‌خورده
+ *  را خودکار تکرار کند. */
+export class SetPascalCookieDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+
+  /** کل هدر cookie مرورگرِ لاگین‌شده (یا خط‌به‌خط آن) */
+  @IsString()
+  @Length(20, 8_000)
+  cookie!: string;
 }

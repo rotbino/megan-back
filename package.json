@@ -13,7 +13,6 @@
     "db:push": "node scripts/db-push.mjs",
     "fetch:base-data": "node scripts/fetch-pascal-base-data.mjs",
     "seed:base-data": "node scripts/seed-base-data.mjs",
-    "rename:pascal": "node scripts/rename-to-pascal.mjs",
     "seed:buy-requests": "node scripts/seed-buy-requests.mjs",
     "seed:products": "node scripts/seed-products.mjs",
     "make-admin": "node scripts/make-admin.mjs",

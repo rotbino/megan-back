@@ -136,10 +136,10 @@ export class ReviewsService {
     const cityNames = new Map<string, string>();
     if (cityIds.length) {
       const locs = await this.prisma.location.findMany({
-        where: { type: 'city', pascalId: { in: cityIds } },
-        select: { pascalId: true, name: true },
+        where: { type: 'city', buskolId: { in: cityIds } },
+        select: { buskolId: true, name: true },
       });
-      for (const l of locs) cityNames.set(String(l.pascalId), l.name);
+      for (const l of locs) cityNames.set(String(l.buskolId), l.name);
     }
 
     const sumRating = (realAgg._sum.rating ?? 0) + (bAgg._sum.rating ?? 0);
@@ -215,7 +215,7 @@ export class ReviewsService {
     this.cache.invalidateTag(`seller:${dto.userName.trim()}`);
     const cityName = row.author.cityId
       ? ((await this.prisma.location.findFirst({
-          where: { type: 'city', pascalId: row.author.cityId },
+          where: { type: 'city', buskolId: row.author.cityId },
           select: { name: true },
         }))?.name ?? null)
       : null;

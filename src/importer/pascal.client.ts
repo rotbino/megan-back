@@ -28,6 +28,9 @@
  *     پذیرفته می‌شود ولی چیزی باز نمی‌کند (GET /api/user → 401).
  */
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { isNetworkError, waitForOnline } from './net-watch';
 
 const API = 'https://www.buskool.com';
@@ -106,10 +109,29 @@ function canonicalCookieValue(v: string): string {
     .replace(/;/g, '%3B');
 }
 
+/** نرمال‌سازی «کوکی چسبانده‌شده در پنل» — قبل از پاک‌سازی (۲۳-۱۱ عصر):
+ *  کاربر کل هدر یا خط‌به‌خط کپی می‌کند:
+ *    • پیشوند «Cookie:» ابتدای کار (کپی کامل هدر) حذف می‌شود
+ *    • خط‌های شکسته/تب جداکنندهٔ جفت‌ها هستند (کپیِ هرکوکی-یک‌خط) → «؛»
+ *    • فاصله‌های اضافهِ بین جفت‌ها هم «؛» می‌شوند (مقدارهای کوکی لاراول
+ *      فاصله ندارند — بلافاصله بعد از مقدار، جفت بعدی می‌آید)
+ */
+function normalizePastedCookie(raw: string): string {
+  return raw
+    .replace(/^\s*cookie\s*:\s*/i, '')
+    .replace(/[\r\n\t]+/g, ';')
+    .replace(/\s*;\s*/g, ';')
+    // فاصلهٔ بین جفت‌ها (کپی «هر کوکی یک خط») → «؛» — مقدار کوکی فاصله ندارد
+    .replace(/\s+((?:user_phone|user_password|laravel_session|XSRF-TOKEN|remember_web_[\w_]+)\s*=)/gi, ';$1')
+    .replace(/;{2,}/g, ';')
+    .replace(/^;|;$/g, '')
+    .trim();
+}
+
 /** پاک‌سازی رشتهٔ کوکی — جفت‌های name=value واقعی؛ حذف مشخصات Set-Cookie؛
  *  رمزگذاری مقدارها نرمال می‌شود (canonicalCookieValue بالا) */
 export function sanitizePascalCookie(raw: string): string {
-  return raw
+  return normalizePastedCookie(raw)
     .split(';')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -176,6 +198,56 @@ export function currentPascalCookie(): string {
   const env = envCookie();
   if (!jar || jar.env !== env) jar = { env, cookie: env };
   return jar.cookie;
+}
+
+// ─── ستِ ران‌تایمِ کوکی از پنل ادمین (۲۳-۱۱ عصر — خواستهٔ مالک: مودال) ───────
+//
+// به‌جای ویرایش .env + ری‌استارت، کوکی از UI می‌آید و:
+//   ۱) همین لحظه در process.env.BUSKOOL_COOKIE می‌نشیند — چون ظرف کوکی
+//      با هر فراخوانی env را می‌سنجه و «env ≠ jar.env» یعنی شروعِ تازه،
+//      درخواست‌های بعدی بی‌ری‌استارت از کوکی تازه استفاده می‌کنند؛
+//   ۲) در فایل .env پروژه هم ذخیره می‌شود تا بعد از ری‌استارت بماند
+//      (فقط در اجرای لوکال — روی ورسل env پنل است و فایل نوشته نمی‌شود).
+// probeهای کش‌شده (سشن/CSRF) با عوض‌شدن کوکی خودشان تازه می‌شوند.
+
+/** ذخیرهٔ کوکی در .env — جابه‌جایی/افزودن خط BUSKOOL_COOKIE؛ مقدار تک‌خطیِ
+ *  پاک‌سازی‌شده است پس قالب .env خراب نمی‌شود */
+export function persistEnvCookie(cookie: string): boolean {
+  if (!cookie) return false;
+  try {
+    const envPath = join(process.cwd(), '.env');
+    if (!existsSync(envPath)) return false;
+    const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
+    const line = `BUSKOOL_COOKIE=${cookie}`;
+    let found = false;
+    const out = lines.map((l) => {
+      if (/^\s*BUSKOOL_COOKIE\s*=/.test(l)) {
+        found = true;
+        return line;
+      }
+      return l;
+    });
+    if (!found) {
+      // بعد از آخرین خط خالی/انتهای فایل — یک خط جدا با کامنت کوتاه
+      out.push('', '# کوکی پاسکال — آخرین‌بار از مودال پنل آپدیت ذخیره شد', line);
+    }
+    writeFileSync(envPath, out.join('\n'), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** ستِ کوکی تازه — از مودال پنل؛ خروجی: کوکی پاک‌شده + نکته‌های تشخیصی */
+export function setPascalCookie(
+  raw: string,
+): { cookie: string; hints: { hasRemember: boolean; hasSession: boolean; decodedValuesFixed: boolean } } {
+  const cookie = sanitizePascalCookie(raw ?? '');
+  if (cookie) process.env.BUSKOOL_COOKIE = cookie;
+  // ظرف قدیمی با env تازه در نخستین currentPascalCookie() دور ریخته می‌شود؛
+  // برای اطمینان همین‌جا هم ریستش می‌کنیم (پروب‌ها با کوکی تازه تازه می‌شوند)
+  jar = cookie ? { env: envCookie(), cookie } : null;
+  return { cookie, hints: pascalCookieHints() };
 }
 
 /** کوکی را به جفت‌های name=value بشکن */

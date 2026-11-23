@@ -41,7 +41,7 @@ export class ImporterController {
   }
 
   @Get('source-info')
-  @ApiOperation({ summary: 'وضعیت کالکشن منبع user-pascal (همان دیتابیس ایمچ)' })
+  @ApiOperation({ summary: 'وضعیت کالکشن منبع user-buskool (همان دیتابیس ایمچ)' })
   async sourceInfo() {
     return ok(await this.importer.sourceInfo());
   }
@@ -83,7 +83,7 @@ export class ImporterController {
   }
 
   @Post('list')
-  @ApiOperation({ summary: 'شروع ایمپورت لیستی از کالکشن user-pascal — رد شدن از ایمپورت‌شده‌ها' })
+  @ApiOperation({ summary: 'شروع ایمپورت لیستی از کالکشن user-buskool — رد شدن از ایمپورت‌شده‌ها' })
   startList(@Body() dto: ListImportDto) {
     return ok(this.importer.startList(dto));
   }

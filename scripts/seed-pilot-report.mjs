@@ -28,7 +28,7 @@ const db = client.db();
 const locs = db.collection('Location');
 const cityId = async (name) => {
   const d = await locs.findOne({ type: 'city', name });
-  return d ? { id: d.pascal_id, parent: d.parent_id } : null;
+  return d ? { id: d.buskool_id, parent: d.parent_id } : null;
 };
 const کرمانشاه = await cityId('کرمانشاه');
 const یزد = await cityId('یزد');
@@ -48,7 +48,7 @@ console.log('seller:', seller.user_name);
 const provinceOf = async (c) => {
   if (!c?.parent) return 0;
   const p = await locs.findOne({ _id: c.parent });
-  return p ? p.pascal_id : 0;
+  return p ? p.buskool_id : 0;
 };
 
 const now = new Date();

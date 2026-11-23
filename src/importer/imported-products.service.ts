@@ -43,7 +43,7 @@ export interface ImportedListingRow {
   updatedAt: string;
   priceUpdatedAt: string | null;
   /** منبع: فروشنده سند b دارد (پاسکالی) یا ثبت‌نام خودی */
-  source: 'pascal' | 'native';
+  source: 'buskool' | 'native';
   owner: {
     id: string;
     userName: string;
@@ -92,7 +92,7 @@ export interface ProductImageRow {
   updatedAt: string;
   width: number | null;
   height: number | null;
-  source: 'pascal' | 'native';
+  source: 'buskool' | 'native';
   importedFrom: string | null;
   /** URL اصلی فایل در پاسکال (قبل از rehost در آیمچ) */
   originalUrl: string | null;
@@ -256,7 +256,7 @@ export class ImportedProductsService {
 
     // ── فیلترهای سمت فروشنده + جستجو — بعد از lookup مالک اعمال می‌شوند ──
     const ownerMatch: Record<string, unknown> = {};
-    if (query.source === 'pascal') ownerMatch['owner.b_user_name'] = { $ne: null };
+    if (query.source === 'buskool') ownerMatch['owner.b_user_name'] = { $ne: null };
     else if (query.source === 'native') ownerMatch['owner.b_user_name'] = null;
     if (query.ownerLogin === 'ever') ownerMatch['owner.last_login_at'] = { $ne: null };
     else if (query.ownerLogin === 'never') ownerMatch['owner.last_login_at'] = null;
@@ -379,14 +379,14 @@ export class ImportedProductsService {
         : [],
       provIds.length || cityIds.length
         ? this.prisma.location.findMany({
-            where: { pascalId: { in: [...provIds, ...cityIds] } },
-            select: { pascalId: true, name: true, type: true },
+            where: { buskolId: { in: [...provIds, ...cityIds] } },
+            select: { buskolId: true, name: true, type: true },
           })
         : [],
     ]);
     const catName = new Map(cats.map((c) => [c.id, c.categoryName]));
-    const provName = new Map(locs.filter((l) => l.type === 'province').map((l) => [l.pascalId, l.name]));
-    const cityName = new Map(locs.filter((l) => l.type === 'city').map((l) => [l.pascalId, l.name]));
+    const provName = new Map(locs.filter((l) => l.type === 'province').map((l) => [l.buskolId, l.name]));
+    const cityName = new Map(locs.filter((l) => l.type === 'city').map((l) => [l.buskolId, l.name]));
 
     const rows: ImportedListingRow[] = rawRows.map((r) => {
       const owner = (r.owner ?? {}) as Record<string, unknown>;
@@ -418,7 +418,7 @@ export class ImportedProductsService {
         createdAt: toIso(r.created_at) ?? '',
         updatedAt: toIso(r.updated_at) ?? '',
         priceUpdatedAt: toIso(r.price_updated_at),
-        source: owner.b_user_name != null ? 'pascal' : 'native',
+        source: owner.b_user_name != null ? 'buskool' : 'native',
         owner: {
           id: toId(owner._id),
           userName: String(owner.user_name ?? ''),
@@ -532,8 +532,8 @@ export class ImportedProductsService {
       field_key: 'gallery',
       related_id: { $ne: null },
     };
-    if (query.source === 'pascal') filter['metadata.importedFrom'] = 'pascal';
-    else if (query.source === 'native') filter['metadata.importedFrom'] = { $ne: 'pascal' };
+    if (query.source === 'buskool') filter['metadata.importedFrom'] = 'buskool';
+    else if (query.source === 'native') filter['metadata.importedFrom'] = { $ne: 'buskool' };
     if (query.replaced === 'yes') filter['metadata.replacedAt'] = { $ne: null };
     else if (query.replaced === 'no') filter['metadata.replacedAt'] = null;
 
@@ -765,7 +765,7 @@ export class ImportedProductsService {
         updatedAt: toIso(r.updated_at) ?? '',
         width: num(meta.width),
         height: num(meta.height),
-        source: meta.importedFrom === 'pascal' ? 'pascal' : 'native',
+        source: meta.importedFrom === 'buskool' ? 'buskool' : 'native',
         importedFrom: typeof meta.importedFrom === 'string' ? meta.importedFrom : null,
         originalUrl: typeof meta.originalUrl === 'string' ? meta.originalUrl : null,
         replacedAt: typeof meta.replacedAt === 'string' ? meta.replacedAt : null,
@@ -832,7 +832,7 @@ export class ImportedProductsService {
     // ── ۲) فیلترهای فایلی (منبع/وضعیت تعویض) → آگهیِ دارای فایل منطبق ──
     //  'no' = هنوز عکس تعویض‌نشده دارد (کار باقی‌مانده) / 'yes' = حداقل یک عکس تعویض‌شده
     const fileFilterNeeded =
-      query.source === 'pascal' || query.source === 'native' || query.replaced === 'yes' || query.replaced === 'no';
+      query.source === 'buskool' || query.source === 'native' || query.replaced === 'yes' || query.replaced === 'no';
     let fileIds: string[] | null = null;
     if (fileFilterNeeded) {
       const fileMatch: Record<string, unknown> = {
@@ -840,8 +840,8 @@ export class ImportedProductsService {
         field_key: 'gallery',
         related_id: { $ne: null },
       };
-      if (query.source === 'pascal') fileMatch['metadata.importedFrom'] = 'pascal';
-      else if (query.source === 'native') fileMatch['metadata.importedFrom'] = { $ne: 'pascal' };
+      if (query.source === 'buskool') fileMatch['metadata.importedFrom'] = 'buskool';
+      else if (query.source === 'native') fileMatch['metadata.importedFrom'] = { $ne: 'buskool' };
       if (query.replaced === 'yes') fileMatch['metadata.replacedAt'] = { $ne: null };
       else if (query.replaced === 'no') fileMatch['metadata.replacedAt'] = null;
       const agg = (await this.prisma.$runCommandRaw({
@@ -1029,7 +1029,7 @@ export class ImportedProductsService {
       updatedAt: toIso(r.updated_at) ?? '',
       width: num(meta.width),
       height: num(meta.height),
-      source: meta.importedFrom === 'pascal' ? 'pascal' : 'native',
+      source: meta.importedFrom === 'buskool' ? 'buskool' : 'native',
       importedFrom: typeof meta.importedFrom === 'string' ? meta.importedFrom : null,
       originalUrl: typeof meta.originalUrl === 'string' ? meta.originalUrl : null,
       replacedAt: typeof meta.replacedAt === 'string' ? meta.replacedAt : null,
@@ -1109,10 +1109,10 @@ export class ImportedProductsService {
         {
           $facet: {
             total: [{ $count: 'n' }],
-            pascal: [{ $match: { 'metadata.importedFrom': 'pascal' } }, { $count: 'n' }],
+            pascal: [{ $match: { 'metadata.importedFrom': 'buskool' } }, { $count: 'n' }],
             replaced: [{ $match: { 'metadata.replacedAt': { $ne: null } } }, { $count: 'n' }],
             pascalRemaining: [
-              { $match: { 'metadata.importedFrom': 'pascal', 'metadata.replacedAt': null } },
+              { $match: { 'metadata.importedFrom': 'buskool', 'metadata.replacedAt': null } },
               { $count: 'n' },
             ],
           },

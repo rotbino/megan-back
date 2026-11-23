@@ -10,7 +10,7 @@
  *
  * این اسکریپت (idempotent — اجرای چندباره بی‌ضرر است):
  *   ۱) stub های نویسندهٔ کامنت را پیدا می‌کند (userName با الگوی «bk-c…»
- *      یا profile.importedFrom='pascal-comment').
+ *      یا profile.importedFrom='buskool-comment').
  *   ۲) برای هر یک: ردیف user_for_b_comment می‌سازد (نام/نام‌خانوادگی/شهر از
  *      رکورد stub؛ شهر با نام از جدول locations).
  *   ۳) SellerReview های او را به b_comment منتقل می‌کند (متن/امتیاز/تاریخ).
@@ -45,7 +45,7 @@ function isCommentStub(u) {
   const p = (u.profile ?? {});
   return (
     (typeof u.userName === 'string' && u.userName.startsWith('bk-c')) ||
-    p.importedFrom === 'pascal-comment'
+    p.importedFrom === 'buskool-comment'
   );
 }
 
@@ -72,10 +72,10 @@ async function main() {
   const cityNames = new Map();
   if (cityIds.length) {
     const locs = await prisma.location.findMany({
-      where: { type: 'city', pascalId: { in: cityIds } },
-      select: { pascalId: true, name: true },
+      where: { type: 'city', buskolId: { in: cityIds } },
+      select: { buskolId: true, name: true },
     });
-    for (const l of locs) cityNames.set(l.pascalId, l.name);
+    for (const l of locs) cityNames.set(l.buskolId, l.name);
   }
 
   let authors = 0, comments = 0, deletedReviews = 0, deletedStubs = 0, kept = 0;

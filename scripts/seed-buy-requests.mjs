@@ -32,13 +32,13 @@ await client.connect();
 const db = client.db();
 
 // ── نقشه شهرها (نام → گره Location نوع شهر با استان) ─────────────────────────
-// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام پاسکال در pascal_id.
+// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام پاسکال در buskool_id.
 const buyads = JSON.parse(readFileSync(SOURCE, 'utf8'));
 const cityNames = [...new Set(buyads.map((b) => b.city).filter(Boolean))];
 const cityRows = await db
   .collection('Location')
   .find({ type: 'city', name: { $in: cityNames } })
-  .project({ pascal_id: 1, parent_id: 1 })
+  .project({ buskool_id: 1, parent_id: 1 })
   .toArray();
 // نام تکراری بین استان‌ها → اولین استان (دقت seed کافی است)
 const cityByName = new Map();
@@ -98,7 +98,7 @@ for (const b of buyads) {
     requirement_amount: b.requirement_amount,
     unit: b.unit ?? 'کیلوگرم',
     province_id: city ? provinceNum(city.parent_id) : null,
-    city_id: city?.pascal_id ?? null,
+    city_id: city?.buskool_id ?? null,
     goal: 'price_and_buy',
     has_history: false,
     status: 'confirmed', // روی پاسکال زنده است

@@ -182,7 +182,7 @@ const withProduct = imgRows.filter((r) => r.product?._id != null).length;
 check('تقریباً همهٔ ردیف‌ها آگهی دارند', withProduct >= imgRows.length - 1, `${withProduct}/${imgRows.length}`);
 const withOwner = imgRows.filter((r) => (r.ownerUser ?? []).length > 0).length;
 check('تقریباً همهٔ ردیف‌ها فروشنده دارند', withOwner >= imgRows.length - 1, `${withOwner}/${imgRows.length}`);
-const importedCount = imgRows.filter((r) => r.metadata?.importedFrom === 'pascal').length;
+const importedCount = imgRows.filter((r) => r.metadata?.importedFrom === 'buskool').length;
 console.log(`  • نمونهٔ آلبوم: ${imgRows.length} تصویر، ${importedCount} پاسکالی؛ مثلاً «${imgRows[0]?.product?.product_name}» فروشنده @${imgRows[0]?.ownerUser?.[0]?.user_name}`);
 check('url همهٔ ردیف‌ها پر است', imgRows.every((r) => typeof r.url === 'string' && r.url));
 
@@ -193,9 +193,9 @@ const imgSum = (await run('File', [
   {
     $facet: {
       total: [{ $count: 'n' }],
-      pascal: [{ $match: { 'metadata.importedFrom': 'pascal' } }, { $count: 'n' }],
+      pascal: [{ $match: { 'metadata.importedFrom': 'buskool' } }, { $count: 'n' }],
       replaced: [{ $match: { 'metadata.replacedAt': { $ne: null } } }, { $count: 'n' }],
-      pascalRemaining: [{ $match: { 'metadata.importedFrom': 'pascal', 'metadata.replacedAt': null } }, { $count: 'n' }],
+      pascalRemaining: [{ $match: { 'metadata.importedFrom': 'buskool', 'metadata.replacedAt': null } }, { $count: 'n' }],
     },
   },
 ]))[0] ?? {};

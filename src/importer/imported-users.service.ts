@@ -67,7 +67,7 @@ export interface ImportedUserRow {
   /** (۱۹-۱۱) خودش با دکمهٔ «ایمپورت از وب» ایمپورت را انجام داده — ردّ پایهٔ
    *  «کاربر واقعی ایمچ»: حداقل یک جلسهٔ WebImportSession کامل‌شده دارد */
   selfImported: boolean;
-  /** (تسک ۳۵ — ۲۱-۱۱) منبع ایمپورت — 'pascal' | 'daymat' | null (بومی) */
+  /** (تسک ۳۵ — ۲۱-۱۱) منبع ایمپورت — 'buskool' | 'daymat' | null (بومی) */
   importSource: string | null;
   /** (تسک ۳۵) سند دیمت — { daymatUserId, businessName, … } | null */
   d: Record<string, unknown> | null;
@@ -117,7 +117,7 @@ export interface ImportedUsersListResult {
 
 export interface ImportedUsersQuery {
   q?: string;
-  source?: 'pascal' | 'native' | 'stub' | 'daymat' | 'all';
+  source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
   premium?: 'yes' | 'no';
   packageType?: number;
   login?: 'ever' | 'never' | 'after-contact';
@@ -224,7 +224,7 @@ export class ImportedUsersService {
     }
     // منبع: پاسکال (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها /
     // دیمت (تسک ۳۵ — import_source='daymat')
-    if (query.source === 'pascal') filter.b_user_name = { $ne: null };
+    if (query.source === 'buskool') filter.b_user_name = { $ne: null };
     else if (query.source === 'daymat') filter.import_source = 'daymat';
     else if (query.source === 'native') {
       filter.$and = [
@@ -400,19 +400,19 @@ export class ImportedUsersService {
     const [provs, cities] = await Promise.all([
       provIds.length
         ? this.prisma.location.findMany({
-            where: { pascalId: { in: provIds } },
-            select: { pascalId: true, name: true, type: true },
+            where: { buskolId: { in: provIds } },
+            select: { buskolId: true, name: true, type: true },
           })
         : [],
       cityIds.length
         ? this.prisma.location.findMany({
-            where: { pascalId: { in: cityIds } },
-            select: { pascalId: true, name: true, type: true },
+            where: { buskolId: { in: cityIds } },
+            select: { buskolId: true, name: true, type: true },
           })
         : [],
     ]);
-    const provName = new Map(provs.filter((p) => p.type === 'province').map((p) => [p.pascalId, p.name]));
-    const cityName = new Map(cities.filter((c) => c.type === 'city').map((c) => [c.pascalId, c.name]));
+    const provName = new Map(provs.filter((p) => p.type === 'province').map((p) => [p.buskolId, p.name]));
+    const cityName = new Map(cities.filter((c) => c.type === 'city').map((c) => [c.buskolId, c.name]));
 
     const rows: ImportedUserRow[] = rawRows.map((r) => {
       const lastLoginIso = toIso(r.last_login_at);
@@ -635,13 +635,13 @@ export class ImportedUsersService {
         : [],
       user.provinceId
         ? this.prisma.location.findFirst({
-            where: { pascalId: user.provinceId, type: 'province' },
+            where: { buskolId: user.provinceId, type: 'province' },
             select: { name: true },
           })
         : null,
       user.cityId
         ? this.prisma.location.findFirst({
-            where: { pascalId: user.cityId, type: 'city' },
+            where: { buskolId: user.cityId, type: 'city' },
             select: { name: true },
           })
         : null,
@@ -763,20 +763,20 @@ export class ImportedUsersService {
       const [prov, city] = await Promise.all([
         u.provinceId
           ? this.prisma.location.findFirst({
-              where: { pascalId: u.provinceId, type: 'province' },
+              where: { buskolId: u.provinceId, type: 'province' },
               select: { name: true },
             })
           : null,
         u.cityId
           ? this.prisma.location.findFirst({
-              where: { pascalId: u.cityId, type: 'city' },
+              where: { buskolId: u.cityId, type: 'city' },
               select: { name: true },
             })
           : null,
       ]);
 
       const b: BUserData = {
-        source: 'pascal',
+        source: 'buskool',
         userName: u.bUserName as string,
         userId: (pj.bUserId as number) ?? 0,
         profileId: (pj.bProfileId as number) ?? null,

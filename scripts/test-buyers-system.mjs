@@ -109,7 +109,7 @@ async function main() {
     const tehranCity = await prisma.location.findFirst({ where: { type: 'city', parentId: tehran.id } });
     await prisma.user.update({
       where: { id: buyerMe.sub },
-      data: { provinceId: tehran.pascalId, cityId: tehranCity?.pascalId ?? null },
+      data: { provinceId: tehran.buskolId, cityId: tehranCity?.buskolId ?? null },
     });
   }
   check('فروشنده ویژه شد + مکان خریدار', true);

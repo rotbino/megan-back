@@ -43,7 +43,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from '@ne
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
-import { PascalClient, fetchSellerPhoneLegacy, pascalBudgetKey, pascalConfig, pascalCookieHints, pascalSessionLoggedIn, type BkLatestItem, type BkLatestListResp, type BkProfileResp, type BkSellerPhoneResp } from './pascal.client';
+import { PascalClient, fetchSellerPhoneLegacy, pascalBudgetKey, pascalConfig, pascalCookieHints, pascalSessionLoggedIn, persistEnvCookie, setPascalCookie, type BkLatestItem, type BkLatestListResp, type BkProfileResp, type BkSellerPhoneResp } from './pascal.client';
 import { importerAdminPhone } from './dto';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -192,6 +192,66 @@ export class PriceUpdateService {
     if (this.phoneUse.cookie !== cookie) this.phoneUse = { cookie, used: 0 };
     const limit = Math.max(1, toCount(process.env.BUSKOOL_PHONE_BUDGET, 20));
     return { limit, used: this.phoneUse.used, remaining: Math.max(0, limit - this.phoneUse.used) };
+  }
+
+  // ═══════════════════════════ مودال کوکی پنل (۲۳-۱۱ عصر) ═══════════════════════════
+
+  /**
+   * ستِ کوکی پاسکال از مودال پنل — خواستهٔ مالک: «اگر خطا داد یه مدال با
+   * تکست‌ایریا باز کن و از من بخوای کوکی رو اونجا پیست کنم و اوکی کنم و
+   * خودت پشت صحنه ست کنی».
+   *
+   * کارها: پاک‌سازیِ متن چسبانده‌شده (هر سبک کپی) → ستِ ران‌تایم در
+   * process.env.BUSKOOL_COOKIE (ظرف کوکی بی‌ری‌استارت از مقدار تازه شروع
+   * می‌شود) → ذخیرهٔ ماندگار در .env → سنجش زندهٔ لاگین با /api/user.
+   * پاسخ برای فرانت: hints (کدام جفت‌ها هست) + loggedIn + persisted +
+   * پیام فارسی جمع‌بندی؛ فرانت در صورت loggedIn=true عملِ شکست‌خورده را
+   * خودکار تکرار می‌کند.
+   */
+  async setPascalCookieFromUi(
+    adminPhone: string,
+    raw: string,
+  ): Promise<{
+    hints: { hasRemember: boolean; hasSession: boolean; decodedValuesFixed: boolean };
+    loggedIn: boolean | null;
+    persisted: boolean;
+    message: string;
+    budget?: PhoneBudgetInfo;
+  }> {
+    this.assertAdmin(adminPhone);
+    const text = (raw ?? '').trim();
+    if (!text) {
+      throw AppError.badRequest('کوکی را در کادر بچسبانید — کل هدر cookie مرورگر', 'BUSKOOL_COOKIE_MISSING');
+    }
+    const { cookie, hints } = setPascalCookie(text);
+    if (!cookie) {
+      throw AppError.badRequest(
+        'در متن چسبانده‌شده جفت name=value قابل استفاده‌ای نبود — کل هدر cookie مرورگرِ لاگین‌شده را کپی کنید (سه جفت: user_phone و user_password و laravel_session)',
+        'BUSKOOL_COOKIE_INVALID',
+      );
+    }
+    const persisted = persistEnvCookie(cookie);
+    const loggedIn = await pascalSessionLoggedIn();
+    this.logger.log(
+      `pascal-cookie از پنل ذخیره شد (remember=${hints.hasRemember} session=${hints.hasSession} loggedIn=${loggedIn} persisted=${persisted})`,
+    );
+    const parts: string[] = [];
+    if (loggedIn === true) parts.push('سشن لاگین شناخته شد ✓');
+    else if (loggedIn === false) parts.push('سشن هنوز مهمان است ✗');
+    else parts.push('سنجش لاگین ممکن نشد (خطای شبکه)');
+    if (!hints.hasRemember) {
+      parts.push(
+        'جفت‌های یادآور (user_password/user_phone) در متن نبود — بدون آن‌ها سشن ۲ ساعت بعد می‌میرد و دقیقاً همین خطا برمی‌گردد؛ دوباره از Request Headers کپی کنید',
+      );
+    }
+    if (!persisted) parts.push('در فایل .env ذخیره نشد (اجرای غیرلوکال؟) — تا ری‌استارت فقط در حافظه');
+    return {
+      hints,
+      loggedIn,
+      persisted,
+      message: parts.join('؛ '),
+      budget: this.budgetInfo(),
+    };
   }
 
   // ═══════════════════════════ اسکن: آپدیت + شناسایی ═══════════════════════════
@@ -597,14 +657,14 @@ export class PriceUpdateService {
     const { cookie } = pascalConfig();
     if (!cookie) {
       throw AppError.badRequest(
-        'کوکی پاسکال تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است',
+        'کوکی پاسکال تنظیم نشده است — با دکمهٔ «تنظیم کوکی» (یا همین خطا) مودال باز می‌شود؛ کوکی مرورگرِ لاگین‌شده را همان‌جا بچسبانید',
         'BUSKOOL_COOKIE_MISSING',
       );
     }
     const budget = this.budgetInfo();
     if (budget.remaining <= 0) {
       throw AppError.badRequest(
-        `سهمیهٔ ${budget.limit} شماره‌ای این کوکی پاسکال تمام شده (${budget.used} گرفته شده) — کوکی تازه در BUSKOOL_COOKIE بگذارید`,
+        `سهمیهٔ ${budget.limit} شماره‌ای این کوکی پاسکال تمام شده (${budget.used} گرفته شده) — با «تنظیم کوکی» کوکیِ حساب دیگری بدهید (از همان مودال، بدون ری‌استارت)`,
         'BUSKOOL_BUDGET_EXHAUSTED',
       );
     }
@@ -697,19 +757,19 @@ export class PriceUpdateService {
           );
         }
         throw AppError.badRequest(
-          `گرفتن شماره با هیچ‌کدام از دو مکانیزم (اندپوینت قدیمی + اندپوینت مرورگر) نشد. راهِ درستِ تازه‌کردن کوکی: در باسکول F12 → Network → روی هر درخواستی کلیک کنید → در Request Headers کل مقدار cookie را کپی کنید (سه جفت: user_phone و user_password و laravel_session) → در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید. ⚠️ از پنل Application→Cookies کپی نکنید — مقدارهایش رمزگشایی‌اند (اگر کپی کرده باشید خودکار اصلاح می‌شود). جزئیات: ${parts.join('؛ ')}`,
+          `گرفتن شماره با هیچ‌کدام از دو مکانیزم (اندپوینت قدیمی + اندپوینت مرورگر) نشد — مودال «تنظیم کوکی» باز شد؛ در باسکول F12 → Network → روی هر درخواستی کلیک کنید → در Request Headers کل مقدار cookie را کپی و در مودال بچسبانید (سه جفت: user_phone و user_password و laravel_session؛ ذخیره می‌شود و همین کار خودکار دوباره امتحان می‌شود — ری‌استارت لازم نیست). ⚠️ از پنل Application→Cookies کپی نکنید — مقدارهایش رمزگشایی‌اند (اگر کپی کنید خودکار اصلاح می‌شود). جزئیات: ${parts.join('؛ ')}`,
           'BUSKOOL_COOKIE_INVALID',
         );
       }
       if (e?.status === 419) {
         throw AppError.badRequest(
-          `پاسکول ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید (${attempts.join('؛ ')})`,
+          `پاسکول ۴۱۹ (توکن CSRF) داد — کوکی را از مودال «تنظیم کوکی» تازه کنید (${attempts.join('؛ ')})`,
           'BUSKOOL_CSRF',
         );
       }
       if (e?.status === 401) {
         throw AppError.badRequest(
-          `پاسکول ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE) (${attempts.join('؛ ')})`,
+          `پاسکول ۴۰۱ داد — کوکی لاگین معتبر نیست؛ از مودال «تنظیم کوکی» تازه کنید (${attempts.join('؛ ')})`,
           'BUSKOOL_UNAUTHORIZED',
         );
       }

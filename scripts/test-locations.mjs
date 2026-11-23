@@ -42,13 +42,13 @@ check('city:4 → parent province:1', city4?.parent_id === 'province:1', city4?.
 const batak = await loc.findOne({ _id: 'city:230' });
 check('city:230 = شهر بابک (کرمان ۲۱)', batak?.name === 'شهر بابک' && batak?.parent_id === 'province:21', JSON.stringify({ name: batak?.name, parent: batak?.parent_id }));
 
-// pascal_id ها در هر type یکتا
+// buskool_id ها در هر type یکتا
 const dupCity = await loc.aggregate([
   { $match: { type: 'city' } },
-  { $group: { _id: '$pascal_id', n: { $sum: 1 } } },
+  { $group: { _id: '$buskool_id', n: { $sum: 1 } } },
   { $match: { n: { $gt: 1 } } },
 ]).toArray();
-check('pascal_id شهرها یکتا', dupCity.length === 0);
+check('buskool_id شهرها یکتا', dupCity.length === 0);
 
 // هر شهری والد استان دارد
 const orphanCities = await loc.aggregate([
