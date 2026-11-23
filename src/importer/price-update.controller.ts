@@ -53,13 +53,14 @@ export class PriceUpdateController {
   @Post('fetch-phone')
   @ApiOperation({
     summary:
-      'شمارهٔ موبایل یک فروشندهٔ پاسکال (get_seller_phone_number با کوکی) — هر کوکی فقط ۲۰ شماره؛ با bUserName شماره روی رکورد «در انتظار ایمپورت» هم ذخیره می‌شود؛ سهمیهٔ باقی‌مانده در پاسخ',
+      'شمارهٔ موبایل یک فروشندهٔ پاسکال — دو مکانیزم به‌ترتیب: اندپوینت قدیمی get_seller_phone_number (s_id/p_id، فقط کوکی — عین برنامهٔ قدیمی) و در شکستِ آن اندپوینت مرورگر get-user-phone-number-for-the-seller (user_id)؛ هر کوکی فقط ۲۰ شماره؛ با bUserName شماره روی رکورد «در انتظار ایمپورت» هم ذخیره می‌شود؛ سهمیهٔ باقی‌مانده در پاسخ',
   })
   async fetchPhone(@Body() dto: FetchPhoneDto) {
     return ok(
       await this.priceUpdate.fetchPhone(dto.adminPhone, {
         sId: dto.sId,
         pId: dto.pId,
+        sProfileId: dto.sProfileId,
         bUserName: dto.bUserName,
       }),
     );

@@ -43,7 +43,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from '@ne
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
-import { PascalClient, pascalBudgetKey, pascalConfig, pascalSessionLoggedIn, type BkLatestItem, type BkLatestListResp, type BkSellerPhoneResp } from './pascal.client';
+import { PascalClient, fetchSellerPhoneLegacy, pascalBudgetKey, pascalConfig, pascalCookieHints, pascalSessionLoggedIn, type BkLatestItem, type BkLatestListResp, type BkProfileResp, type BkSellerPhoneResp } from './pascal.client';
 import { importerAdminPhone } from './dto';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -54,6 +54,14 @@ const SCAN_MIN_GAP_MS = 5_000;
 const NEW_USERS_CAP = 300;
 /** سقف آگهی‌های قابل آپدیت در یک اسکن (هر بچ ۱۰۰۰تایی) */
 const BATCH_MAX = 1_000;
+
+/** شمارهٔ داخل پاسخ گوشی‌گیری — {phone} یا {data:{phone}} یا {data:"..."} (۲۳-۱۱) */
+function phoneOf(resp: BkSellerPhoneResp | undefined): unknown {
+  if (!resp) return undefined;
+  if (typeof resp.data === 'object' && resp.data !== null) return resp.data.phone;
+  if (typeof resp.data === 'string') return resp.data;
+  return resp.phone;
+}
 
 /** تاریخ پاسکال «YYYY-MM-DD HH:mm:ss» → Date؛ نامعتبر → null */
 function bkDate(s: string | null | undefined): Date | null {
@@ -565,11 +573,17 @@ export class PriceUpdateService {
    * گرفتن شمارهٔ موبایل یک فروشندهٔ پاسکال — کوکی می‌خواهد؛ هر کوکی فقط ۲۰
    * شماره (محدودیت پاسکال). پاسخ {phone} یا {data:{phone}} هر دو پذیرفته است.
    *
-   * اندپوینت (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست»): اندپوینت قدیمی
-   * /get_seller_phone_number کنار گذاشته شد؛ خود سایت پاسکال از
-   * /get-user-phone-number-for-the-seller با بدنهٔ {user_id, client:"web"}
-   * استفاده می‌کند و مالک همین را در مرورگر خودش تست و تأیید کرده است.
-   * pId دیگر لازم نیست (فقط user_id) ولی در قرارداد API حفظ شده است.
+   * دو مکانیزم، به‌ترتیب (۲۳-۱۱ — بازگشت به کد اثبات‌شدهٔ برنامهٔ قدیمی مالک):
+   *   ۱) «اندپوینت قدیمی» /get_seller_phone_number با {s_id, p_id,
+   *      item:"PRODUCT", client:"web"} و «فقط» هدر Cookie — عین کد
+   *      buskoolServices.js که سال‌ها از «سرورِ بدون مرورگر» کار کرد و روزی
+   *      ۵۰۰ شماره می‌گرفت: بدون پیش‌درخواست CSRF و بدون گرم‌کردن سشن؛
+   *      کوکی‌های یادآور (user_phone/user_password) خودشان کنار همین POST
+   *      سشن لاگین را ترمیم می‌کنند. s_id = myuser_id فروشنده (شناسهٔ پروفایل)
+   *      و p_id = شناسهٔ یک آگهی او.
+   *   ۲) «اندپوینت مرورگر» /get-user-phone-number-for-the-seller با
+   *      {user_id, client:"web"} + کوکی + x-csrf-token — همان چیزی که خود
+   *      سایت در مرورگر می‌زند (تأیید مالک ۲۲-۱۱).
    *
    * اگر bUserName داده شود (خواستهٔ مالک ۲۲-۱۱ — دکمهٔ «گرفتن موبایل»)، شماره
    * روی رکورد «در انتظار ایمپورت» همان کاربر ذخیره می‌شود تا دفعهٔ بعد ایمپورت
@@ -577,7 +591,7 @@ export class PriceUpdateService {
    */
   async fetchPhone(
     adminPhone: string,
-    input: { sId: number; pId?: number; bUserName?: string },
+    input: { sId: number; pId?: number; sProfileId?: number; bUserName?: string },
   ): Promise<{ phone: string; budget: PhoneBudgetInfo; saved: boolean }> {
     this.assertAdmin(adminPhone);
     const { cookie } = pascalConfig();
@@ -595,8 +609,55 @@ export class PriceUpdateService {
       );
     }
 
+    const attempts: string[] = [];
+
+    // ── s_id اندپوینت قدیمی (myuser_id فروشنده) — اگر فراخواننده نداده، از
+    // پروفایل عمومی پاسکال خوانده می‌شود «بدون کوکی» تا ظرف کوکی برای POST
+    // گوشی‌گیری دست‌نخورده بماند (مثل برنامهٔ قدیمی: اولین تماسِ همان POST) ──
+    let sProfileId = Math.floor(input.sProfileId ?? 0);
+    const pId = Math.floor(input.pId ?? 0);
+    if (!sProfileId && input.bUserName) {
+      try {
+        const bkPub = new PascalClient(() => false);
+        const profile = await bkPub.call<BkProfileResp>(
+          '/load_profile_by_user_name',
+          { user_name: input.bUserName },
+          { noCookie: true },
+        );
+        sProfileId = Math.floor(profile?.profile?.myuser_id ?? 0);
+      } catch (err) {
+        this.logger.warn(`legacy s_id lookup failed: ${(err as Error).message}`);
+      }
+    }
+
+    // ── روش ۱: اندپوینت قدیمی — مکانیزم اثبات‌شده از سرور ──
+    if (sProfileId > 0 && pId > 0) {
+      const r = await fetchSellerPhoneLegacy(sProfileId, pId);
+      const summary = r.redirectLoc
+        ? `${r.status} → ${r.redirectLoc}`
+        : `${r.status}${r.code != null ? ` کد ${r.code}` : ''}${r.error && r.code == null ? ` (${r.error})` : ''}`;
+      attempts.push(`اندپوینت قدیمی: ${summary}`);
+      const phone1 = normalizePhone(phoneOf(r.data));
+      if (phone1) {
+        this.phoneUse.used++;
+        const saved = await this.savePendingPhone(input.bUserName, phone1);
+        return { phone: phone1, budget: this.budgetInfo(), saved };
+      }
+      if (r.code === 3) {
+        // کد ۳ در برنامهٔ قدیمی = برای این فروشنده شماره‌ای آزاد نیست —
+        // تلاش بیشتر جواب عوض نمی‌کند
+        throw new BadRequestException(
+          'پاسکول برای این فروشنده شماره‌ای نشان نمی‌دهد (کد ۳) — با کوکی یا زمان دیگر امتحان کنید',
+        );
+      }
+      // کد ۵ (کوکی نامعتبر/سهمیه)، ریدایرکت و بقیه → روش ۲ هم امتحان می‌شود
+    } else {
+      attempts.push('اندپوینت قدیمی: شناسهٔ s_id/p_id در دسترس نبود');
+    }
+
+    // ── روش ۲: اندپوینت مرورگر — {user_id, client:"web"} + کوکی + CSRF ──
     const bk = new PascalClient(() => false);
-    let resp: BkSellerPhoneResp;
+    let resp: BkSellerPhoneResp | undefined;
     try {
       resp = await bk.call('/get-user-phone-number-for-the-seller', {
         user_id: Math.floor(input.sId),
@@ -604,9 +665,9 @@ export class PriceUpdateService {
       });
     } catch (err) {
       // پیام تمیز و «دقیق» برای مالک (۲۲-۱۱) — هر علت جای خودش را می‌گوید؛
-      // دیگر همهٔ خطاها به‌نادرست «کوکی منقضی شده» ترجمه نمی‌شوند.
-      // ⚠️ با AppError (کد پایدار) پرتاب می‌شود تا فیلتر مرکزی پیامِ بلند را
+      // با AppError (کد پایدار) پرتاب می‌شود تا فیلتر مرکزی پیامِ بلند را
       // با «اطلاعات ارسالی معتبر نیست» جایگزین نکند (تلهٔ ۲۰۰ کاراکتر).
+      // ۲۳-۱۱: پیام «خود-تشخیص» شد — هر دو تلاش + وضعیت کوکی + سنجش زنده.
       const e = err as Error & { status?: number; redirectLoc?: string };
       const raw = String(e?.message ?? err).replace(/^pascal \S+ failed:\s*/, '');
       if (
@@ -614,73 +675,91 @@ export class PriceUpdateService {
         /^REDIRECT/.test(raw) ||
         raw.includes('HTML_RESPONSE')
       ) {
-        // سنجش زندهٔ وضعیت سشن (۲۳-۱۱): ترمیم خودکار (گرم‌کردن سشن) هم جواب
-        // نداد؛ حالا دقیق بگوییم سرور ما را مهمان می‌بیند یا مشکل جای دیگر است
+        // سنجش زندهٔ وضعیت سشن + نکته‌های کوکی + جمع‌بندی هر دو تلاش
         const authed = await pascalSessionLoggedIn();
-        const diag =
-          authed === false
-            ? 'سنجش زنده: سرور پاسکال این کوکی را «مهمان» می‌شناسد (401) — یعنی laravel_sessionِ کپی‌شده از پیش مُرده بوده است'
-            : authed === true
-              ? 'سنجش زنده: سشن لاگین است ولی اندپوینت گوشی ریدایرکت می‌کند — شاید پاسکال درخواست را از IP بک‌اند قبول نمی‌کند؛ از همان ماشینی که با آن در باسکول لاگین هستید امتحان کنید'
-              : 'سنجش زنده ناموفق بود (خطای شبکه)';
+        const hints = pascalCookieHints();
+        const parts: string[] = [...attempts];
+        parts.push(
+          `اندپوینت مرورگر: ${e?.redirectLoc ? `ریدایرکت → ${e.redirectLoc}` : raw.slice(0, 80)}`,
+        );
+        parts.push(
+          `کوکی: user_phone ${hints.hasRemember ? '✓' : '✗'}، user_password ${hints.hasRemember ? '✓' : '✗'}، laravel_session ${hints.hasSession ? '✓' : '✗'}`,
+        );
+        if (hints.decodedValuesFixed) {
+          parts.push('مقدارهای رمزگشایی‌شده (کپی از پنل Cookies) شناسایی و خودکار درصدکد شد');
+        }
+        parts.push(
+          `سنجش /api/user: ${authed === true ? 'لاگین شناخته شد' : authed === false ? 'مهمان (۴۰۱)' : 'خطای شبکه'}`,
+        );
+        if (authed === true) {
+          parts.push(
+            'سشن لاگین است ولی گوشی‌گیری ریدایرکت می‌خورد — احتمالاً پاسکول درخواست را از این IP/اثر انگشت قبول نمی‌کند؛ از همان ماشینی که لاگینیدید امتحان کنید',
+          );
+        }
         throw AppError.badRequest(
-          `کوکی پاسکال لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید. از این پس سشنِ تازه‌شده خودکار نگه داشته می‌شود و تا وقتی هر کمتر از ۲ ساعت یک بار گوشی بگیرید دیگر لازم نیست کوکی تازه کپی کنید. (${diag})`,
+          `گرفتن شماره با هیچ‌کدام از دو مکانیزم (اندپوینت قدیمی + اندپوینت مرورگر) نشد. راهِ درستِ تازه‌کردن کوکی: در باسکول F12 → Network → روی هر درخواستی کلیک کنید → در Request Headers کل مقدار cookie را کپی کنید (سه جفت: user_phone و user_password و laravel_session) → در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید. ⚠️ از پنل Application→Cookies کپی نکنید — مقدارهایش رمزگشایی‌اند (اگر کپی کرده باشید خودکار اصلاح می‌شود). جزئیات: ${parts.join('؛ ')}`,
           'BUSKOOL_COOKIE_INVALID',
         );
       }
       if (e?.status === 419) {
         throw AppError.badRequest(
-          'پاسکال ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید',
+          `پاسکول ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید (${attempts.join('؛ ')})`,
           'BUSKOOL_CSRF',
         );
       }
       if (e?.status === 401) {
-        throw AppError.badRequest('پاسکال ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE)', 'BUSKOOL_UNAUTHORIZED');
+        throw AppError.badRequest(
+          `پاسکول ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE) (${attempts.join('؛ ')})`,
+          'BUSKOOL_UNAUTHORIZED',
+        );
       }
       if (e?.status === 423) {
         throw AppError.badRequest(
-          'پاسکال نمایش این شماره را فعلاً قفل کرده (۴۲۳) — معمولاً چون همین شماره تازه گرفته شده یا سهمیهٔ نمایش پر است؛ کمی بعد دوباره تلاش کنید',
+          'پاسکول نمایش این شماره را فعلاً قفل کرده (۴۲۳) — معمولاً چون همین شماره تازه گرفته شده یا سهمیهٔ نمایش پر است؛ کمی بعد دوباره تلاش کنید',
           'BUSKOOL_LOCKED',
         );
       }
       if (e?.status === 403) {
         throw AppError.badRequest(
-          'پاسکال درخواست را بلاک کرد (۴۰۳) — کمی صبر کنید و دوباره تلاش کنید',
+          'پاسکول درخواست را بلاک کرد (۴۰۳) — کمی صبر کنید و دوباره تلاش کنید',
           'BUSKOOL_BLOCKED',
         );
       }
-      throw AppError.badRequest(`گرفتن شماره از پاسکال ناموفق بود: ${raw}`, 'BUSKOOL_PHONE_FAILED');
+      throw AppError.badRequest(
+        `گرفتن شماره از پاسکول ناموفق بود: ${raw} (${attempts.join('؛ ')})`,
+        'BUSKOOL_PHONE_FAILED',
+      );
     }
 
-    // کد فرانت خود پاسکال e.data.phone می‌خواند (chunks/1.js) — {phone}
+    // کد فرانت خود پاسکول e.data.phone می‌خواند (chunks/1.js) — {phone}
     // مستقیم هم برای اطمینان پذیرفته است
-    const raw =
-      (typeof resp?.data === 'object' && resp.data !== null ? resp.data.phone : undefined) ??
-      (typeof resp?.data === 'string' ? resp.data : undefined) ??
-      resp?.phone;
-    const phone = normalizePhone(raw);
+    const phone = normalizePhone(phoneOf(resp));
     if (!phone) {
-      throw new BadRequestException(`شماره‌ای در پاسخ پاسکال نبود — پاسخ: ${JSON.stringify(resp).slice(0, 160)}`);
+      throw new BadRequestException(
+        `شماره‌ای در پاسخ پاسکول نبود (${attempts.join('؛ ')}) — پاسخ: ${JSON.stringify(resp).slice(0, 160)}`,
+      );
     }
 
     // مصرف بودجه — فقط شمارهٔ واقعاً بیرون‌آمده
     this.phoneUse.used++;
-
-    // ذخیره روی رکورد «در انتظار ایمپورت» — best-effort؛ شکستش گرفتن شماره
-    // را خراب نمی‌کند (فرانت شماره را دارد و با همان ایمپورت را شروع می‌کند)
-    let saved = false;
-    if (input.bUserName) {
-      try {
-        const upd = await this.prisma.pendingImportUser.updateMany({
-          where: { bUserName: input.bUserName },
-          data: { phone, phoneTakenAt: new Date() },
-        });
-        saved = upd.count > 0;
-      } catch (err) {
-        this.logger.warn(`pending phone-save failed: ${(err as Error).message}`);
-      }
-    }
+    const saved = await this.savePendingPhone(input.bUserName, phone);
     return { phone, budget: this.budgetInfo(), saved };
+  }
+
+  /** ذخیرهٔ شماره روی رکورد «در انتظار ایمپورت» — best-effort؛ شکستش گرفتن
+   *  شماره را خراب نمی‌کند (فرانت شماره را دارد و با همان ایمپورت را شروع می‌کند) */
+  private async savePendingPhone(bUserName: string | undefined, phone: string): Promise<boolean> {
+    if (!bUserName) return false;
+    try {
+      const upd = await this.prisma.pendingImportUser.updateMany({
+        where: { bUserName },
+        data: { phone, phoneTakenAt: new Date() },
+      });
+      return upd.count > 0;
+    } catch (err) {
+      this.logger.warn(`pending phone-save failed: ${(err as Error).message}`);
+      return false;
+    }
   }
 
   // ═══════════════════════════ استخراج تک‌کاربر ═══════════════════════════
@@ -718,19 +797,24 @@ export class PriceUpdateService {
       };
     }
 
-    // ۲) پروفایل پاسکال — s_id (= user_info.id) برای گرفتن شماره
+    // ۲) پروفایل پاسکال — s_id (user_info.id) برای اندپوینت مرورگر و
+    // myuser_id (profile.myuser_id) برای اندپوینت قدیمی گوشی‌گیری (۲۳-۱۱)
     const bk = new PascalClient(() => false);
-    const profile = await bk.call<{ user_info?: { id: number; user_name?: string } }>('/load_profile_by_user_name', {
+    const profile = await bk.call<{
+      user_info?: { id: number; user_name?: string };
+      profile?: { myuser_id?: number } | null;
+    }>('/load_profile_by_user_name', {
       user_name: userName,
     });
     const sId = profile?.user_info?.id;
     if (!sId || !profile?.user_info?.user_name) {
       throw new BadRequestException(`کاربر پاسکال @${userName} پیدا نشد`);
     }
+    const sProfileId = profile?.profile?.myuser_id;
 
-    // ۳) نمونه‌آگهی — سنجش «چیزی برای ایمپورت دارد» (p_id دیگر برای شماره
-    // لازم نیست — اندپوینت جدید فقط user_id می‌خواهد؛ ۲۲-۱۱)
-    const list = await bk.call<{ products?: { main: { id: number } }[] }>('/get_product_list_by_user_name', {
+    // ۳) نمونه‌آگهی — سنجش «چیزی برای ایمپورت دارد» + p_id اندپوینت قدیمی
+    // گوشی‌گیری (s_id + p_id همان مکانیزم برنامهٔ قدیمی؛ ۲۳-۱۱)
+    const list = await bk.call<{ products?: { main: { id: number; myuser_id?: number } }[] }>('/get_product_list_by_user_name', {
       user_name: userName,
       status: 2,
       is_public: true,
@@ -741,12 +825,19 @@ export class PriceUpdateService {
     if (!hasProduct) {
       throw new BadRequestException(`@${userName} آگهی عمومی ندارد — چیزی برای ایمپورت نیست`);
     }
+    const samplePid = hasProduct.main.id;
+    const sampleSid = hasProduct.main.myuser_id ?? sProfileId ?? 0;
 
     // ۴) شمارهٔ موبایل (با کوکی + بودجه) — سپس فرانت startSingle را می‌زند.
     // خطای کوکی/شبکه همان‌جا پیام دقیق می‌شود؛ بودجه فقط شمارهٔ واقعی مصرف می‌کند.
     // bUserName هم پاس می‌شود تا اگر همین کاربر در لیست «در انتظار ایمپورت»
     // هست، شماره‌اش روی رکوردش ذخیره شود (سهمیه دوباره مصرف نشود).
-    const { phone, budget } = await this.fetchPhone(adminPhone, { sId, bUserName: userName });
+    const { phone, budget } = await this.fetchPhone(adminPhone, {
+      sId,
+      sProfileId: sampleSid || sProfileId,
+      pId: samplePid,
+      bUserName: userName,
+    });
     return { exists: false, phone, budget };
   }
 }

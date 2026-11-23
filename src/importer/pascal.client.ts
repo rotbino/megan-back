@@ -83,7 +83,31 @@ const COOKIE_JUNK_NAMES = new Set([
   'version',
 ]);
 
-/** پاک‌سازی رشتهٔ کوکی — جفت‌های name=value واقعی؛ حذف مشخصات Set-Cookie */
+/** نرمال‌سازی رمزگذاری «مقدار» کوکی (۲۳-۱۱ — یکی از ریشه‌های «کوکی لاگین نیست»).
+ *
+ * لاراول/سیمفونی مقدار کوکی را موقع Set-Cookie خام‌کد (rawurlencode) می‌کند —
+ * یعنی روی سیم `user_phone=eyJ…%3D%3D` دیده می‌شود؛ PHP هم موقع خواندن
+ * urldecode می‌کند و «+» خام را به فاصله تبدیل می‌کند. پس:
+ *   • کپی از «هدر درخواست» (DevTools→Network→Request Headers): مقدار از قبل
+ *     درصدکدشده است — دست‌نخورده می‌ماند (صرفاً + خامِ سرگردان هم کد می‌شود).
+ *   • کپی از «پنل Cookies» (Application→Cookies / اینپکتور): مقدار رمزگشایی‌شده
+ *     با + و = خامِ base64 است — PHP این + را فاصله می‌کند، رمزگشایی لاراول
+ *     می‌شکند و سرور ما را «مهمان» می‌بیند → ۳۰۲ به /login → خطای همیشگی
+ *     «کوکی لاگین نیست». این‌جا خودکار درصدکد می‌شود تا هر دو سبکِ کپی،
+ *     دقیقاً همان چیزی بفرستند که مرورگر می‌فرستد.
+ */
+function canonicalCookieValue(v: string): string {
+  if (!v) return v;
+  if (/%[0-9A-Fa-f]{2}/.test(v)) return v.replace(/\+/g, '%2B');
+  return v
+    .replace(/%/g, '%25')
+    .replace(/\+/g, '%2B')
+    .replace(/=/g, '%3D')
+    .replace(/;/g, '%3B');
+}
+
+/** پاک‌سازی رشتهٔ کوکی — جفت‌های name=value واقعی؛ حذف مشخصات Set-Cookie؛
+ *  رمزگذاری مقدارها نرمال می‌شود (canonicalCookieValue بالا) */
 export function sanitizePascalCookie(raw: string): string {
   return raw
     .split(';')
@@ -93,7 +117,31 @@ export function sanitizePascalCookie(raw: string): string {
       const name = pair.split('=')[0].trim().toLowerCase();
       return !COOKIE_JUNK_NAMES.has(name);
     })
+    .map((pair) => {
+      const i = pair.indexOf('=');
+      if (i <= 0) return pair;
+      return `${pair.slice(0, i).trim()}=${canonicalCookieValue(pair.slice(i + 1).trim())}`;
+    })
     .join('; ');
+}
+
+/** نکته‌های تشخیصی کوکی برای پیام‌های خطا — مقدارها هرگز لو داده نمی‌شوند.
+ *  decodedValuesFixed یعنی env مقدارهای رمزگشایی‌شده (کپی از پنل Cookies) داشت
+ *  که خودکار اصلاح شد. */
+export function pascalCookieHints(): {
+  hasRemember: boolean;
+  hasSession: boolean;
+  decodedValuesFixed: boolean;
+} {
+  const rawPairs = parsePairs((process.env.BUSKOOL_COOKIE ?? '').trim());
+  const rem = `${rawPairs.get('user_phone') ?? ''}|${rawPairs.get('user_password') ?? ''}`;
+  const decoded = /[+=]/.test(rem.replace(/%[0-9A-Fa-f]{2}/g, ''));
+  const pairs = parsePairs(currentPascalCookie());
+  return {
+    hasRemember: pairs.has('user_phone') && pairs.has('user_password'),
+    hasSession: pairs.has('laravel_session'),
+    decodedValuesFixed: decoded,
+  };
 }
 
 // ─── ظرف کوکی زنده (۲۳-۱۱ — ریشه‌یابی نهایی خطای «کوکی لاگین نیست») ─────────
@@ -578,6 +626,96 @@ export class PascalClient {
         ...(src.redirectLoc !== undefined ? { redirectLoc: src.redirectLoc } : {}),
       },
     );
+  }
+}
+
+// ─── گوشی‌گیری «برنامهٔ قدیمی» (۲۳-۱۱ — از کد buskoolServices خود مالک) ───────
+//
+// مکانیزم اثبات‌شدهٔ گرفتن شماره از «سرورِ بدون مرورگر» که سال‌ها کار کرد و
+// روزانه ۵۰۰ شماره می‌گرفت:
+//   POST /get_seller_phone_number  {s_id: <myuser_id فروشنده>,
+//                                   p_id: "<شناسهٔ آگهی>" (رشته!),
+//                                   item: "PRODUCT", client: "web"}
+// با «فقط» هدر Cookie — بدون پیش‌درخواست CSRF، بدون گرم‌کردن سشن، بدون
+// Origin/Referer. کوکی‌های یادآور (user_phone/user_password) کنار همین
+// درخواست خودشان سشن لاگین را ترمیم می‌کنند (به همین دلیل با سشنِ مُرده هم
+// روزها کار می‌کرد). تفاوت‌های حیاتی با call() عمومی:
+//   • هیچ GETای قبل از POST زده نمی‌شود — ظرف کوکی دست‌نخورده می‌ماند تا
+//     دقیقاً مثل برنامهٔ قدیمی، اولین تماسِ همین POST باشد.
+//   • Set-Cookie پاسخ «فقط در موفقیت» پذیرفته می‌شود — سشنِ مهمانِ ساخته‌شده
+//     در شکست، ظرفِ تمیز را آلوده نمی‌کند.
+
+export interface LegacyPhoneAttempt {
+  ok: boolean;
+  /** 0 = خطای شبکه */
+  status: number;
+  /** کد خطای JSON خود پاسکال (5 = کوکی نامعتبر/سهمیه، 3 = بی‌شماره) */
+  code?: number;
+  redirectLoc?: string;
+  data?: BkSellerPhoneResp;
+  error?: string;
+}
+
+/** گرفتن شمارهٔ فروشنده با اندپوینت قدیمی — عین مکانیزم برنامهٔ جداگانهٔ قبلی */
+export async function fetchSellerPhoneLegacy(sId: number, pId: number): Promise<LegacyPhoneAttempt> {
+  const cookie = currentPascalCookie();
+  if (!cookie) return { ok: false, status: 0, error: 'no-cookie' };
+  await gate.acquire();
+  try {
+    const res = await fetch(`${API}/get_seller_phone_number`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+        Accept: 'application/json, text/plain, */*',
+        Cookie: cookie,
+      },
+      body: JSON.stringify({
+        s_id: Math.floor(sId),
+        p_id: String(Math.floor(pId)),
+        item: 'PRODUCT',
+        client: 'web',
+      }),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (res.status >= 300 && res.status < 400) {
+      return { ok: false, status: res.status, redirectLoc: res.headers.get('location') ?? '' };
+    }
+    const ctype = res.headers.get('content-type') ?? '';
+    if (res.ok && ctype.includes('json')) {
+      const data = (await res.json()) as BkSellerPhoneResp & { code?: number };
+      const phoneLike =
+        data?.phone != null ||
+        (typeof data?.data === 'object' && data?.data?.phone != null) ||
+        typeof data?.data === 'string';
+      if (phoneLike || data?.status === true) {
+        // موفقیت — تمدید سشنِ لاگین را مثل مرورگر نگه دار
+        adoptSetCookie(res);
+        return { ok: true, status: res.status, data };
+      }
+      return { ok: false, status: res.status, code: data?.code, data };
+    }
+    if (res.ok) return { ok: false, status: res.status, error: 'non-json' };
+    // 4xx/5xx — بدنهٔ JSON خطا (مثل {code:5}) اگر باشد
+    let code: number | undefined;
+    let snippet = '';
+    try {
+      const txt = await res.text();
+      snippet = txt.slice(0, 120);
+      try {
+        code = (JSON.parse(txt) as { code?: number })?.code;
+      } catch {
+        /* HTML */
+      }
+    } catch {
+      /* خالی */
+    }
+    return { ok: false, status: res.status, code, error: snippet || 'http-error' };
+  } catch (err) {
+    return { ok: false, status: 0, error: (err as Error).message };
+  } finally {
+    gate.release();
   }
 }
 
