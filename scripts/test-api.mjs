@@ -56,7 +56,7 @@ async function main() {
   const profile = await post('/users/getProfile', {}, accessToken);
   const userId = profile.json?.data?.user?.id;
   const userName = profile.json?.data?.user?.user_name;
-  show('getProfile → user_name باسکول‌گونه', profile.json?.status === true && /^[a-z2-9]{8,12}$/.test(userName ?? ''), `userName=${userName}`);
+  show('getProfile → user_name پاسکال‌گونه', profile.json?.status === true && /^[a-z2-9]{8,12}$/.test(userName ?? ''), `userName=${userName}`);
 
   // ── updateProfile ──
   const upd = await post('/users/updateProfile', { first_name: 'سامی', last_name: 'جابر', sex: 'آقا', is_seller: true }, accessToken);
@@ -89,7 +89,7 @@ async function main() {
 
   // ── محصولات seed‌شده ──
   const list = await post('/products/getProductList', {});
-  show('getProductList → ۶۰ آگهی باسکول', list.json?.data?.total === 60, `total=${list.json?.data?.total}`);
+  show('getProductList → ۶۰ آگهی پاسکال', list.json?.data?.total === 60, `total=${list.json?.data?.total}`);
   const first = list.json?.data?.items?.[0];
   show('آیتم اول → ساختار DTO کامل', !!(first?.productName && first?.seller?.userName && first?.photoThumbs));
 
@@ -145,7 +145,7 @@ async function main() {
   const { writeFileSync, unlinkSync } = await import('node:fs');
   const sharp = (await import('sharp')).default;
   const testImg = '/tmp/megan-test-upload.jpg';
-  // تصویر نویزی — تصویر تک‌رنگ زیر ۲۰KB فشرده می‌شود و قاعده باسکول ردش می‌کند
+  // تصویر نویزی — تصویر تک‌رنگ زیر ۲۰KB فشرده می‌شود و قاعده پاسکال ردش می‌کند
   const noise = Buffer.alloc(900 * 700 * 3);
   for (let i = 0; i < noise.length; i += 3) {
     noise[i] = (i * 7) & 255;

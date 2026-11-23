@@ -1,6 +1,6 @@
 // تست زندهٔ «سیاست خطای رکورد» (خواستهٔ مالک ۱۵-۱۱) — موقتی، بعد از تست پاک شود.
 //
-// سناریو: کالکشن منبع موقتی با ۳ یوزرنیم جعلی (در باسکول وجود ندارند) →
+// سناریو: کالکشن منبع موقتی با ۳ یوزرنیم جعلی (در پاسکال وجود ندارند) →
 // جاب لیستی باید هر سه را «ذخیره و رد» کند و در پایان «done» شود، نه اینکه
 // بعد از ۳ شکست پیاپی متوقف شود (رفتار قدیمی). دلیل خطا هم باید روی
 // profile.bImportError رکوردهای stub ثبت شده باشد.
@@ -32,7 +32,7 @@ async function main() {
       documents: FAKES.map((userName) => ({ userName, phone: null, _note: 'tmp-import-policy-test' })),
     });
     const res = await prisma.$runCommandRaw({ count: TABLE });
-    console.log(`setup ✓ — ${TABLE}: ${res.n} سند جعلی (غیرموجود در باسکول)`);
+    console.log(`setup ✓ — ${TABLE}: ${res.n} سند جعلی (غیرموجود در پاسکال)`);
     console.log('حالا دیمن را با IMPORT_SOURCE_TABLE=' + TABLE + ' ری‌استارت کن و جاب لیستی limit=3 بزن.');
   } else if (mode === 'verify') {
     const stubs = await prisma.user.findMany({
@@ -43,7 +43,7 @@ async function main() {
     let okCount = 0;
     for (const s of stubs) {
       const err = (s.profile ?? {})?.bImportError;
-      // باسکول برای یوزرنیم ناشناس 404 می‌دهد (سنجش زنده) — هر دو امضای
+      // پاسکال برای یوزرنیم ناشناس 404 می‌دهد (سنجش زنده) — هر دو امضای
       // user-not-found و http-404 «خطای رکورد» معتبرند
       const good =
         s.failedImport === true &&

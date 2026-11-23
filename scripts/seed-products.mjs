@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * seed محصولات واقعی باسکول در MongoDB Atlas:
+ * seed محصولات واقعی پاسکال در MongoDB Atlas:
  *  • ۲۶ فروشنده واقعی (user_name/نام/احراز) → کالکشن User (شماره موبایل ساختگی یکتا)
- *  • ۶۰ آگهی واقعی → کالکشن Product (همان id عددی باسکول، فیلدهای snake_case)
- *  • عکس‌ها از CDN باسکول دانلود → پاین‌لاین sharp (اصلی ۱۶۰۰ + تامبنیل ۴۰۰)
+ *  • ۶۰ آگهی واقعی → کالکشن Product (همان id عددی پاسکال، فیلدهای snake_case)
+ *  • عکس‌ها از CDN پاسکال دانلود → پاین‌لاین sharp (اصلی ۱۶۰۰ + تامبنیل ۴۰۰)
  *    → آپلود به باکت آروان ما → ردیف File (relatedModel=Product, fieldKey=gallery)
  *  • Counter محصول روی max(id)+1000 ست می‌شود
  *
  * اجرا: node scripts/seed-products.mjs [--skip-photos]
- *   --skip-photos → عکس‌ها همان URL باسکول می‌مانند (بدون rehost)
+ *   --skip-photos → عکس‌ها همان URL پاسکال می‌مانند (بدون rehost)
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -95,7 +95,7 @@ async function fetchImage(rawUrl) {
       redirect: 'follow',
     });
     if (!res.ok) return null;
-    // CDN باسکول «binary/octet-stream» می‌فرستد — نوع واقعی را امضای بایت‌ها می‌گوید
+    // CDN پاسکال «binary/octet-stream» می‌فرستد — نوع واقعی را امضای بایت‌ها می‌گوید
     const mime = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     if (!mime.startsWith('image/') && !mime.startsWith('binary/') && !mime.startsWith('application/octet-stream')) return null;
     const buf = Buffer.from(await res.arrayBuffer());
@@ -118,7 +118,7 @@ const fakePhone = (id) => `09${String(100000000 + id).slice(-9)}`;
 
 async function main() {
   if (!existsSync(SOURCE)) {
-    console.error(`✖ فایل داده باسکول پیدا نشد: ${SOURCE}`);
+    console.error(`✖ فایل داده پاسکال پیدا نشد: ${SOURCE}`);
     process.exit(1);
   }
   const raw = JSON.parse(readFileSync(SOURCE, 'utf8'));
@@ -169,7 +169,7 @@ async function main() {
   }
   console.log(`✔ sellers: ${userUpserts} کاربر (upsert)`);
 
-  // ── ۲. محصولات (همان id باسکول) ─────────────────────────────────────────
+  // ── ۲. محصولات (همان id پاسکال) ─────────────────────────────────────────
   let productUpserts = 0;
   let maxId = 0;
   const productRows = [];
@@ -232,7 +232,7 @@ async function main() {
 
   // ── ۴. عکس‌ها → آروان + ردیف File ────────────────────────────────────────
   if (SKIP_PHOTOS) {
-    console.log('⏭ --skip-photos → عکس‌ها با URL باسکول ثبت می‌شوند (بدون rehost)');
+    console.log('⏭ --skip-photos → عکس‌ها با URL پاسکال ثبت می‌شوند (بدون rehost)');
     let fileRows = 0;
     for (const { row, photos } of productRows) {
       for (const [i, ph] of photos.slice(0, 4).entries()) {
@@ -266,7 +266,7 @@ async function main() {
     }
     console.log(`✔ files (external): ${fileRows} ردیف`);
   } else {
-    console.log('▶ rehost عکس‌ها از CDN باسکول به آروان…');
+    console.log('▶ rehost عکس‌ها از CDN پاسکال به آروان…');
     let ok = 0;
     let failed = 0;
     for (const { row, photos } of productRows) {
@@ -336,7 +336,7 @@ async function main() {
   await fixObjectIds(db);
 
   await client.close();
-  console.log('✅ seed محصولات باسکول کامل شد.');
+  console.log('✅ seed محصولات پاسکال کامل شد.');
 }
 
 /** تبدیل user_id (Product) و owner_id (File) رشته‌ای به ObjectId — idempotent */

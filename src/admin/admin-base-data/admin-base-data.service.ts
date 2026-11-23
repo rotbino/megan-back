@@ -4,9 +4,9 @@ import { CacheService } from '../../common/cache/cache.module';
 import { AppError } from '../../common/errors/app-error';
 import type { UpsertCategoryDto, UpsertLocationDto } from './dto';
 
-/** شروع id دسته‌های جدید — بالاتر از کل idهای باسکول */
+/** شروع id دسته‌های جدید — بالاتر از کل idهای پاسکال */
 const CATEGORY_COUNTER_START = 950_000;
-/** شروع id مکان‌های جدید — بالاتر از idهای باسکول */
+/** شروع id مکان‌های جدید — بالاتر از idهای پاسکال */
 const LOCATION_COUNTER_START = 500_000;
 /** حداکثر عمق درخت دسته (ریشه=۱) */
 const MAX_CATEGORY_DEPTH = 3;

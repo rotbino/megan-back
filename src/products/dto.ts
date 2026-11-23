@@ -19,7 +19,7 @@ export class GetProductListDto {
   @IsString()
   categorySlug?: string;
 
-  /** عبارت جستجو (مثل باسکول: ?s=) */
+  /** عبارت جستجو (مثل پاسکال: ?s=) */
   @IsOptional()
   @IsString()
   s?: string;
@@ -34,7 +34,7 @@ export class GetProductListDto {
   @IsInt()
   cityId?: number;
 
-  /** مرتب‌سازی — دقیقاً مثل باسکول: مرتبط‌ترین (نردبان اول) / جدیدترین؛
+  /** مرتب‌سازی — دقیقاً مثل پاسکال: مرتبط‌ترین (نردبان اول) / جدیدترین؛
    *  match = «مطابق نیاز من» (خواستهٔ مالک ۱۱-۱۱): نوع ← حجم/موجودی ←
    *  نزدیکی به شهر خریدار + بوست نردبان/ویژه — فقط با پارامترهای match* معنا دارد */
   @IsOptional()
@@ -222,7 +222,7 @@ export class CreateProductDto {
   @Type(() => ProductFeatureDto)
   features?: ProductFeatureDto[];
 
-  /** URLهای عمومی حاصل از uploadImage (حداکثر ۴ عکس مثل باسکول) */
+  /** URLهای عمومی حاصل از uploadImage (حداکثر ۴ عکس مثل پاسکال) */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -418,7 +418,7 @@ export class ReviewProductDto {
   @IsBoolean()
   approve!: boolean;
 
-  /** دلایل رد — عین جعبه باسکول (آرایه) */
+  /** دلایل رد — عین جعبه پاسکال (آرایه) */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

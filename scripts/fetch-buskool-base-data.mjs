@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * کراول داده‌های پایه از APIهای عمومی باسکول:
+ * کراول داده‌های پایه از APIهای عمومی پاسکال:
  *   - POST /get_category_list {parent_id}     → کل درخت دسته‌ها (BFS)
  *   - POST /location/get_location_info {city_id}      → همه استان‌ها (۳۱)
  *   - POST /location/get_location_info {province_id}  → شهرهای هر استان
@@ -15,7 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, 'data');
 const API = 'https://www.buskool.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-const DELAY_MS = 150; // مؤدبانه با سرور باسکول
+const DELAY_MS = 150; // مؤدبانه با سرور پاسکال
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -44,7 +44,7 @@ async function main() {
   mkdirSync(DATA_DIR, { recursive: true });
 
   // ── درخت دسته‌بندی‌ها: BFS از ریشه ──
-  console.log('▶ کراول درخت دسته‌بندی‌ها از باسکول…');
+  console.log('▶ کراول درخت دسته‌بندی‌ها از پاسکال…');
   const categories = [];
   const seen = new Set();
   let queue = [null]; // parent_id های در انتظار

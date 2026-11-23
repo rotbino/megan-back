@@ -52,7 +52,7 @@ async function login(phone) {
   check('لیست عمومی ≥۶۰', (r.json?.data?.total ?? 0) >= 60, `total=${r.json?.data?.total}`);
   check('صفحه‌بندی ۱۲تایی', r.json?.data?.items?.length === 12 && (r.json?.data?.pageCount ?? 0) >= 5);
   const first = r.json?.data?.items?.[0];
-  check('شکل کارت باسکول', !!(first?.subcategoryName && first?.requirementAmount && first?.unit && first?.city), JSON.stringify(first ?? {}).slice(0, 200));
+  check('شکل کارت پاسکال', !!(first?.subcategoryName && first?.requirementAmount && first?.unit && first?.city), JSON.stringify(first ?? {}).slice(0, 200));
 
   // جستجو
   r = await post('buy-requests/getBuyRequestList', { s: 'پسته' });

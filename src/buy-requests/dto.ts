@@ -8,7 +8,7 @@ export class CreateBuyRequestDto {
   @IsInt()
   subCategoryId!: number;
 
-  /** «نوع کالا» — آزاد مثل: پاجوش پیارم (اختیاری، مثل باسکول) */
+  /** «نوع کالا» — آزاد مثل: پاجوش پیارم (اختیاری، مثل پاسکال) */
   @IsOptional()
   @IsString()
   @Length(2, 100)
@@ -20,7 +20,7 @@ export class CreateBuyRequestDto {
   @Max(10_000_000)
   requirementAmount!: number;
 
-  /** هدف درخواست — عین فرم باسکول */
+  /** هدف درخواست — عین فرم پاسکال */
   @IsOptional()
   @IsIn(['price_and_buy', 'price_only'])
   goal?: 'price_and_buy' | 'price_only';
@@ -48,7 +48,7 @@ export class CreateBuyRequestDto {
 
 /** POST /buy-requests/getBuyRequestList — لیست عمومی (صفحه buyAd-requests) */
 export class GetBuyRequestListDto {
-  /** جستجو در نوع کالا + نام دسته (مثل باسکول) */
+  /** جستجو در نوع کالا + نام دسته (مثل پاسکال) */
   @IsOptional()
   @IsString()
   s?: string;

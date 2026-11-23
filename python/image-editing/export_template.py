@@ -32,7 +32,7 @@ b64 = {
 }
 
 src = f"""// توسط python/image-editing/export_template.py ساخته شده — دستی ویرایش نکنید.
-// تمپلیت دوتنهٔ واترمارک باسکول (خروجی build_template.py v3 از جفت طلایی).
+// تمپلیت دوتنهٔ واترمارک پاسکال (خروجی build_template.py v3 از جفت طلایی).
 // کوانتیزه: a=آلفا×255 | cB/cG/cR=رنگ | d=نقشهٔ تشخیص (−0.65..0.65).
 
 export const BUSKOOL_TEMPLATE = {{

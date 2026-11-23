@@ -16,7 +16,7 @@ const FAMILY = ['احمدی','محمدی','رضایی','حسینی','کریمی'
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 async function main() {
-  // id استان‌های پرترافیک باسکول + وزن — تهران/کرمان(پسته)/خراسان(زعفران)/...
+  // id استان‌های پرترافیک پاسکال + وزن — تهران/کرمان(پسته)/خراسان(زعفران)/...
   const provinces = await prisma.location.findMany({
     where: { parent_id: null, is_active: true },
     select: { id: true, name: true },

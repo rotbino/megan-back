@@ -18,10 +18,10 @@ import {
   UpdateMyBuyRequestDto,
 } from './dto';
 
-/** شروع id انواع کالا (Good) — بالاتر از کل idهای باسکول (~۱۰۳۵) */
+/** شروع id انواع کالا (Good) — بالاتر از کل idهای پاسکال (~۱۰۳۵) */
 const GOOD_START_ID = 900_000;
 
-const BUY_REQUEST_PAGE = 12; // عین صفحه‌بندی باسکول
+const BUY_REQUEST_PAGE = 12; // عین صفحه‌بندی پاسکال
 
 /** DTO کارت لیست عمومی — هم‌شکل تایپ BuyRequest فرانت (عین get_buyAd_list) */
 export interface BuyRequestDto {
@@ -31,7 +31,7 @@ export interface BuyRequestDto {
   subcategoryName: string;
   requirementAmount: number;
   unit: string;
-  /** ObjectId مگان (رشته) — در باسکول عدد بود؛ فقط کلید/ارجاع فرانت */
+  /** ObjectId مگان (رشته) — در پاسکال عدد بود؛ فقط کلید/ارجاع فرانت */
   myuserId: string;
   firstName: string;
   lastName: string;
@@ -92,7 +92,7 @@ interface NameMaps {
 
 /**
  * ─── درخواست‌های خرید (RFQ) — B7 ─────────────────────────────────────────────
- * ساختار عین باسکول: جمله کارت «خریدار {مقدار} {واحد} {دسته} از نوع {نوع} هستم».
+ * ساختار عین پاسکال: جمله کارت «خریدار {مقدار} {واحد} {دسته} از نوع {نوع} هستم».
  * «نوع کالا» هنگام ثبت به ردیف جدول Good تبدیل می‌شود (جداشده از درخت دسته،
  * خواسته مالک ۳۰-۱۰) — زیربنای تطبیق درخواست با فروشندگان همان نوع.
  */
@@ -118,7 +118,7 @@ export class BuyRequestsService {
     if (!sub) throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     const typeName = dto.name?.trim();
 
-    // مکان — اختیاری مثل باسکول (خریدار می‌تواند «همه ایران» بماند)
+    // مکان — اختیاری مثل پاسکال (خریدار می‌تواند «همه ایران» بماند)
     if (dto.provinceId || dto.cityId) {
       if (!dto.provinceId || !dto.cityId) {
         throw AppError.badRequest('استان و شهر را کامل انتخاب کنید.', 'CITY_REQUIRED');
@@ -165,7 +165,7 @@ export class BuyRequestsService {
   }
 
   /**
-   * نوع کالا (Good) — «نوع {دسته} خود را وارد کنید» باسکول:
+   * نوع کالا (Good) — «نوع {دسته} خود را وارد کنید» پاسکال:
    * نوع موجود (همان دسته با همین نام) بازمصرف می‌شود؛ در غیر این صورت با id
    * از Counter('good') ساخته می‌شود. جدول Category دست نمی‌خورد — نوع کالا
    * دیگر نود درخت نیست و در سایدبار دیده نمی‌شود (خواسته مالک ۳۰-۱۰).
@@ -206,7 +206,7 @@ export class BuyRequestsService {
 
   // ─── لیست عمومی ────────────────────────────────────────────────────────────
 
-  /** POST /buy-requests/getBuyRequestList — فقط confirmed (عین باسکول) */
+  /** POST /buy-requests/getBuyRequestList — فقط confirmed (عین پاسکال) */
   async getBuyRequestList(dto: GetBuyRequestListDto) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(50, Math.max(1, dto.perPage ?? BUY_REQUEST_PAGE));
@@ -250,7 +250,7 @@ export class BuyRequestsService {
     };
   }
 
-  /** POST /buy-requests/getLatestBuyRequests — سکشن صفحه اول (۴ تایی عین باسکول) */
+  /** POST /buy-requests/getLatestBuyRequests — سکشن صفحه اول (۴ تایی عین پاسکال) */
   async getLatestBuyRequests(limit = 4) {
     const rows = await this.prisma.buyRequest.findMany({
       where: { status: 'confirmed', ...(await this.activeUsers.activeUserWhere()) },
@@ -405,7 +405,7 @@ export class BuyRequestsService {
 
   /**
    * POST /buy-requests/updateMyBuyRequest — ویرایش درخواست «در انتظار تایید».
-   * فقط مالک و فقط pending (بعد از تأیید/رد، مثل باسکول قابل ویرایش نیست)؛
+   * فقط مالک و فقط pending (بعد از تأیید/رد، مثل پاسکال قابل ویرایش نیست)؛
    * تغییر «نوع کالا» → ردیف Good تازه (idempotent). مکان اختیاری است.
    */
   async updateMyBuyRequest(user: AuthUser, dto: UpdateMyBuyRequestDto) {

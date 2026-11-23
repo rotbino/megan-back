@@ -26,7 +26,7 @@ export class ImportedUsersController {
   constructor(private readonly users: ImportedUsersService) {}
 
   @Get()
-  @ApiOperation({ summary: 'فهرست کاربران — فیلتر منبع/ویژگی باسکول/ورود/تماس + سورت + صفحه‌بندی + آمار' })
+  @ApiOperation({ summary: 'فهرست کاربران — فیلتر منبع/ویژگی پاسکال/ورود/تماس + سورت + صفحه‌بندی + آمار' })
   async list(@Query() dto: ImportedUsersQueryDto) {
     return ok(await this.users.list(dto));
   }

@@ -10,7 +10,7 @@ export interface ReviewRowDto {
   rating: number;
   text: string;
   status: ReviewStatus;
-  /** userName فقط برای نویسندگان واقعی — نویسندهٔ کامنت باسکولی کاربر ایمچ
+  /** userName فقط برای نویسندگان واقعی — نویسندهٔ کامنت پاسکالی کاربر ایمچ
    *  نیست (جدول user_for_b_comment) و شناسه‌ای ندارد (خواستهٔ مالک ۱۳-۱۱) */
   author: {
     userName: string | null;
@@ -37,7 +37,7 @@ export interface SellerReviewsPage {
 }
 
 /**
- * ─── نظرات کاربران درباره فروشنده (عین «نظرات کاربران» باسکول) ─────────────
+ * ─── نظرات کاربران درباره فروشنده (عین «نظرات کاربران» پاسکال) ─────────────
  * هر کاربر حداکثر یک نظر برای هر فروشنده (upsert با unique [author, seller])؛
  * ویرایش نظر خودش آزاد است؛ نظر درباره خودش ممنوع. عمومی خواندنی است،
  * نوشتن فقط با توکن.
@@ -60,10 +60,10 @@ export class ReviewsService {
   /** POST /reviews/getSellerReviews — عمومی؛ خلاصه + صفحه‌بندی + نظر من
    *
    * ادغام دو منبع (خواستهٔ مالک ۱۳-۱۱): کامنت‌های واقعی کاربران ایمچ
-   * (SellerReview تأییدشده) «قبل از» کامنت‌های باسکولی (BComment — نویسندگان
+   * (SellerReview تأییدشده) «قبل از» کامنت‌های پاسکالی (BComment — نویسندگان
    * ساختگی user_for_b_comment) می‌آیند؛ خلاصه امتیاز/توزیع روی مجموع هر دو
    * حساب می‌شود. صفحه‌بندی پیوسته: صفحه‌های اول را نظرهای واقعی پر می‌کنند و
-   * بعد از آن‌ها کامنت‌های باسکولی ادامه می‌یابند. */
+   * بعد از آن‌ها کامنت‌های پاسکالی ادامه می‌یابند. */
   async getSellerReviews(viewerId: string | null, dto: { userName: string; page?: number; perPage?: number }): Promise<SellerReviewsPage> {
     const seller = await this.prisma.user.findUnique({
       where: { userName: dto.userName },
@@ -102,7 +102,7 @@ export class ReviewsService {
     ]);
     const total = realTotal + bTotal;
 
-    // ── صفحه‌بندی پیوسته: اول واقعی‌ها، بعد باسکولی‌ها ──
+    // ── صفحه‌بندی پیوسته: اول واقعی‌ها، بعد پاسکالی‌ها ──
     const skip = (page - 1) * perPage;
     const realTake = Math.max(0, Math.min(perPage, realTotal - skip));
     const [realRows, bRows] = await Promise.all([
@@ -129,7 +129,7 @@ export class ReviewsService {
       })(),
     ]);
 
-    // نام شهر نویسندگان واقعی (cityId عددی باسکول → نام فارسی)
+    // نام شهر نویسندگان واقعی (cityId عددی پاسکال → نام فارسی)
     const cityIds = [...new Set([...realRows, ...(myRow ? [myRow] : [])]
       .map((r) => r.author.cityId)
       .filter((x): x is number => x != null))];
@@ -222,7 +222,7 @@ export class ReviewsService {
     return this.toDto(row, cityName);
   }
 
-  /** ردیف واقعی (SellerReview) → DTO — شهر نویسنده از cityId (id عددی باسکول) */
+  /** ردیف واقعی (SellerReview) → DTO — شهر نویسنده از cityId (id عددی پاسکال) */
   private toDto(
     r: {
       id: string;
@@ -254,7 +254,7 @@ export class ReviewsService {
     };
   }
 
-  /** ردیف کامنت باسکولی (BComment + نویسندهٔ user_for_b_comment) → DTO —
+  /** ردیف کامنت پاسکالی (BComment + نویسندهٔ user_for_b_comment) → DTO —
    *  نویسندهٔ ساختگی ایمند شناسه/آواتار دارد؛ شهر به‌صورت متن آماده است */
   private toDtoB(
     b: {
@@ -269,7 +269,7 @@ export class ReviewsService {
       id: b.id,
       rating: b.rating,
       text: b.text,
-      status: 'approved', // کامنت باسکولی با متن تأییدشدهٔ خود باسکول آمده — صف بررسی ندارد
+      status: 'approved', // کامنت پاسکالی با متن تأییدشدهٔ خود پاسکال آمده — صف بررسی ندارد
       author: {
         userName: null,
         firstName: b.author.firstName,

@@ -9,7 +9,7 @@ import { UploadsModule } from '../uploads/uploads.module';
 import { CallsModule } from '../calls/calls.module';
 import { PresenceModule } from '../presence/presence.module';
 
-/** ماژول محصولات — آگهی‌های عمده‌فروشی عین باسکول (R4) */
+/** ماژول محصولات — آگهی‌های عمده‌فروشی عین پاسکال (R4) */
 @Module({
   imports: [AuthModule, CategoriesModule, LocationsModule, UploadsModule, CallsModule, PresenceModule],
   controllers: [ProductsController],

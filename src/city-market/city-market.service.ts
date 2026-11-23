@@ -119,7 +119,7 @@ export class CityMarketService {
 
         // سورت طبیعی (همان getProductList): نردبان ← ویژه ← تازه‌ترین ثبت ←
         // تازه‌ترین قیمت — «جدیدترین» = تاریخ ثبت آگهی (خواستهٔ مالک ۱۸-۱۱؛
-        // آگهی قدیمیِ ری‌پرایس‌شدهٔ باسکولی نباید بالای جدیدترین بنشیند)
+        // آگهی قدیمیِ ری‌پرایس‌شدهٔ پاسکالی نباید بالای جدیدترین بنشیند)
         const orderBy: Prisma.ProductOrderByWithRelationInput[] =
           sort === 'newest'
             ? [{ createdAt: 'desc' }, { priceUpdatedAt: 'desc' }]

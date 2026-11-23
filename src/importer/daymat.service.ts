@@ -23,7 +23,7 @@
  *   • userName ایمچ تصادفی و مستقل؛ isVerified هرگز true نمی‌شود (فقط مدارک)؛
  *   • رمز دیمت (bcrypt) قابل انتقال به scrypt نیست — خالی می‌ماند؛ کاربر با
  *     فلوی موبایل وارد می‌شود و بعداً رمز تعیین می‌کند.
- *   • شمارهٔ تکراری (قبلاً باسکولی): کاربر جدید ساخته نمی‌شود؛ کالاها به
+ *   • شمارهٔ تکراری (قبلاً پاسکالی): کاربر جدید ساخته نمی‌شود؛ کالاها به
  *     همان حساب می‌چسبد و d (دادهٔ دیمت) ثبت می‌شود.
  *
  * idempotency: کاربر = شمارهٔ تلفن یا d.daymatUserId؛ آگهی = d.daymatAdId؛
@@ -331,14 +331,14 @@ export class DaymatService {
       const ddb = client.db(daymatDbName());
       const mdb = client.db(imachDbName());
 
-      // ── فاز ۰: بک‌فیل منبع باسکول (یک‌بار؛ idempotent) ──
+      // ── فاز ۰: بک‌فیل منبع پاسکال (یک‌بار؛ idempotent) ──
       // کوئری خام: فیلتر null پریمیا با فیلدِ غایب در مونگو مطابق نمی‌شود
       // (درس اجرای اول: ۰ ردیف با updateMany پریمیا) — درایور خام مستقیم.
       const backfill = await mdb.collection('User').updateMany(
         { b_user_name: { $ne: null }, import_source: { $in: [null] } },
         { $set: { import_source: 'buskool' } },
       );
-      this.log('info', `بک‌فیل منبع: ${backfill.modifiedCount} کاربر باسکولی برچسب «buskool» گرفتند`);
+      this.log('info', `بک‌فیل منبع: ${backfill.modifiedCount} کاربر پاسکالی برچسب «buskool» گرفتند`);
 
       // ── فاز ۱: کاربران ──
       this.setPhase('users', 'کاربران دیمت');
@@ -591,7 +591,7 @@ export class DaymatService {
       });
 
       if (existing) {
-        // حساب موجود (مثلاً باسکولی) — کالاها به همین حساب می‌چسبند؛ پروفایل
+        // حساب موجود (مثلاً پاسکالی) — کالاها به همین حساب می‌چسبند؛ پروفایل
         // دیمت فقط جاهای خالی را پر می‌کند و منبعِ قبلی دست نمی‌خورد
         const profile = (existing.profile ?? {}) as Record<string, unknown>;
         await this.prisma.user.update({
@@ -789,7 +789,7 @@ export class DaymatService {
         filename: t.file.name ?? url.split('/').pop() ?? 'daymat',
         replace: isAvatar, // اسلات تک‌فایلی آواتار؛ گالری چندفایلی
         metadata: { importedFrom: 'daymat', originalUrl: url },
-        // تصاویر دیمت واترمارک باسکول ندارند — بررسی‌شده و تمیز
+        // تصاویر دیمت واترمارک پاسکال ندارند — بررسی‌شده و تمیز
         ...(t.kind === 'product' ? { watermarkOutcome: 'not_found' as const } : {}),
       });
       if (res.ok) {

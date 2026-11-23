@@ -5,7 +5,7 @@ import { AppError } from '../common/errors/app-error';
 import { detectWatermark, isStrong, removeWatermarkRgb, type WmDetection } from './buskool-wm-core';
 
 /**
- * حذف خودکار واترمارک باسکول — سرویس UI (خواستهٔ مالک ۱۹-۱۱).
+ * حذف خودکار واترمارک پاسکال — سرویس UI (خواستهٔ مالک ۱۹-۱۱).
  *
  * پورت TypeScript همان الگوریتم اثبات‌شدهٔ python/image-editing (تمپلیت
  * دوتنه از جفت طلایی) تا مستقیم روی بک‌اند ورسل اجرا شود — بدون پایتون،

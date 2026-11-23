@@ -4,7 +4,7 @@ import { IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from '
 /**
  * POST /chat/startThread — شروع/یافتن مکالمه.
  * دو مسیر: productId (گفتگو روی آگهی) یا userName (گفتگوی مستقیم از پروفایل
- * فروشنده — عین «ارسال پیام» باسکول؛ بدون آگهی زمینه).
+ * فروشنده — عین «ارسال پیام» پاسکال؛ بدون آگهی زمینه).
  */
 export class StartThreadDto {
   @IsOptional()

@@ -25,14 +25,14 @@ console.log(`محصولات کاربران ایمپورت‌شده: ${products.l
 
 const hits = products.filter((p) => {
   const t = norm(p.description);
-  return t.includes('باسکول') || t.includes('اینکوباک');
+  return t.includes('پاسکال') || t.includes('اینکوباک');
 });
-console.log(`توضیحات محصول شامل باسکول/اینکوباک: ${hits.length}`);
+console.log(`توضیحات محصول شامل پاسکال/اینکوباک: ${hits.length}`);
 for (const p of hits.slice(0, 8)) {
   console.log(`  #${p.id} «${p.productName}»: ${norm(p.description).replace(/\s+/g, ' ').slice(0, 160)}`);
 }
 
-// کامنت‌های باسکول (جدول b_comment جدید)
+// کامنت‌های پاسکال (جدول b_comment جدید)
 try {
   const res = await prisma.$runCommandRaw({ count: 'b_comment' });
   console.log(`\nاسناد b_comment: ${Number(res?.n ?? 0)}`);

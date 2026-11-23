@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * seed درخواست‌های خرید واقعی باسکول در MongoDB Atlas (B7):
- *  • خریداران واقعی (myuser_id باسکول → کاربر مگان با user_name یکتا)
- *  • ۶۰ درخواست واقعی (id باسکول، status=confirmed — همان‌هایی که در باسکول زنده‌اند)
- *  • نگاشت نام شهر → City ما (نام شهر در باسکول بدون استان؛ اولین تطبیق)
+ * seed درخواست‌های خرید واقعی پاسکال در MongoDB Atlas (B7):
+ *  • خریداران واقعی (myuser_id پاسکال → کاربر مگان با user_name یکتا)
+ *  • ۶۰ درخواست واقعی (id پاسکال، status=confirmed — همان‌هایی که در پاسکال زنده‌اند)
+ *  • نگاشت نام شهر → City ما (نام شهر در پاسکال بدون استان؛ اولین تطبیق)
  *  • Counter درخواست خرید روی max(id)+1000
  *
  * اجرا: node scripts/seed-buy-requests.mjs  (idempotent — upsert)
@@ -32,7 +32,7 @@ await client.connect();
 const db = client.db();
 
 // ── نقشه شهرها (نام → گره Location نوع شهر با استان) ─────────────────────────
-// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام باسکول در buskool_id.
+// کلید _id لوکیشن ترکیبی است («city:230»)؛ عدد خام پاسکال در buskool_id.
 const buyads = JSON.parse(readFileSync(SOURCE, 'utf8'));
 const cityNames = [...new Set(buyads.map((b) => b.city).filter(Boolean))];
 const cityRows = await db
@@ -84,7 +84,7 @@ for (const b of buyads) {
 }
 console.log(`✔ buyers: ${usersById.size} کاربر (${userUpserts} جدید)`);
 
-// ── درخواست‌ها: upsert با id باسکول ─────────────────────────────────────────
+// ── درخواست‌ها: upsert با id پاسکال ─────────────────────────────────────────
 // رکورد نرمال — فقط شناسه‌ها؛ نام‌ها هنگام خواندن با join ساخته می‌شوند
 let inserted = 0;
 for (const b of buyads) {
@@ -101,7 +101,7 @@ for (const b of buyads) {
     city_id: city?.buskool_id ?? null,
     goal: 'price_and_buy',
     has_history: false,
-    status: 'confirmed', // روی باسکول زنده است
+    status: 'confirmed', // روی پاسکال زنده است
     rejection_reason: null,
     user_id: usersById.get(b.myuser_id),
     created_at: new Date(b.created_at?.replace(' ', 'T') ?? Date.now()),
@@ -112,7 +112,7 @@ for (const b of buyads) {
 }
 console.log(`✔ buy requests: ${buyads.length} (${inserted} جدید)`);
 
-// ── Counter: شروع id های جدید بالاتر از max باسکول ─────────────────────────
+// ── Counter: شروع id های جدید بالاتر از max پاسکال ─────────────────────────
 const maxId = Math.max(...buyads.map((b) => b.id));
 await db.collection('Counter').updateOne(
   { _id: 'buy_request' },

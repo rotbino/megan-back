@@ -2,12 +2,12 @@
  * مدیریت آگهی‌های ایمپورت‌شده (خواستهٔ مالک ۱۳-۱۱) — پشت دو صفحهٔ جدید
  * «دیتا ایمپورت → آگهی‌ها» و «دیتا ایمپورت → تصاویر آگهی‌ها»:
  *
- *   • آگهی‌ها: کدام آگهی از باسکول آمده (فروشنده‌اش سند b دارد) و کدام طبیعی
+ *   • آگهی‌ها: کدام آگهی از پاسکال آمده (فروشنده‌اش سند b دارد) و کدام طبیعی
  *     ثبت شده؛ کدام فروشنده‌اش آمده لاگین کرده؛ کدام توسط خود فروشنده ویرایش
  *     شده (ProductEditHistory با action=edit)؛ وضعیت/بدون‌عکس/تعداد عکس و
- *     مهرهای زمانی دقیق باسکول — برای تسلط بر مخلوط آگهی‌های باسکولی و خودی.
+ *     مهرهای زمانی دقیق پاسکال — برای تسلط بر مخلوط آگهی‌های پاسکالی و خودی.
  *   • تصاویر آگهی‌ها: آلبوم صفحه‌به‌صفحه (۲۰تایی) از فایل‌های گالری آگهی‌ها
- *     برای یافتن واترمارک باسکول؛ تعویض بایت‌ها «درجا» (همان کلید/نام/مسیر)
+ *     برای یافتن واترمارک پاسکال؛ تعویض بایت‌ها «درجا» (همان کلید/نام/مسیر)
  *     از طریق UploadsService.replaceInPlace انجام می‌شود.
  *
  * پیاده‌سازی: aggregation خام مونگو ($runCommandRaw) — عین الگوی
@@ -42,7 +42,7 @@ export interface ImportedListingRow {
   createdAt: string;
   updatedAt: string;
   priceUpdatedAt: string | null;
-  /** منبع: فروشنده سند b دارد (باسکولی) یا ثبت‌نام خودی */
+  /** منبع: فروشنده سند b دارد (پاسکالی) یا ثبت‌نام خودی */
   source: 'buskool' | 'native';
   owner: {
     id: string;
@@ -94,7 +94,7 @@ export interface ProductImageRow {
   height: number | null;
   source: 'buskool' | 'native';
   importedFrom: string | null;
-  /** URL اصلی فایل در باسکول (قبل از rehost در آیمچ) */
+  /** URL اصلی فایل در پاسکال (قبل از rehost در آیمچ) */
   originalUrl: string | null;
   /** آخرین تعویض توسط ادمین (metadata.replacedAt) */
   replacedAt: string | null;
@@ -103,7 +103,7 @@ export interface ProductImageRow {
     name: string;
     slug: string;
     status: string;
-    /** تاریخ ثبت/آپدیت خودِ آگهی (باسکول) — معنادار برای شکار واترمارک */
+    /** تاریخ ثبت/آپدیت خودِ آگهی (پاسکال) — معنادار برای شکار واترمارک */
     createdAt: string;
     updatedAt: string;
   } | null;
@@ -115,7 +115,7 @@ export interface ProductImagesSummary {
   buskool: number;
   native: number;
   replaced: number;
-  /** باسکولی‌های هنوز تعویض‌نشده — باقی‌ماندهٔ کار پاک‌کردن واترمارک */
+  /** پاسکالی‌های هنوز تعویض‌نشده — باقی‌ماندهٔ کار پاک‌کردن واترمارک */
   buskoolRemaining: number;
 }
 
@@ -176,7 +176,7 @@ export type ProductImageGroupPhoto = Omit<ProductImageRow, 'product' | 'owner'>;
 
 /** ردیف گروهی (خواستهٔ مالک ۱۶-۱۱ عصر): هر آگهی یک کارت با «همهٔ» عکس‌هایش —
  *  چیدمان تخت قبلی هر عکس را ردیف جدا می‌داد و آگهی چندعکسه چندبار تکرار می‌شد؛
- *  حالا همهٔ عکس‌های یک آگهی کنار هم‌اند تا واترمارک باسکول روی هیچ‌کدام از قلم نیفتد */
+ *  حالا همهٔ عکس‌های یک آگهی کنار هم‌اند تا واترمارک پاسکال روی هیچ‌کدام از قلم نیفتد */
 export interface ProductImageGroupRow {
   product: NonNullable<ProductImageRow['product']>;
   owner: ProductImageRow['owner'];
@@ -504,7 +504,7 @@ export class ImportedProductsService {
     // ── سورت (خواستهٔ مالک ۱۵-۱۱): پیش‌فرض آخرین آپدیتِ آگهی، بعد ثبت آگهی ──
     // ⚠️ تاریخ‌های خودِ فایل (created_at/updated_at) همگی «زمان ایمپورت»‌اند و
     // برای شکار واترمارک بی‌معنا هستند — تاریخ‌های معنا‌دار روی خودِ آگهی‌اند
-    // (باسکول: ثبت/آپدیت). پس سورت‌های اصلی روی تاریخ آگهی‌اند.
+    // (پاسکال: ثبت/آپدیت). پس سورت‌های اصلی روی تاریخ آگهی‌اند.
     const legacy = query.sort === 'newest' || query.sort === 'oldest';
     const sortName = legacy ? 'createdAt' : (query.sort ?? 'productUpdated');
     const dir =
@@ -775,7 +775,7 @@ export class ImportedProductsService {
               name: String(product.product_name ?? ''),
               slug: String(product.slug ?? ''),
               status: String(product.status ?? ''),
-              // تاریخ‌های خودِ آگهی (باسکول) — مبنای سورت/فیلتر شکار واترمارک
+              // تاریخ‌های خودِ آگهی (پاسکال) — مبنای سورت/فیلتر شکار واترمارک
               createdAt: toIso(product.created_at) ?? '',
               updatedAt: toIso(product.updated_at) ?? '',
             }
@@ -1140,7 +1140,7 @@ export class ImportedProductsService {
    *  عنوان آگهی/فروشنده و بقیهٔ داده عمداً نیست؛ فیلتر واترمارک برای
    *  جداکردن لیست علامت‌خورده‌ها (پایهٔ کار پاک‌سازی مرحلهٔ بعد).
    *
-   *  سورت (خواستهٔ مالک ۱۹-۱۱ عصر): باسکول ۱-۲ سال پیش واترمارک اضافه
+   *  سورت (خواستهٔ مالک ۱۹-۱۱ عصر): پاسکال ۱-۲ سال پیش واترمارک اضافه
    *  کرده — تصاویر باید بر اساس تاریخ خودِ آگهی مرتب شوند تا با مقایسهٔ
    *  آگهی‌های تازه‌ثبت‌شده و ویرایش‌شده معلوم شود کدام‌ها واترمارک دارند.
    *  پیش‌فرض = زمان ثبت (productCreated)؛ گزینهٔ دوم = آخرین ویرایش

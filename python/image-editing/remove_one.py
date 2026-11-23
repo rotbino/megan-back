@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""حذف واترمارک باسکول از «یک» فایل تصویر — پل اتصال UI/بک‌اند در آینده.
+"""حذف واترمارک پاسکال از «یک» فایل تصویر — پل اتصال UI/بک‌اند در آینده.
 
 مثال:
     python3 remove_one.py photo.jpg -o photo_clean.jpg --json
@@ -37,7 +37,7 @@ def load_input(src):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="حذف واترمارک باسکول از یک فایل تصویر")
+    ap = argparse.ArgumentParser(description="حذف واترمارک پاسکال از یک فایل تصویر")
     ap.add_argument("input", help="مسیر فایل محلی یا URL")
     ap.add_argument("-o", "--output", help="مسیر خروجی (پیش‌فرض: <ورودی>_clean.jpg — برای URL اجباری است)")
     ap.add_argument("--config", help="مسیر config.json دلخواه")

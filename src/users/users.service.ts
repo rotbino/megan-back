@@ -11,7 +11,7 @@ export class UsersService {
     private readonly cache: CacheService,
   ) {}
 
-  /** نام استان/شهر از id عددی باسکول — کوئری‌های ایندکس‌دار سبک */
+  /** نام استان/شهر از id عددی پاسکال — کوئری‌های ایندکس‌دار سبک */
   private async locationNames(provinceId: number | null, cityId: number | null) {
     const [province, city] = await Promise.all([
       provinceId == null

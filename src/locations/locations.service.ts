@@ -7,8 +7,8 @@ import { ActiveUsersService } from '../common/active-users/active-users.module';
  * لوکیشن درختی واحد — یک کالکشن با type متمایز (province/city/region/…).
  *
  * کلید درخت رشتهٔ ترکیبی است: «province:4» / «city:230» — چون id های عددی
- * باسکول در دو فضای جدا هستند و برخورد دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان).
- * API ها همان id عددی خام باسکول را برمی‌گردانند تا فرانت/آگهی‌ها بدون تغییر
+ * پاسکال در دو فضای جدا هستند و برخورد دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان).
+ * API ها همان id عددی خام پاسکال را برمی‌گردانند تا فرانت/آگهی‌ها بدون تغییر
  * کار کنند؛ تبدیل فقط داخل همین سرویس است.
  */
 @Injectable()
@@ -167,7 +167,7 @@ export class LocationsService {
     return this.prisma.location.findUnique({ where: { id: key } });
   }
 
-  /** یافتن شهر با id عددی باسکول — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
+  /** یافتن شهر با id عددی پاسکال — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
   async getCityById(buskolId: number) {
     const hit = await this.prisma.location.findUnique({
       where: { id: this.key('city', buskolId) },
@@ -181,7 +181,7 @@ export class LocationsService {
     };
   }
 
-  /** یافتن استان با id عددی باسکول — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
+  /** یافتن استان با id عددی پاسکال — اعتبارسنجی فرم‌ها؛ is_active برای رد مکان غیرفعال */
   async getProvinceById(buskolId: number) {
     const hit = await this.prisma.location.findUnique({
       where: { id: this.key('province', buskolId) },

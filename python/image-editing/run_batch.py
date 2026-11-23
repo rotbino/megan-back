@@ -43,7 +43,7 @@ def save_state(path, state):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="اجرای انبوه حذف واترمارک باسکول")
+    ap = argparse.ArgumentParser(description="اجرای انبوه حذف واترمارک پاسکال")
     ap.add_argument("--limit", type=int, help="حداکثر تعداد فایل در این اجرا")
     ap.add_argument("--ids", help="فقط این شناسه‌ها (جدا با کاما)")
     ap.add_argument("--dry-run", action="store_true", help="بدون آپلود/آپدیت دیتابیس")

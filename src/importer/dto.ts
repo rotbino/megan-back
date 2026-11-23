@@ -102,12 +102,12 @@ export class ImportedUsersQueryDto {
   @IsIn(['buskool', 'native', 'stub', 'daymat', 'all'])
   source?: 'buskool' | 'native' | 'stub' | 'daymat' | 'all';
 
-  /** ویژهٔ باسکول (b.premium.isPremium) — نه اعتبار آیمچ */
+  /** ویژهٔ پاسکال (b.premium.isPremium) — نه اعتبار آیمچ */
   @IsOptional()
   @IsIn(['yes', 'no'])
   premium?: 'yes' | 'no';
 
-  /** نوع بستهٔ باسکول: 0=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله */
+  /** نوع بستهٔ پاسکال: 0=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -209,7 +209,7 @@ export class ImportedListingsQueryDto {
   @Length(1, 60)
   q?: string;
 
-  /** منبع: باسکولی (فروشنده سند b دارد) / ثبت‌نام خودی فروشنده */
+  /** منبع: پاسکالی (فروشنده سند b دارد) / ثبت‌نام خودی فروشنده */
   @IsOptional()
   @IsIn(['buskool', 'native', 'all'])
   source?: 'buskool' | 'native' | 'all';
@@ -273,7 +273,7 @@ export class ImportedListingsQueryDto {
   pageSize?: number;
 }
 
-/** GET /importer/product-images — آلبوم تصاویر آگهی‌ها (تعقیب واترمارک باسکول) */
+/** GET /importer/product-images — آلبوم تصاویر آگهی‌ها (تعقیب واترمارک پاسکال) */
 export class ProductImagesQueryDto {
   /** جستجو: نام آگهی، شناسهٔ عددی آگهی، نام/شماره/یوزرنیم فروشنده */
   @IsOptional()
@@ -386,7 +386,7 @@ export class ProductFilesQueryDto {
   @Min(1)
   productId?: number;
 
-  /** سورت (خواستهٔ مالک ۱۹-۱۱ عصر): تاریخ‌های معنادارِ خودِ آگهی (باسکول) —
+  /** سورت (خواستهٔ مالک ۱۹-۱۱ عصر): تاریخ‌های معنادارِ خودِ آگهی (پاسکال) —
    *  تاریخ‌های خودِ فایل همگی «زمان ایمپورت»‌اند و برای شکار واترمارک
    *  بی‌معنا هستند. پیش‌فرض = زمان ثبت (مالک: «پیشفرض رو بزار بر حسب زمان
    *  ثبت»)؛ productUpdated = آخرین ویرایش آگهی — برای بررسی اینکه آیا
@@ -452,7 +452,7 @@ export class ReviewFilesDto {
 
 // ═══════════════════ آپدیت قیمت‌ها + کاربران جدید (۲۱-۱۱) ═══════════════════
 
-/** POST /importer/update/scan — یک تکهٔ ۱۰۰۰تایی از جدیدترین آگهی‌های باسکول:
+/** POST /importer/update/scan — یک تکهٔ ۱۰۰۰تایی از جدیدترین آگهی‌های پاسکال:
  *  آپدیت قیمت/موجودی/حداقل‌سفارش آگهی‌های موجود + لیست کاربران تازه‌ثبت‌نامِ
  *  غایب در ایمچ. فرانت حلقهٔ بچ‌ها را می‌چرخاند (۵ث فاصله). */
 export class UpdateScanDto {
@@ -486,22 +486,22 @@ export class UpdateScanDto {
   recentDays?: number;
 }
 
-/** POST /importer/update/fetch-phone — شمارهٔ موبایل فروشندهٔ باسکول
+/** POST /importer/update/fetch-phone — شمارهٔ موبایل فروشندهٔ پاسکال
  *  (get-user-phone-number-for-the-seller با کوکی؛ هر کوکی ۲۰ شماره — ۲۲-۱۱
- *  اندپوینت همان چیزی شد که خود باسکول در مرورگر می‌زند).
+ *  اندپوینت همان چیزی شد که خود پاسکال در مرورگر می‌زند).
  *  bUserName اختیاری: داده شود شماره روی رکورد «در انتظار ایمپورت» ذخیره
  *  می‌شود (دکمهٔ «گرفتن موبایل» — خواستهٔ مالک ۲۲-۱۱). */
 export class FetchPhoneDto {
   @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
   adminPhone!: string;
 
-  /** شناسهٔ کاربر باسکول (user_info.id) */
+  /** شناسهٔ کاربر پاسکال (user_info.id) */
   @Type(() => Number)
   @IsInt()
   @Min(1)
   sId!: number;
 
-  /** شناسهٔ آگهی باسکول — اختیاری (۲۲-۱۱: اندپوینت جدید فقط user_id می‌خواهد؛
+  /** شناسهٔ آگهی پاسکال — اختیاری (۲۲-۱۱: اندپوینت جدید فقط user_id می‌خواهد؛
    *  برای سازگاری فرانتِ فعلی که هنوز می‌فرستد، پذیرفته و نادیده گرفته می‌شود) */
   @IsOptional()
   @Type(() => Number)
@@ -509,7 +509,7 @@ export class FetchPhoneDto {
   @Min(1)
   pId?: number;
 
-  /** یوزرنیم باسکول برای ذخیرهٔ شماره روی رکورد «در انتظار ایمپورت» */
+  /** یوزرنیم پاسکال برای ذخیرهٔ شماره روی رکورد «در انتظار ایمپورت» */
   @IsOptional()
   @IsString()
   @Length(2, 64)
@@ -524,7 +524,7 @@ export class PendingListDto {
   adminPhone!: string;
 }
 
-/** POST /importer/update/extract-user — پیش‌ایمپورت یک یوزرنیم باسکول:
+/** POST /importer/update/extract-user — پیش‌ایمپورت یک یوزرنیم پاسکال:
  *  چک وجود در ایمچ (bUserName) + گرفتن شماره؛ ایمپورت کامل با startSingle */
 export class ExtractUserDto {
   @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })

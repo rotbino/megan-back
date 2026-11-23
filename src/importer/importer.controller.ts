@@ -14,7 +14,7 @@ import {
 } from './dto';
 
 /**
- * ایمپورتر باسکول — ابزار داخلی ادمین برای مهاجرت داده از buskool.com.
+ * ایمپورتر پاسکال — ابزار داخلی ادمین برای مهاجرت داده از buskool.com.
  * مسیر عمومی: /api/v1/importer/* (پشت CORS_ORIGINS اپ؛ عملیات مخرب فقط
  * با adminPhone مطابق IMPORTER_ADMIN_PHONE).
  */
@@ -28,9 +28,9 @@ export class ImporterController {
   ) {}
 
   @Get('ping')
-  @ApiOperation({ summary: 'وضعیت ایمپورتر — اتصال، تاخیر باسکول، کوکی، مشغولی' })
+  @ApiOperation({ summary: 'وضعیت ایمپورتر — اتصال، تاخیر پاسکال، کوکی، مشغولی' })
   async ping() {
-    // await لازم است: ping حالا async است (سنجش لاگین سشن باسکول، ۱۵-۱۱)
+    // await لازم است: ping حالا async است (سنجش لاگین سشن پاسکال، ۱۵-۱۱)
     return ok(await this.importer.ping());
   }
 
@@ -61,7 +61,7 @@ export class ImporterController {
   @Post('migrate-b')
   @ApiOperation({
     summary:
-      'مهاجرت رکوردهای قدیمی به ساختار b — فیلدهای b_* پراکنده → سند یکپارچه + صفر شدن activePakageType کپی‌شده از باسکول',
+      'مهاجرت رکوردهای قدیمی به ساختار b — فیلدهای b_* پراکنده → سند یکپارچه + صفر شدن activePakageType کپی‌شده از پاسکال',
   })
   async migrateB(@Body() dto: MigrateBDto) {
     return ok(await this.importedUsers.migrateB(dto.adminPhone));
@@ -70,7 +70,7 @@ export class ImporterController {
   @Post('fix-identity')
   @ApiOperation({
     summary:
-      'جداسازی هویت آیمچ از باسکول (۲۰-۱۱، قابل ازسرگیری) — احراز باسکول → bVerified و isVerified همه false (جز پرونده‌های واقعاً تأییدشده)؛ یوزرنیم آیمچِ برابر با یوزرنیم باسکول → تصادفی یکتا (باسکول در bUserName می‌ماند)؛ هر فراخوانی حداکثر ?batch= نفر — تا done:true ادامه دهید',
+      'جداسازی هویت آیمچ از پاسکال (۲۰-۱۱، قابل ازسرگیری) — احراز پاسکال → bVerified و isVerified همه false (جز پرونده‌های واقعاً تأییدشده)؛ یوزرنیم آیمچِ برابر با یوزرنیم پاسکال → تصادفی یکتا (پاسکال در bUserName می‌ماند)؛ هر فراخوانی حداکثر ?batch= نفر — تا done:true ادامه دهید',
   })
   async fixIdentity(@Body() dto: MigrateBDto, @Query('batch') batch?: string) {
     return ok(await this.importedUsers.fixIdentity(dto.adminPhone, batch));

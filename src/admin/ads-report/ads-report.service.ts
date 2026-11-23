@@ -35,7 +35,7 @@ export interface AdsReportRow {
   /** مسیر تاکسونومی v2 مثل ['کشاورزی و باغبانی','حبوبات','نخود'] — null = نگاشت‌نشده */
   v2_path: string[] | null;
   v2_key: string | null;
-  /** مسیر باسکول «خشکبار ← پسته» — همیشه کنار v2 می‌ماند (دو-دسته‌بندی دائمی) */
+  /** مسیر پاسکال «خشکبار ← پسته» — همیشه کنار v2 می‌ماند (دو-دسته‌بندی دائمی) */
   buskol_path: string;
   province_name: string;
   city_name: string;
@@ -145,14 +145,14 @@ function passesAttrFilter(
 /**
  * گزارش آگهی‌ها روی تاکسونومی v2 — «صفحهٔ مهاجرت» ادمین.
  *
- * سایت عمومی همچنان روی دستهٔ باسکول است؛ این سرویس آگهی‌ها را در لحظهٔ
- * خواندن از شناسهٔ باسکول به کلید v2 می‌برد (جدول نگاشت استاتیک —
+ * سایت عمومی همچنان روی دستهٔ پاسکال است؛ این سرویس آگهی‌ها را در لحظهٔ
+ * خواندن از شناسهٔ پاسکال به کلید v2 می‌برد (جدول نگاشت استاتیک —
  * scripts/gen-taxonomy-map.ts). وقتی مالک سوییچ عمومی را اعلام کند، همین
  * جدول مبنای متریالایز فیلد روی Product خواهد شد.
  */
 @Injectable()
 export class AdsReportService {
-  /** کلید v2 → همهٔ idهای باسکول زیر همان گره (پرشده از نگاشت استاتیک) */
+  /** کلید v2 → همهٔ idهای پاسکال زیر همان گره (پرشده از نگاشت استاتیک) */
   private readonly keyToBuskolIds = new Map<string, number[]>();
   /** همهٔ idهای دارای نگاشت — برای گره 'unmapped' */
   private readonly mappedBuskolIds = new Set<number>();
@@ -164,7 +164,7 @@ export class AdsReportService {
     private readonly locations: LocationsService,
     private readonly uploads: UploadsService,
   ) {
-    // پیش‌محاسبهٔ معکوس نگاشت — کلید هر دستهٔ باسکول روی خودش و همهٔ اجدادش
+    // پیش‌محاسبهٔ معکوس نگاشت — کلید هر دستهٔ پاسکال روی خودش و همهٔ اجدادش
     for (const [bId, key] of Object.entries(BUSKOL_TO_V2)) {
       const id = Number(bId);
       this.mappedBuskolIds.add(id);
@@ -433,7 +433,7 @@ export class AdsReportService {
 
   // ─── داخلی ─────────────────────────────────────────────────────────────────
 
-  /** resolve یک دستهٔ باسکول → کلید v2 (id، بعد نام — مقاوم در برابر ایمپورت‌های تازه) */
+  /** resolve یک دستهٔ پاسکال → کلید v2 (id، بعد نام — مقاوم در برابر ایمپورت‌های تازه) */
   private resolveKey(buskolId: number, name?: string): string | null {
     return BUSKOL_TO_V2[buskolId] ?? (name ? BUSKOL_NAME_TO_V2[normalizeFa(name)] ?? null : null);
   }

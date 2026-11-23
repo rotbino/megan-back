@@ -5459,10 +5459,10 @@
     "id": 1066,
     "created_at": null,
     "updated_at": null,
-    "category_name": "باسکول",
+    "category_name": "پاسکال",
     "unit": "عدد",
     "min": 10,
-    "example": "باسکول کفی",
+    "example": "پاسکال کفی",
     "parent_id": 614,
     "score": 62
   },

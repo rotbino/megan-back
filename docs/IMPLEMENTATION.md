@@ -7,16 +7,16 @@
 
 ## ۰. اصول طلایی (هرگز عوض نمی‌شود)
 
-1. **UX، فلو و متن‌ها عین باسکول** — برند ایمچ فقط در رنگ و لعاب ظاهری متفاوت است.
+1. **UX، فلو و متن‌ها عین پاسکال** — برند ایمچ فقط در رنگ و لعاب ظاهری متفاوت است.
 2. **سرعت، SEO و کش** در درجه اول اهمیت‌اند — هم سمت سرور، هم سمت کلاینت.
 3. **کد ماژولار و ساده** — هیچ پیچیدگی خودساخته؛ هزینه توسعه‌های بعدی باید حداقل بماند.
 4. **نام‌گذاری اندپوینت‌ها خوانا و فعلی** (مثل `getUserByPhone`، `getProfile`) — نه قرارداد REST استاندارد. اکثر اندپوینت‌ها **POST** هستند.
 5. **تنها قابلیت تبلیغاتی: نردبان** (۱۰۰٬۰۰۰ تومان / ماه / محصول). عضویت VIP و «فروشنده ویژه» نداریم.
-6. ورود فقط با **موبایل + کد ۴ رقمی OTP** (مثل باسکول) — بدون رمز عبور. تا
+6. ورود فقط با **موبایل + کد ۴ رقمی OTP** (مثل پاسکال) — بدون رمز عبور. تا
    رسیدن پنل پیامک، کد ثابت **1234** از `OTP_FIXED_CODE` در `.env` صادر می‌شود؛
    با آمدن پنل، این کلید خالی می‌شود و کد تصادفی واقعی می‌رود.
 7. هر فاز: پیاده‌سازی → تست → commit → push → تیک این سند.
-8. **دیتای آگهی‌ها عین ساختار باسکول** (id عددی، فیلدهای snake_case) — دیتای باسکول مستقیم seed می‌شود.
+8. **دیتای آگهی‌ها عین ساختار پاسکال** (id عددی، فیلدهای snake_case) — دیتای پاسکال مستقیم seed می‌شود.
 9. **مدیریت فایل عین imach-back** — جدول File چندریختی + نظم ضد-سرگردان (بخش ۵).
 
 ---
@@ -38,7 +38,7 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 
 **احراز هویت:** OTP ۴ رقمی با TTL ۲ دقیقه (هش sha256؛ فعلاً کد ثابت 1234 از
 `OTP_FIXED_CODE` تا رسیدن پنل پیامک) → ساخت/یافتن کاربر (user_name عمومی
-مثل باسکول هنگام ثبت‌نام تولید می‌شود) → توکن دسترسی JWT (۷ روز) + رفرش‌توکن چرخشی
+مثل پاسکال هنگام ثبت‌نام تولید می‌شود) → توکن دسترسی JWT (۷ روز) + رفرش‌توکن چرخشی
 (۳۰ روز، هش‌شده). پاک‌سازی OTP/RefreshToken منقضی با reaper دوره‌ای (Prisma TTL ایندکس ندارد).
 
 **کش:**
@@ -85,8 +85,8 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 - bodyLimit محاسبه‌شده از MAX_FILE_SIZE؛ multipart با `parts()` (ترتیب‌مستقل).
 
 ### دیتابیس (MongoDB + Prisma)
-- نام فیلدها **snake_case عین باسکول** با `@map` — `product_name`، `min_sale_price`، `province_id`…
-- **id عددی باسکول** برای داده‌های seed: `Int @id` با مقدار صریح (پسته=44، اصفهان=4،
+- نام فیلدها **snake_case عین پاسکال** با `@map` — `product_name`، `min_sale_price`، `province_id`…
+- **id عددی پاسکال** برای داده‌های seed: `Int @id` با مقدار صریح (پسته=44، اصفهان=4،
   آگهی=284241). id محصولات جدید از جدول `Counter` با increment اتمیک (شروع ۳ میلیون).
 - User/OtpCode/RefreshToken/File با ObjectId عادی.
 - ⚠️ **درج مستقیم با درایور خام**: فیلدهای ObjectId (مثل `user_id`/`owner_id`) باید
@@ -99,7 +99,7 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 ### سرعت
 - داده‌های پایه فقط از کش تگ‌دار سرو می‌شوند (TTL ۱۰ دقیقه).
 - PrismaService با گرم‌کردن بوت (کالکشن‌های مسیر داغ).
-- لیست‌ها: همیشه projection سبک + صفحه‌بندی (payload هرگز ۲.۶MB نمی‌شود مثل باسکول).
+- لیست‌ها: همیشه projection سبک + صفحه‌بندی (payload هرگز ۲.۶MB نمی‌شود مثل پاسکال).
 - عکس‌ها: URL عمومی مستقیم از CDN آروان با `Cache-Control: immutable` — بدون پروکسی.
 - `NODE_ENV=development` → کد OTP در پاسخ `sendOtp` برمی‌گردد (`devCode`).
 
@@ -112,7 +112,7 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
    برای صفحه‌بندی نرم؛ کلید کوئری استاندارد `[module, action, params]`.
 2. **SSR / ISR** برای همه صفحات عمومی سئو-پذیر: لیست محصولات، جزئیات آگهی، پروفایل
    کسب‌وکار، درخواست‌های خرید — Server Components + `revalidate` مناسب. صفحات پنل و ورود `noindex`.
-3. **URLهای خوانا و سئوپذیر** مثل باسکول: `/product-list/category/پسته`،
+3. **URLهای خوانا و سئوپذیر** مثل پاسکال: `/product-list/category/پسته`،
    `/product-view/{slug}/{category}/{id}`، `/profile/{username}` + canonical + OG/Twitter
    + JSON-LD (Product، BreadcrumbList، WebSite+SearchAction).
 4. **next/image برای همه تصاویر** با `remotePatterns` دامنه آروان؛ تامبنیل ۴۰۰px در
@@ -122,21 +122,21 @@ reaper/replace/staging، PrismaService با کوئری گرم‌کردن بوت�
 6. **پرفورمنس**: dynamic import کامپوننت‌های سنگین (مگامنو، چت، ویزارد)، فونت محلی
    IRANSans با next/font، بدون overflow افقی در 390px، نوار پایین موبایل اپ‌گونه.
 7. **SEO فنی**: `sitemap.ts` داینامیک از دیتابیس، `robots.ts`، متادیتای یکتا، عنوان‌های
-   مطابق الگوی باسکول («خرید و قیمت {کالا} عمده | ارزان‌ترین قیمت»).
+   مطابق الگوی پاسکال («خرید و قیمت {کالا} عمده | ارزان‌ترین قیمت»).
 8. سینک جریان توسعه: ریپو → `cp` به اپ کاری → تست مرورگر → commit/push ریپو.
 
 ---
 
-## ۴. داده‌های پایه (Seed) — منبع: باسکول
+## ۴. داده‌های پایه (Seed) — منبع: پاسکال
 
-دیتای واقعی از **APIهای عمومی خود باسکول** گرفته و در مونگو Atlas اینزرت می‌شود؛
+دیتای واقعی از **APIهای عمومی خود پاسکال** گرفته و در مونگو Atlas اینزرت می‌شود؛
 اسکریپت‌ها در فولدر `scripts/` نگهداری و پوش می‌شوند:
 
 | اسکریپت | کار |
 |---|---|
 | `scripts/fetch-buskool-base-data.mjs` | کراول `POST /get_category_list` (BFS کل درخت) + `POST /location/get_location_info` → JSON خام در `scripts/data/` |
 | `scripts/seed-base-data.mjs` | آپسرت ۶۹۵ دسته + ۵۰۵ لوکیشن (۳۱ استان + ۴۷۴ شهر) در کالکشن درخت واحد `Location` با کلید ترکیبی «province:4»/«city:230» (trim نام شهرها) |
-| `scripts/seed-products.mjs` | ۲۶ فروشنده واقعی + ۶۰ آگهی واقعی (id باسکول) + **rehost عکس‌ها از CDN باسکول به باکت آروان** (پاین‌لاین sharp: اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + هدر immutable) + Counter؛ `--skip-photos` → URL باسکول می‌ماند |
+| `scripts/seed-products.mjs` | ۲۶ فروشنده واقعی + ۶۰ آگهی واقعی (id پاسکال) + **rehost عکس‌ها از CDN پاسکال به باکت آروان** (پاین‌لاین sharp: اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + هدر immutable) + Counter؛ `--skip-photos` → URL پاسکال می‌ماند |
 | `scripts/db-drop-all.mjs` | پاک‌سازی کامل (شروع تازه) |
 | `scripts/db-push.mjs` | `prisma db push` کراس‌پلتفرم (node) با override صریح DATABASE_URL |
 | `scripts/test-locations.mjs` | تست صحت درخت لوکیشن واحد (۱۰ چک: برخورد id ها، والد-فرزند، یکتایی) |
@@ -157,7 +157,7 @@ File { ownerId → User, relatedModel: "User"|"Product"|…, relatedId (رشته
 ```
 
 ⚠️ `relatedId` **رشته ساده** است (نه ObjectId) — چندریختی: id کاربر ObjectId است ولی
-id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/کوئری می‌شوند.
+id محصول عدد پاسکال؛ هر دو به شکل رشته ذخیره/کوئری می‌شوند.
 
 **نظم ضد-فایل-سرگردان (خواسته مالک — «حافظه گران را هدر نده»):**
 1. **Staging + Reaper:** آپلود قبل از وجود مدل (staged, relatedId=null) → اگر تا TTL
@@ -185,9 +185,9 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   MongoDB Atlas؛ env فیل‌fast؛ PrismaService گرم؛ کش تگ‌دار LRU؛ فیلتر خطای یکسان
   {status, message, code}؛ Throttler سراسری؛ helmet CORP؛ Swagger /docs؛ `/health`.
 - [x] **R1 — احراز هویت:** `sendOtp` (rate ۳/۱۰دقیقه، هش، TTL ۲ دقیقه، devCode) /
-  `verifyOtp` (ورود/ثبت‌نام یکجا + تولید user_name باسکول‌گونه) / `refreshToken` چرخشی /
+  `verifyOtp` (ورود/ثبت‌نام یکجا + تولید user_name پاسکال‌گونه) / `refreshToken` چرخشی /
   `logout` + reaper پاک‌سازی؛ users: `getProfile`/`updateProfile`/`getUserByPhone`.
-- [x] **R2 — داده‌های پایه:** seed ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر (id باسکول) +
+- [x] **R2 — داده‌های پایه:** seed ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر (id پاسکال) +
   `getAllCategories`/`getCategoriesByParent`/`getAllProvinces`/`getCitiesByProvince` کش‌شده.
 - [x] **R3 — ماژول files (پورت imach-back):** درایور arvan/local + پاین‌لاین sharp
   (اصلی+تامبنیل) + staging/reaper + replace + `uploadImage`/`getFileUrl`/`deleteImage` +
@@ -197,14 +197,14 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   جدیدترین، صفحه‌بندی، عکس‌ها از galleryMap) / `getProductById` (+بازدید) /
   `getRelatedProducts` / `getMyProducts` (+شمارنده تب) / `deleteMyProduct` (نرم) /
   `getSeller` / `searchSuggestions`.
-- [x] **R5 — seed محصولات باسکول:** ۲۶ فروشنده + ۶۰ آگهی واقعی + rehost عکس‌ها در آروان
+- [x] **R5 — seed محصولات پاسکال:** ۲۶ فروشنده + ۶۰ آگهی واقعی + rehost عکس‌ها در آروان
   (اصلی ۱۶۰۰ + تامبنیل ۴۰۰ + immutable) + Counter + fixer ObjectId.
 - [x] **B6 — احراز هویت اسناد:** `submitVerification` (multipart اتمیک: کارت ملی + سلفی
   در یک درخواست، جبران کامل در خطا) / `getMyVerification` / ادمین:
   `getVerificationOrders` + `reviewVerification` (تأیید → isVerified + denorm
   sellerIsVerified همه آگهی‌ها + ابطال کش؛ رد → دلیل برای کاربر) + `make-admin.mjs`.
   تست سرتاسری ۱۸/۱۸ + تست مرورگر (هر ۴ حالت UI: none/pending/approved/rejected).
-- [x] **B7 — درخواست‌های خرید (RFQ):** seed ۶۰ درخواست واقعی + ۵۳ خریدار باسکول
+- [x] **B7 — درخواست‌های خرید (RFQ):** seed ۶۰ درخواست واقعی + ۵۳ خریدار پاسکال
   (`seed-buy-requests.mjs` idempotent). `createBuyRequest` (ویزارد، «نوع کالا» → نود
   PRODUCT_TYPE با Counter ۹۰۰هزار، idempotent) / `getBuyRequestList` (جستجو contains
   + فیلتر استان + صفحه‌بندی) / `getLatestBuyRequests` / `getMyBuyRequests` (+شمارنده) /
@@ -222,10 +222,10 @@ id محصول عدد باسکول؛ هر دو به شکل رشته ذخیره/ک
   create باید readAt: null صریح بنویسد. تست ۲۵/۲۵ + مرورگر (push زنده بدون ریلود).
 - [x] **L1 — لوکیشن درختی واحد (بازطراحی مالک):** حذف دو جدول Province/City → یک
   کالکشن `Location` با `type` (province/city/region/neighborhood…) + `parentId`
-  خودارجاع. ⚠️ کشف مهم: id های عددی باسکولِ استان و شهر از دو فضای جدا هستند و
+  خودارجاع. ⚠️ کشف مهم: id های عددی پاسکالِ استان و شهر از دو فضای جدا هستند و
   برخورد دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان) → کلید یکتای درخت رشتهٔ ترکیبی
   «province:4»/«city:230» + `buskolId` عددی + `@@unique([type, buskolId])`.
-  API ها همان id عددی خام باسکول را برمی‌گردانند (فرانت و آگهی‌های موجود بدون
+  API ها همان id عددی خام پاسکال را برمی‌گردانند (فرانت و آگهی‌های موجود بدون
   تغییر). اندپوینت عمومی جدید `getLocationsByParent` (کلید والد → فرزندان) برای
   سطح‌های آینده (منطقه/محله) بدون مهاجرت. seed+drop+reseed اجرا شد؛ تست
   test-locations ۱۰/۱۰ + کل سوئیت‌های R (۳۲) B6 (۱۸) B7 (۴۴) B8 (۲۵) پاس.
@@ -334,7 +334,7 @@ curl -X POST http://localhost:4000/api/v1/products/getProductList -H 'Content-Ty
 | R2 داده‌های پایه | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | R3 ماژول files | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | R4 محصولات | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
-| R5 seed محصولات باسکول | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
+| R5 seed محصولات پاسکال | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | F1 اتصال فرانت به بک | ✅ انجام شد | ۱۴۰۵/۰۸/۰۴ |
 | B6 احراز هویت اسناد | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |
 | B7 درخواست‌های خرید + CRM | ✅ انجام شد | ۱۴۰۵/۰۸/۰۵ |

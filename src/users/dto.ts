@@ -12,7 +12,7 @@ export class UpdateProfileDto {
   @Length(1, 60)
   last_name?: string;
 
-  /** مکان پیش‌فرض کاربر — id عددی باسکول (null = پاک‌کردن) */
+  /** مکان پیش‌فرض کاربر — id عددی پاسکال (null = پاک‌کردن) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -23,7 +23,7 @@ export class UpdateProfileDto {
   @IsInt()
   city_id?: number | null;
 
-  /** «آقا» / «خانم» — مثل باسکول */
+  /** «آقا» / «خانم» — مثل پاسکال */
   @IsOptional()
   @IsString()
   @Matches(/^(آقا|خانم)$/, { message: 'جنسیت باید «آقا» یا «خانم» باشد.' })

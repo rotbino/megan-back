@@ -1,6 +1,6 @@
 # Megan (iMach) — بک‌اند مارکت‌پلیس B2B عمده‌فروشی
 
-**NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas** — آگهی‌ها عین ساختار باسکول (id عددی،
+**NestJS 12 + Fastify 5 + Prisma 6 + MongoDB Atlas** — آگهی‌ها عین ساختار پاسکال (id عددی،
 فیلدهای snake_case)، مدیریت فایل چندریختی با دکترین imach-back (staging + reaper + replace)،
 لوکیشن درختی واحد (استان/شهر/منطقه/محله در یک کالکشن با type).
 
@@ -25,10 +25,10 @@ npm run db:push
 # اگر Prisma هشدار data-loss داد (مثلاً موقع تغییر مدل‌ها) و مطمئنید داده seed است:
 #   npm run db:push -- --accept-data-loss
 
-# ۴) seed داده‌های پایه — ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر (id باسکول)
+# ۴) seed داده‌های پایه — ۶۹۵ دسته + ۳۱ استان + ۴۷۴ شهر (id پاسکال)
 npm run seed:base-data
 
-# ۵) (اختیاری) seed ۶۰ آگهی واقعی باسکول + انتقال عکس‌ها به آروان
+# ۵) (اختیاری) seed ۶۰ آگهی واقعی پاسکال + انتقال عکس‌ها به آروان
 npm run seed:products
 # فقط برای دیتابیس خالی لازم است — الان دیتای Atlas از قبل seed شده.
 
@@ -77,7 +77,7 @@ src/
   common/       env (fail-fast، فقط از .env روت) · PrismaService (گرم‌کردن بوت) · کش تگ‌دار LRU · فیلتر خطا · گاردها
   auth/         sendOtp · verifyOtp · refreshToken · logout — OTP هش‌شده + JWT + رفرش چرخشی
   users/        getProfile · updateProfile · getUserByPhone
-  categories/   getAllCategories · getCategoriesByParent — درخت باسکول (id عددی)
+  categories/   getAllCategories · getCategoriesByParent — درخت پاسکال (id عددی)
   locations/    getAllProvinces · getCitiesByProvince · getLocationsByParent — درخت لوکیشن واحد
   uploads/      uploadImage · getFileUrl · deleteImage + ادمین (عروسک/مصرف) — پورت imach-back
   products/     getProductList · getProductById · createProduct · getMyProducts · getSeller · …
@@ -87,7 +87,7 @@ src/
   wallet/       کیف پول و نردبان — شارژ کارت‌به‌کارت + نردبان ماهانه (B9)
 scripts/        seedها · db-push.mjs (کراس‌پلتفرم) · test-*.mjs (تست سرتاسری)
 docs/           IMPLEMENTATION.md — نقشه راه فاز به فاز (زنده)
-prisma/         schema.prisma — لوکیشن درختی واحد + File چندریختی + آگهی‌های باسکول
+prisma/         schema.prisma — لوکیشن درختی واحد + File چندریختی + آگهی‌های پاسکال
 ```
 
 ## قرارداد پاسخ
@@ -102,9 +102,9 @@ prisma/         schema.prisma — لوکیشن درختی واحد + File چند
 ## نکته‌های حیاتی
 
 - **لوکیشن درختی واحد:** یک کالکشن `Location` با type (province/city/region/…) — کلید
-  ترکیبی «province:4» چون id های عددی باسکول استان و شهر از دو فضای جدا هستند و برخورد
+  ترکیبی «province:4» چون id های عددی پاسکال استان و شهر از دو فضای جدا هستند و برخورد
   دارند (شهر ۴=بستان‌آباد، استان ۴=اصفهان). API همان id عددی خام را برمی‌گرداند.
-- **id عددی باسکول** برای دسته/لوکیشن/آگهی؛ id جدید محصولات از جدول `Counter`.
+- **id عددی پاسکال** برای دسته/لوکیشن/آگهی؛ id جدید محصولات از جدول `Counter`.
 - **درون‌ریزی مستقیم با درایور خام:** فیلدهای ObjectId باید ObjectId واقعی باشند نه رشته.
 - **فایل‌ها:** جدول `File` چندریختی — relatedId رشته؛ reaper فایل‌های staged منقضی را
   حذف می‌کند؛ replace اول آپلود می‌کند بعد قبلی را پاک می‌کند.

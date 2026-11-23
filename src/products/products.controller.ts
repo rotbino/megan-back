@@ -191,7 +191,7 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('deleteMyProduct')
-  @ApiOperation({ summary: 'حذف نرم آگهی (تب «حذف شده») — عین باسکول' })
+  @ApiOperation({ summary: 'حذف نرم آگهی (تب «حذف شده») — عین پاسکال' })
   async deleteMyProduct(@CurrentUser() user: AuthUser, @Body() dto: DeleteMyProductDto) {
     return ok(await this.products.deleteMyProduct(user, dto.id), 'آگهی حذف شد.');
   }

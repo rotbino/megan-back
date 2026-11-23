@@ -69,7 +69,7 @@ export interface WalletTransactionDto {
 /**
  * ─── کیف پول و نردبان (B9) ───────────────────────────────────────────────────
  *
- * کیف پول (عین پنل باسکول):
+ * کیف پول (عین پنل پاسکال):
  *  • شارژ کارت‌به‌کارت — جایگزین درگاه پرداخت: کاربر یکی از ۳ پکیج را به کارت
  *    ایمچ واریز می‌کند + تصویر فیش را می‌فرستد (ChargeOrder + فیش در جدول File
  *    با دکترین ضد-فایل-سرگردان) → ادمین تأیید/رد می‌کند → شارژ (با احتساب
@@ -108,8 +108,8 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
   private async reapExpiredLadders(): Promise<void> {
     try {
       // دستور خام، نه updateMany پریسما — @updatedAt در updateMany هم مهر «اکنون»
-      // می‌گذارد و reaper ساعتی، مهرهای دقیق باسکول آگهی‌ها را پاک می‌کرد
-      // (خواستهٔ مالک ۱۳-۱۱: مهر ثبت/آپدیت/قیمت عین باسکول بمانند).
+      // می‌گذارد و reaper ساعتی، مهرهای دقیق پاسکال آگهی‌ها را پاک می‌کرد
+      // (خواستهٔ مالک ۱۳-۱۱: مهر ثبت/آپدیت/قیمت عین پاسکال بمانند).
       const res = (await this.prisma.$runCommandRaw({
         update: 'Product',
         updates: [
@@ -141,7 +141,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
       const premiumIds = premiumUsers.map((u) => ({ $oid: u.id }));
 
       // همان دو جاروی قبلی ولی با دستور خام — updateMany پریسما @updatedAt را
-      // به «اکنون» می‌گذارد و مهرهای باسکول آگهی‌ها پاک می‌شد (خواستهٔ مالک ۱۳-۱۱)
+      // به «اکنون» می‌گذارد و مهرهای پاسکال آگهی‌ها پاک می‌شد (خواستهٔ مالک ۱۳-۱۱)
       const run = (updates: Prisma.InputJsonObject[]) =>
         this.prisma.$runCommandRaw({ update: 'Product', updates }) as unknown as Promise<{
           n?: number;
@@ -188,7 +188,7 @@ export class WalletService implements OnModuleInit, OnModuleDestroy {
     const customMin = customChargeMin(billing);
     return {
       balance: me.walletBalance,
-      /** حداقل شارژ پکیجی — برابر هزینه نردبان یک‌ماهه (عین باسکول) */
+      /** حداقل شارژ پکیجی — برابر هزینه نردبان یک‌ماهه (عین پاسکال) */
       minCharge: billing.ladder.monthlyPrice,
       ladderMonthlyPrice: billing.ladder.monthlyPrice,
       ladderMaxMonths: billing.ladder.maxMonths,

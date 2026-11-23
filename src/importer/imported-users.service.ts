@@ -2,10 +2,10 @@
  * مدیریت کاربران ایمپورت‌شده (خواستهٔ مالک ۱۳-۱۱) — پشت صفحهٔ
  * «دیتا ایمپورت → مدیریت کاربران» (بخش جدای ادمین).
  *
- * هدف: کنترل رفتار کاربران ایمپورت‌شده از باسکول در کنار سایر کاربران —
- *   • چه کسی در باسکول ویژه بوده و چه بسته‌ای خریده (b.premium) — برای
+ * هدف: کنترل رفتار کاربران ایمپورت‌شده از پاسکال در کنار سایر کاربران —
+ *   • چه کسی در پاسکال ویژه بوده و چه بسته‌ای خریده (b.premium) — برای
  *     تماس و دعوت به پرداخت؛ در آیمچ هیچ‌کس بدون پرداخت ویژه نیست.
- *   • کدام کاربر خودش ثبت‌نام کرده و کدام از باسکول آمده (bUserName).
+ *   • کدام کاربر خودش ثبت‌نام کرده و کدام از پاسکال آمده (bUserName).
  *   • چه کسی بعد از تماس/دعوت واقعاً وارد اکانتش شده و کِی (lastLoginAt
  *     در برابر b.contactedAt).
  *   • آمار کامل هر کاربر + حذف کامل کاربران بی‌activity (پس از مثلاً یک
@@ -46,13 +46,13 @@ export interface ImportedUserRow {
   role: string;
   isActive: boolean;
   isVerified: boolean;
-  /** (۲۰-۱۱) احراز هویت باسکول — دادهٔ رفتاری، بدون اعتبار در آیمچ */
+  /** (۲۰-۱۱) احراز هویت پاسکال — دادهٔ رفتاری، بدون اعتبار در آیمچ */
   bVerified: boolean;
   failedImport: boolean;
   /** دلیل آخرین شکست ایمپورت (خواستهٔ مالک ۱۵-۱۱) — از profile.bImportError؛
    *  null یعنی شکست قدیمی بدون ثبت دلیل یا ایمپورت سالم */
   importError: { message: string; sig: string; at: string } | null;
-  /** کاربر کمکی نویسندهٔ کامنت باسکول (bk-c*) — برای تفکیک آمار منبع */
+  /** کاربر کمکی نویسندهٔ کامنت پاسکال (bk-c*) — برای تفکیک آمار منبع */
   isStub: boolean;
   hasBusinessDesc: boolean;
   provinceId: number | null;
@@ -61,7 +61,7 @@ export interface ImportedUserRow {
   cityName: string | null;
   createdAt: string;
   lastLoginAt: string | null;
-  /** سند باسکول — null یعنی کاربر باسکولی نیست (یا رکورد قدیمی) */
+  /** سند پاسکال — null یعنی کاربر پاسکالی نیست (یا رکورد قدیمی) */
   b: BUserData | null;
   productsCount: number;
   /** (۱۹-۱۱) خودش با دکمهٔ «ایمپورت از وب» ایمپورت را انجام داده — ردّ پایهٔ
@@ -75,7 +75,7 @@ export interface ImportedUserRow {
 
 export interface ImportedUsersSummary {
   total: number;
-  /** ایمپورت‌شده از باسکول (bUserName پر) */
+  /** ایمپورت‌شده از پاسکال (bUserName پر) */
   buskool: number;
   /** خودشان ثبت‌نام کرده‌اند */
   native: number;
@@ -83,10 +83,10 @@ export interface ImportedUsersSummary {
   stub: number;
   /** (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت (import_source='daymat') */
   daymat: number;
-  /** ویژهٔ باسکول (b.premium.isPremium) */
+  /** ویژهٔ پاسکال (b.premium.isPremium) */
   premiumBuskool: number;
-  /** (۲۲-۱۱ — خواستهٔ مالک) تفکیک ویژه‌های باسکول بر اساس نوع بسته‌ای که
-   *  خریده‌اند (۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) — برای برآورد درآمد باسکول
+  /** (۲۲-۱۱ — خواستهٔ مالک) تفکیک ویژه‌های پاسکال بر اساس نوع بسته‌ای که
+   *  خریده‌اند (۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) — برای برآورد درآمد پاسکال
    *  در کارت‌های بالای صفحهٔ مدیریت کاربران */
   premiumPackages: { packageType: number; title: string; count: number }[];
   /** هرگز وارد نشده‌اند */
@@ -101,8 +101,8 @@ export interface ImportedUsersSummary {
   selfImported: number;
   /** رکوردهای قدیمی که هنوز سند b ندارند — دکمهٔ «مهاجرت ساختار b» */
   needsMigration: number;
-  /** (۲۰-۱۱) هنوز جداسازی هویت آیمچ/باسکول نشده — یوزرنیم آیمچ == یوزرنیم
-   *  باسکول (یا الگوی لودهندهٔ bk-f-*) — دکمهٔ «جداسازی هویت» */
+  /** (۲۰-۱۱) هنوز جداسازی هویت آیمچ/پاسکال نشده — یوزرنیم آیمچ == یوزرنیم
+   *  پاسکال (یا الگوی لودهندهٔ bk-f-*) — دکمهٔ «جداسازی هویت» */
   needsIdentityFix: number;
 }
 
@@ -222,7 +222,7 @@ export class ImportedUsersService {
       const re = { $regex: escapeRegex(q), $options: 'i' };
       filter.$or = [{ phone: re }, { user_name: re }, { first_name: re }, { last_name: re }, { b_user_name: re }];
     }
-    // منبع: باسکول (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها /
+    // منبع: پاسکال (bUserName پر) / بومی (خود ثبت‌نام کرده) / stub کامنت‌ها /
     // دیمت (تسک ۳۵ — import_source='daymat')
     if (query.source === 'buskool') filter.b_user_name = { $ne: null };
     else if (query.source === 'daymat') filter.import_source = 'daymat';
@@ -234,7 +234,7 @@ export class ImportedUsersService {
       ];
     } else if (query.source === 'stub') filter['profile.bStub'] = true;
 
-    // ویژهٔ باسکول (فقط دادهٔ رفتاری — نه اعتبار آیمچ)
+    // ویژهٔ پاسکال (فقط دادهٔ رفتاری — نه اعتبار آیمچ)
     if (query.premium === 'yes') filter['b.premium.isPremium'] = true;
     else if (query.premium === 'no') filter['b.premium.isPremium'] = { $ne: true };
     if (query.packageType !== undefined && query.packageType !== null) {
@@ -475,7 +475,7 @@ export class ImportedUsersService {
             // (تسک ۳۵ — ۲۱-۱۱) ایمپورت‌شده از دیمت
             daymat: [{ $match: { import_source: 'daymat' } }, { $count: 'n' }],
             premiumBuskool: [{ $match: { 'b.premium.isPremium': true } }, { $count: 'n' }],
-            // (۲۲-۱۱) تفکیک ویژه‌ها بر اساس نوع بسته — مبنای برآورد درآمد باسکول
+            // (۲۲-۱۱) تفکیک ویژه‌ها بر اساس نوع بسته — مبنای برآورد درآمد پاسکال
             premiumPackages: [
               { $match: { 'b.premium.isPremium': true } },
               { $group: { _id: '$b.premium.packageType', n: { $sum: 1 } } },
@@ -514,7 +514,7 @@ export class ImportedUsersService {
               { $count: 'n' },
             ],
             needsMigration: [{ $match: { b_user_name: { $ne: null }, b: null } }, { $count: 'n' }],
-            // (۲۰-۱۱) جداسازی هویت لازم دارد: یوزرنیم آیمچ == یوزرنیم باسکول،
+            // (۲۰-۱۱) جداسازی هویت لازم دارد: یوزرنیم آیمچ == یوزرنیم پاسکال،
             // یا الگوی قدیمیِ لودهندهٔ bk-f-* — پس از fix-identity صفر می‌شود
             needsIdentityFix: [
               {
@@ -620,7 +620,7 @@ export class ImportedUsersService {
         }),
         this.prisma.product.count({ where: { userId: id } }),
         this.prisma.sellerReview.count({ where: { sellerId: id } }),
-        // کامنت‌های باسکولی درباره این فروشنده — جدول b_comment (خاستهٔ مالک ۱۳-۱۱)
+        // کامنت‌های پاسکالی درباره این فروشنده — جدول b_comment (خاستهٔ مالک ۱۳-۱۱)
         this.prisma.bComment.count({ where: { sellerId: id } }),
         this.prisma.sellerReview.count({ where: { authorId: id } }),
         this.prisma.buyRequest.count({ where: { userId: id } }),
@@ -681,7 +681,7 @@ export class ImportedUsersService {
       },
       counts: {
         products: productsCount,
-        // مجموع نظرات واقعی + کامنت‌های باسکولی — همان چیزی که بازدیدکننده می‌بیند
+        // مجموع نظرات واقعی + کامنت‌های پاسکالی — همان چیزی که بازدیدکننده می‌بیند
         reviewsReceived: reviewsReceived + bCommentsReceived,
         bCommentsReceived,
         reviewsWritten,
@@ -713,7 +713,7 @@ export class ImportedUsersService {
     const b = asBUserData(user.b);
     if (!b) {
       throw new BadRequestException(
-        'این کاربر سند دادهٔ باسکولی (b) ندارد — اگر رکورد قدیمی است، اول «مهاجرت ساختار b» را اجرا کنید',
+        'این کاربر سند دادهٔ پاسکالی (b) ندارد — اگر رکورد قدیمی است، اول «مهاجرت ساختار b» را اجرا کنید',
       );
     }
     b.contactedAt = undo ? null : new Date().toISOString();
@@ -726,8 +726,8 @@ export class ImportedUsersService {
   /**
    * رکوردهای ایمپورت‌شدهٔ قبل از فیلد b را به ساختار جدید می‌برد:
    *   • فیلدهای b_* پراکنده در profile → سند یکپارچهٔ b
-   *   • activePakageType (که قدیماً از باسکول کپی می‌شد!) → b.premium و
-   *     سپس صفر — کاربر در آیمچ دیگر به‌خاطر باسکول ویژه نیست (خواستهٔ مالک).
+   *   • activePakageType (که قدیماً از پاسکال کپی می‌شد!) → b.premium و
+   *     سپس صفر — کاربر در آیمچ دیگر به‌خاطر پاسکال ویژه نیست (خواستهٔ مالک).
    * idempotent است: رکوردهای دارای b رد می‌شوند.
    */
   async migrateB(adminPhone: string) {
@@ -759,7 +759,7 @@ export class ImportedUsersService {
     let premiumFixed = 0;
     for (const u of legacyUsers) {
       const pj = (u.profile ?? {}) as Record<string, unknown>;
-      const packageType = u.activePakageType ?? 0; // قدیماً مقدار باسکول اینجا کپی می‌شد
+      const packageType = u.activePakageType ?? 0; // قدیماً مقدار پاسکال اینجا کپی می‌شد
       const [prov, city] = await Promise.all([
         u.provinceId
           ? this.prisma.location.findFirst({
@@ -841,21 +841,21 @@ export class ImportedUsersService {
     return { migrated, premiumFixed, skipped: legacyUsers.length === 0 ? 0 : 0 };
   }
 
-  // ═══════════════════════════ جداسازی هویت آیمچ/باسکول ═══════════════════════════
+  // ═══════════════════════════ جداسازی هویت آیمچ/پاسکال ═══════════════════════════
 
   /**
    * مهاجرت جداسازی هویت (خواستهٔ مالک ۲۰-۱۱) — **قابل ازسرگیری**:
    *
    *   ۱) احراز هویت — isVerifiedِ همه false می‌شود (هیچ کاربری واقعاً در آیمچ
-   *      احراز نشده؛ مقدار فعلی از باسکول کپی شده بود). مقدار باسکول در
+   *      احراز نشده؛ مقدار فعلی از پاسکال کپی شده بود). مقدار پاسکال در
    *      bVerified (b_verified) نگه داشته می‌شود: isVerified قدیمی یا b.isVerified.
    *      استثنا: کاربرانی که پروندهٔ احراز تأییدشده دارند (VerificationOrder
    *      approved) — احراز واقعی‌اند و true می‌مانند.
    *
-   *   ۲) یوزرنیم — برای هر کاربری که یوزرنیم آیمچش با یوزرنیم باسکولش یکی
+   *   ۲) یوزرنیم — برای هر کاربری که یوزرنیم آیمچش با یوزرنیم پاسکالش یکی
    *      است (یا الگوی قدیمی bk-f-* / bk-c-* دارد)، یوزرنیم آیمچ تصادفی و
-   *      یکتا ساخته می‌شود (مستقل از باسکول). یوزرنیم باسکول در bUserName
-   *      هست و دست نمی‌خورد — کلید ایمپورت/آپدیت قیمت‌های بعدی باسکول.
+   *      یکتا ساخته می‌شود (مستقل از پاسکال). یوزرنیم پاسکال در bUserName
+   *      هست و دست نمی‌خورد — کلید ایمپورت/آپدیت قیمت‌های بعدی پاسکال.
    *      ردپای تحلیل (ActivityLog.catalogUserName) هم با نام جدید هماهنگ می‌شود.
    *
    * سقف تابع سرورلس ورسل ۶۰ ثانیه است — هر فراخوانی حداکثر `batch` (پیش‌فرض
@@ -883,7 +883,7 @@ export class ImportedUsersService {
     };
 
     // ── ۱) احراز هویت (فقط در نخستین فراخوانی کار واقعی دارد؛ بعدی‌ها no-op) ──
-    // الف) b_verified برای کاربران باسکولی: از is_verified قدیمی یا b.isVerified
+    // الف) b_verified برای کاربران پاسکالی: از is_verified قدیمی یا b.isVerified
     const setBFromVerified = await this.prisma.$runCommandRaw({
       update: 'User',
       updates: [
@@ -948,7 +948,7 @@ export class ImportedUsersService {
         const id = toId(d._id);
         const oldName = String(d.user_name ?? '');
         const bName = (d.b_user_name as string | null) ?? null;
-        // نام تصادفی مستقل — یکتا در همین دسته + غیربرابر با یوزرنیم باسکول
+        // نام تصادفی مستقل — یکتا در همین دسته + غیربرابر با یوزرنیم پاسکال
         // خود کاربر (فضای ۳۳^۸؛ برخورد با بقیهٔ دیتابیس را ایندکس یونیک می‌گیرد)
         let next = generateUserName();
         while (used.has(next) || next === bName || next === oldName) next = generateUserName();

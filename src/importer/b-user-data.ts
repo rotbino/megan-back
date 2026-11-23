@@ -1,19 +1,19 @@
 /**
- * ساختار فیلد `b` روی مدل User — «سند رفتار کاربر در باسکول» (خواستهٔ مالک ۱۳-۱۱).
+ * ساختار فیلد `b` روی مدل User — «سند رفتار کاربر در پاسکال» (خواستهٔ مالک ۱۳-۱۱).
  *
- * همهٔ داده‌های مختص باسکول که برای بازاریابی/تحلیل لازم است در همین یک
+ * همهٔ داده‌های مختص پاسکال که برای بازاریابی/تحلیل لازم است در همین یک
  * فیلد JSON نگه داشته می‌شود (به‌جای پخش‌کردن فیلدهای b_* در جای‌جای مدل).
  * دو مصرف‌کننده دارد:
  *   • ImporterService — هنگام ایمپورت می‌سازدش
  *   • ImportedUsersService — صفحهٔ «مدیریت کاربران ایمپورت‌شده» فیلتر/سورت/CRM
  *
- * ⚠️ قاعدهٔ طلایی (خواستهٔ مالک): ویژه بودنِ باسکول هرگز به activePakageType
+ * ⚠️ قاعدهٔ طلایی (خواستهٔ مالک): ویژه بودنِ پاسکال هرگز به activePakageType
  * آیمچ کپی نمی‌شود — کاربر فقط با پرداخت واقعی در آیمچ ویژه می‌شود. b.premium
- * فقط برای شناسایی «ویژه‌های سابق باسکول» است تا بعداً با تماس و پیشنهاد
+ * فقط برای شناسایی «ویژه‌های سابق پاسکال» است تا بعداً با تماس و پیشنهاد
  * تخفیف، خودشان پکیج بخرند.
  */
 
-/** عنوان فارسی بستهٔ باسکول از کد (۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) */
+/** عنوان فارسی بستهٔ پاسکال از کد (۰=رایگان ۱=دوماهه ۲=شش‌ماهه ۳=یک‌ساله) */
 export function bkPackageTitle(type: number): string {
   const titles: Record<number, string> = { 0: 'رایگان', 1: 'دوماهه', 2: 'شش‌ماهه', 3: 'یک‌ساله' };
   return titles[type] ?? `نوع ${type}`;
@@ -22,39 +22,39 @@ export function bkPackageTitle(type: number): string {
 export interface BUserData {
   /** منبع داده — پس از ایمپورترهای آیندهٔ سایت‌های دیگر هم همین فیلد کلید تشخیص است */
   source: 'buskool';
-  /** یوزرنیم باسکول (همان bUserName) */
+  /** یوزرنیم پاسکال (همان bUserName) */
   userName: string;
-  /** id عددی باسکول (myuser_id) */
+  /** id عددی پاسکال (myuser_id) */
   userId: number;
-  /** id سند myuser_profiles باسکول */
+  /** id سند myuser_profiles پاسکال */
   profileId: number | null;
 
-  // ── ویژه بودن در باسکول — فقط دادهٔ رفتاری، نه اعتبار در آیمچ ──
+  // ── ویژه بودن در پاسکال — فقط دادهٔ رفتاری، نه اعتبار در آیمچ ──
   premium: {
     isPremium: boolean;
-    /** active_pakage_type خام باسکول */
+    /** active_pakage_type خام پاسکال */
     packageType: number;
     /** عنوان فارسی بسته */
     packageTitle: string;
   };
 
-  // ── وضعیت و رفتار کاربر در باسکول ──
+  // ── وضعیت و رفتار کاربر در پاسکال ──
   isVerified: boolean;
   isBuyer: boolean;
   isSeller: boolean;
   isBlocked: boolean;
-  /** موجودی کیف پول باسکول (تومان) */
+  /** موجودی کیف پول پاسکال (تومان) */
   walletBalance: number;
-  /** مجوز نمایش شماره در باسکول (مثل «1111») */
+  /** مجوز نمایش شماره در پاسکال (مثل «1111») */
   phoneViewPermission: string | null;
   categoryId: number | null;
-  /** بیت‌مپ وضعیت مشتری باسکول */
+  /** بیت‌مپ وضعیت مشتری پاسکال */
   customerStatus: string | null;
-  /** بیت‌مپ وضعیت پشتیبانی باسکول */
+  /** بیت‌مپ وضعیت پشتیبانی پاسکال */
   supportStatus: string | null;
-  /** کاربر از کجا به باسکول آمده (utm-like باسکول) */
+  /** کاربر از کجا به پاسکال آمده (utm-like پاسکال) */
   comingFrom: string | null;
-  /** نوع فعالیت باسکول (رشتهٔ عددی: تولیدی/بازرگانی/…) */
+  /** نوع فعالیت پاسکال (رشتهٔ عددی: تولیدی/بازرگانی/…) */
   activityType: string | null;
   /** دامنهٔ فعالیت به نام — مثل «تنقلات و شیرینی» */
   activityDomain: string | null;
@@ -62,35 +62,35 @@ export interface BUserData {
   province: string | null;
   city: string | null;
 
-  // ── کسب‌وکار (myuser_profiles باسکول) ──
+  // ── کسب‌وکار (myuser_profiles پاسکال) ──
   address: string | null;
   postalCode: string | null;
   isCompany: boolean;
   companyName: string;
   companyRegisterCode: string | null;
   confirmed: boolean;
-  /** URL عکس‌های مرتبط باسکول (related-photos آروان) — از ۱۴-۱۱ هنگام
+  /** URL عکس‌های مرتبط پاسکال (related-photos آروان) — از ۱۴-۱۱ هنگام
    *  ایمپورت در گالری کسب‌وکار کاربر هم rehost می‌شوند (اسلات استاندارد
    *  gallery روی User)؛ این آرایه منبع بازآوری کاربران قدیمی است */
   relateds: string[];
-  /** URL اصلی عکس پروفایل در باسکول (پیش از rehost در آیمچ) */
+  /** URL اصلی عکس پروفایل در پاسکال (پیش از rehost در آیمچ) */
   profilePhotoUrl: string | null;
-  /** متن خام description باسکول — فقط برای متن «خودِ کاربر»؛ متن خودکار آرشیو نمی‌شود */
+  /** متن خام description پاسکال — فقط برای متن «خودِ کاربر»؛ متن خودکار آرشیو نمی‌شود */
   descriptionRaw: string | null;
-  /** آیا متن خودکار باسکول/اینکوباک بود (دو قالب «… در بازار بزرگ …» / «… در سامانه ی … هستم»)؟ → در businessDesc ننشست */
+  /** آیا متن خودکار پاسکال/اینکوباک بود (دو قالب «… در بازار بزرگ …» / «… در سامانه ی … هستم»)؟ → در businessDesc ننشست */
   descriptionIsAuto: boolean;
 
-  // ── آمار باسکول (get_user_statistics) ──
+  // ── آمار پاسکال (get_user_statistics) ──
   responseRate: number | null;
   reputationScore: string | null;
   productsCount: number | null;
   ratingCount: number | null;
   ratingAvg: number | null;
-  /** نشان ibp باسکول */
+  /** نشان ibp پاسکال */
   ibp: boolean;
 
   // ── زمان‌ها ──
-  /** ثبت‌نام در باسکول (ISO) */
+  /** ثبت‌نام در پاسکال (ISO) */
   createdAt: string | null;
   /** اولین ایمپورت موفق به آیمچ (ISO) — در ایمپورت مجدد حفظ می‌شود */
   importedAt: string;

@@ -59,7 +59,7 @@ console.log('\n۲۰ گره پرحجم:');
 for (const [k, v] of [...perNode.entries()].filter(([k]) => k.includes('.')).sort((a, b) => b[1] - a[1]).slice(0, 20))
   console.log(`  ${k.padEnd(28)} ${String(v).padStart(6)}`);
 if (unmapped.length) {
-  console.log('\nنگاشت‌نشده‌ها (id / نام باسکول / تعداد):');
+  console.log('\nنگاشت‌نشده‌ها (id / نام پاسکال / تعداد):');
   for (const [id, name, n] of unmapped.sort((a, b) => b[2] - a[2]).slice(0, 15)) console.log(`  ${id} / ${name} / ${n}`);
 }
 

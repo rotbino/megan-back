@@ -58,7 +58,7 @@ import { CatalogV2Module } from './catalog-v2/catalog-v2.module';
     CityMarketModule, // بازار عمدهٔ شهری — اندپوینت مستقل چندشهری (۹-۱۱)
     VerificationModule,
     BuyRequestsModule,
-    FollowModule, // پیگیری‌ها — CRM کوچک (جایگزین نشان‌شده‌های باسکول)
+    FollowModule, // پیگیری‌ها — CRM کوچک (جایگزین نشان‌شده‌های پاسکال)
     ChatModule,
     PresenceModule,
     ReviewsModule,
@@ -77,7 +77,7 @@ import { CatalogV2Module } from './catalog-v2/catalog-v2.module';
     BuyerBookModule, // دفتر خرید — صفحهٔ عمومی خریدار /b/{bookId} + ذخیرهٔ فروشنده‌ها (۱۰-۱۱ دور ۵)
     TasksModule, // تسک‌های کاربر — کارهای مهم مانده برای زنگولهٔ اعلان (۱۱-۱۱ دور ۴)
     ServiceSignupsModule, // ثبت‌نام سرویس‌های تخصصی — ریتو/همخرید از /services (۱۱-۱۲)
-    ImporterModule, // ایمپورتر باسکول — ابزار داخلی ادمین /api/v1/importer (۱۳-۱۱)
+    ImporterModule, // ایمپورتر پاسکال — ابزار داخلی ادمین /api/v1/importer (۱۳-۱۱)
     AdminModule, // پنل ادمین — کد کاملاً جدا در src/admin/
     CatalogV2Module, // کاتالوگ عمومی v2 — صفحهٔ /product-filter (مهاجرت موازی ۱۶-۱۱)
   ],

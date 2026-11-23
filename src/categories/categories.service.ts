@@ -26,7 +26,7 @@ export class CategoriesService {
   async getAllCategories(): Promise<CategoryNode[]> {
     return this.cache.wrap(
       'categories:tree',
-      // یک ساعت — درخت باسکول ۶۹۵تایی تقریباً هرگز عوض نمی‌شود؛ خواندن سرد
+      // یک ساعت — درخت پاسکال ۶۹۵تایی تقریباً هرگز عوض نمی‌شود؛ خواندن سرد
       // روی Atlas ~۷ بچ getMore می‌خورد (~۰.۹ ثانیه) و نباید به کاربر برسد.
       // بوت درخت را گرم می‌کند (main.ts) و تغییر واقعی تگ categories را می‌بزد.
       { ttlMs: 60 * TTL.MINUTE, tags: ['base', 'categories'] },

@@ -1,14 +1,14 @@
 /**
- * آپدیت قیمت‌ها + شناسایی کاربران جدید باسکول (۲۱-۱۱، خواستهٔ مالک — «یک تیر
+ * آپدیت قیمت‌ها + شناسایی کاربران جدید پاسکال (۲۱-۱۱، خواستهٔ مالک — «یک تیر
  * برای دو نشان»؛ نوسازی ۲۲-۱۱: کاربران جدید «در دیتابیس» ثبت می‌شوند).
  *
- * هر فراخوانی «اسکن» یک تکهٔ ۱۰۰۰تایی از لیست عمومی جدیدترین آگهی‌های باسکول
+ * هر فراخوانی «اسکن» یک تکهٔ ۱۰۰۰تایی از لیست عمومی جدیدترین آگهی‌های پاسکال
  * را می‌گیرد و از همان دو کار را می‌کند:
  *   ۱) آپدیت قیمت/موجودی/حداقل‌سفارش آگهی‌های موجود در ایمچ — id عددی آگهی
- *      ایمپورت‌شده همان id باسکول است؛ فقط ردیف‌های «واقعاً متفاوت» آپدیت
+ *      ایمپورت‌شده همان id پاسکال است؛ فقط ردیف‌های «واقعاً متفاوت» آپدیت
  *      می‌شوند (یک select سبک + مقایسه در حافظه + یک دستور update خام —
  *      نه select/save تک‌تکی؛ خواستهٔ مالک: منابع کم، سرعت بالا).
- *   ۲) شناسایی کاربران تازه‌ثبت‌نام باسکول که هنوز در ایمچ نیستند —
+ *   ۲) شناسایی کاربران تازه‌ثبت‌نام پاسکال که هنوز در ایمچ نیستند —
  *      user_info هر آیتم یونیک می‌شود، با bUserName جدول یوزر تطبیق داده
  *      می‌شود و غایب‌ها «همان‌جا در جدول PendingImportUser ثبت می‌شوند»
  *      (خواستهٔ مالک ۲۲-۱۱: یک بار که پیدا شدیم دیگر توی دیتابیس داریمش —
@@ -16,14 +16,14 @@
  *      خوانده می‌شود و بین جلسه‌ها/ریفرش‌ها می‌ماند؛ با ایمپورت کامل، رکورد
  *      حذف و کاربر از لیست خارج می‌شود.
  *
- * ادب شبکه (خواستهٔ مالک — «باسکول تشخیص ندهد ماشین هست و بلاکمون نکند»):
- *   • لیست جدیدترین‌ها «بدون کوکی» گرفته می‌شود — با کوکی، باسکول نتیجه را با
+ * ادب شبکه (خواستهٔ مالک — «پاسکال تشخیص ندهد ماشین هست و بلاکمون نکند»):
+ *   • لیست جدیدترین‌ها «بدون کوکی» گرفته می‌شود — با کوکی، پاسکال نتیجه را با
  *     فعالیت/جستجوی صاحب کوکی هماهنگ می‌کند و آخرین آگهی‌های واقعی نمی‌آید.
  *   • بین دو اسکنِ متوالی حداقل ۵ ثانیه فاصله — فرانت شمارش معکوس را نشان
  *     می‌دهد؛ همین گارد سمت سرور هم هست تا دابل‌کلیک/دو تب نتواند فاصله را
  *     بشکند (وضعیت ماژول-سطح؛ در سرورلس روی نمونهٔ گرم همان پروسه).
  *
- * شمارهٔ موبایل فروشنده (/get_seller_phone_number): کوکی می‌خواهد و باسکول به
+ * شمارهٔ موبایل فروشنده (/get_seller_phone_number): کوکی می‌خواهد و پاسکال به
  * هر کوکی فقط ۲۰ شماره می‌دهد (خواستهٔ مالک) — بودجهٔ مصرفی ماژول-سطح، با
  * عوض‌شدن کوکی صفر می‌شود؛ پاسخِ {phone} یا {data:{phone}} هر دو پذیرفته است.
  * دکمهٔ «گرفتن موبایل» شماره را روی رکورد PendingImportUser ذخیره می‌کند
@@ -55,14 +55,14 @@ const NEW_USERS_CAP = 300;
 /** سقف آگهی‌های قابل آپدیت در یک اسکن (هر بچ ۱۰۰۰تایی) */
 const BATCH_MAX = 1_000;
 
-/** تاریخ باسکول «YYYY-MM-DD HH:mm:ss» → Date؛ نامعتبر → null */
+/** تاریخ پاسکال «YYYY-MM-DD HH:mm:ss» → Date؛ نامعتبر → null */
 function bkDate(s: string | null | undefined): Date | null {
   if (!s) return null;
   const d = new Date(s.trim().replace(' ', 'T'));
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** عدد امن از پاسخ باسکول (ممکن است رشته/غیرواقعی باشد) */
+/** عدد امن از پاسخ پاسکال (ممکن است رشته/غیرواقعی باشد) */
 function toCount(v: unknown, fallback = 0): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
@@ -71,7 +71,7 @@ function toCount(v: unknown, fallback = 0): number {
 /** Int32 صریح برای دستور خام — عدد لخت در EJSON double می‌شود */
 const int32 = (n: number) => ({ $numberInt: String(Math.floor(n)) });
 
-/** نرمال‌سازی شمارهٔ موبایل باسکول → ۰۹xxxxxxxxx؛ ناقص → null */
+/** نرمال‌سازی شمارهٔ موبایل پاسکال → ۰۹xxxxxxxxx؛ ناقص → null */
 function normalizePhone(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   // ارقام فارسی/عربی → لاتین
@@ -84,13 +84,13 @@ function normalizePhone(raw: unknown): string | null {
   return /^0\d{10}$/.test(s) ? s : null;
 }
 
-/** کاربر باسکولِ دیده‌شده در یک اسکن — غایب در ایمچ و تازه‌ثبت‌نام */
+/** کاربر پاسکالِ دیده‌شده در یک اسکن — غایب در ایمچ و تازه‌ثبت‌نام */
 export interface ScanNewUser {
   bUserId: number;
   bUserName: string;
   firstName: string;
   lastName: string;
-  /** تاریخ ثبت‌نام در باسکول (ISO) */
+  /** تاریخ ثبت‌نام در پاسکال (ISO) */
   createdAt: string | null;
   isVerified: boolean;
   activePakageType: number;
@@ -129,9 +129,9 @@ export interface PendingImportUserRow {
 export interface ScanResult {
   from: number;
   to: number;
-  /** آیتم‌های خام پاسخ باسکول */
+  /** آیتم‌های خام پاسخ پاسکال */
   fetched: number;
-  /** بعد از حذف رد/حذف‌شده‌های باسکول */
+  /** بعد از حذف رد/حذف‌شده‌های پاسکال */
   kept: number;
   /** آگهی‌هایی که در ایمچ پیدا شدند */
   inImach: number;
@@ -139,7 +139,7 @@ export interface ScanResult {
   updated: number;
   /** در ایمچ بودند ولی هیچ تغییری نداشتند */
   unchanged: number;
-  /** در ایمچ نبودند (آگهی جدید باسکول) */
+  /** در ایمچ نبودند (آگهی جدید پاسکال) */
   notInImach: number;
   /** کاربران یونیک دیده‌شده در این بچ */
   usersSeen: number;
@@ -163,7 +163,7 @@ export interface PhoneBudgetInfo {
 export class PriceUpdateService {
   private readonly logger = new Logger(PriceUpdateService.name);
 
-  /** گارد ۵ ثانیه بین اسکن‌ها — آخرین باری که «لیست» از باسکول گرفته شد */
+  /** گارد ۵ ثانیه بین اسکن‌ها — آخرین باری که «لیست» از پاسکال گرفته شد */
   private lastScanAt = 0;
 
   /** بودجهٔ شماره‌های موبایل هر کوکی — با عوض‌شدن BUSKOOL_COOKIE صفر می‌شود */
@@ -187,7 +187,7 @@ export class PriceUpdateService {
   // ═══════════════════════════ اسکن: آپدیت + شناسایی ═══════════════════════════
 
   /**
-   * یک تکه از لیست جدیدترین آگهی‌های باسکول (بدون کوکی، sort_by=RD):
+   * یک تکه از لیست جدیدترین آگهی‌های پاسکال (بدون کوکی، sort_by=RD):
    * قیمت آگهی‌های موجود را تازه می‌کند و کاربران غایبِ تازه‌ثبت‌نام را
    * برمی‌گرداند. idempotent — اجرای دوبارهٔ همان بازه فقط تغییرات تازه را می‌گیرد.
    */
@@ -260,7 +260,7 @@ export class PriceUpdateService {
         stock: number;
         price: number;
         amount: number;
-        /** مهر قیمت: آخرین به‌روزرسانی خود باسکول (last_price_update || updated_at) */
+        /** مهر قیمت: آخرین به‌روزرسانی خود پاسکال (last_price_update || updated_at) */
         priceAt: string;
         userId: string;
         before: { stock: number; minSalePrice: number; minSaleAmount: number };
@@ -277,7 +277,7 @@ export class PriceUpdateService {
           stock,
           price,
           amount,
-          // همان ادبِ web-import: مهر قیمت از خود باسکول، نه «الان»
+          // همان ادبِ web-import: مهر قیمت از خود پاسکال، نه «الان»
           priceAt: (bkDate(it.main.last_price_update) ?? bkDate(it.main.updated_at) ?? new Date()).toISOString(),
           userId: cur.userId,
           before: { stock: cur.stock, minSalePrice: cur.minSalePrice, minSaleAmount: cur.minSaleAmount },
@@ -515,11 +515,11 @@ export class PriceUpdateService {
   // ═══════════════════════════ شمارهٔ موبایل فروشنده ═══════════════════════════
 
   /**
-   * گرفتن شمارهٔ موبایل یک فروشندهٔ باسکول — کوکی می‌خواهد؛ هر کوکی فقط ۲۰
-   * شماره (محدودیت باسکول). پاسخ {phone} یا {data:{phone}} هر دو پذیرفته است.
+   * گرفتن شمارهٔ موبایل یک فروشندهٔ پاسکال — کوکی می‌خواهد؛ هر کوکی فقط ۲۰
+   * شماره (محدودیت پاسکال). پاسخ {phone} یا {data:{phone}} هر دو پذیرفته است.
    *
    * اندپوینت (۲۲-۱۱ — ریشه‌یابی خطای «کوکی لاگین نیست»): اندپوینت قدیمی
-   * /get_seller_phone_number کنار گذاشته شد؛ خود سایت باسکول از
+   * /get_seller_phone_number کنار گذاشته شد؛ خود سایت پاسکال از
    * /get-user-phone-number-for-the-seller با بدنهٔ {user_id, client:"web"}
    * استفاده می‌کند و مالک همین را در مرورگر خودش تست و تأیید کرده است.
    * pId دیگر لازم نیست (فقط user_id) ولی در قرارداد API حفظ شده است.
@@ -536,14 +536,14 @@ export class PriceUpdateService {
     const { cookie } = buskoolConfig();
     if (!cookie) {
       throw AppError.badRequest(
-        'کوکی باسکول تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است',
+        'کوکی پاسکال تنظیم نشده است (BUSKOOL_COOKIE) — برای گرفتن شماره لازم است',
         'BUSKOOL_COOKIE_MISSING',
       );
     }
     const budget = this.budgetInfo();
     if (budget.remaining <= 0) {
       throw AppError.badRequest(
-        `سهمیهٔ ${budget.limit} شماره‌ای این کوکی باسکول تمام شده (${budget.used} گرفته شده) — کوکی تازه در BUSKOOL_COOKIE بگذارید`,
+        `سهمیهٔ ${budget.limit} شماره‌ای این کوکی پاسکال تمام شده (${budget.used} گرفته شده) — کوکی تازه در BUSKOOL_COOKIE بگذارید`,
         'BUSKOOL_BUDGET_EXHAUSTED',
       );
     }
@@ -568,35 +568,35 @@ export class PriceUpdateService {
         raw.includes('HTML_RESPONSE')
       ) {
         throw AppError.badRequest(
-          'کوکی باسکول لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید',
+          'کوکی پاسکال لاگین نیست یا منقضی شده — کل هدر cookie مرورگرِ لاگین‌شده را در BUSKOOL_COOKIE بگذارید (هر سه جفت: user_phone و user_password و laravel_session؛ فقط جفت‌های name=value بدون expires/path) و بک‌اند را ری‌استارت کنید',
           'BUSKOOL_COOKIE_INVALID',
         );
       }
       if (e?.status === 419) {
         throw AppError.badRequest(
-          'باسکول ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید',
+          'پاسکال ۴۱۹ (توکن CSRF) داد — کوکی را تازه در BUSKOOL_COOKIE بگذارید و بک‌اند را ری‌استارت کنید',
           'BUSKOOL_CSRF',
         );
       }
       if (e?.status === 401) {
-        throw AppError.badRequest('باسکول ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE)', 'BUSKOOL_UNAUTHORIZED');
+        throw AppError.badRequest('پاسکال ۴۰۱ داد — کوکی لاگین معتبر نیست (BUSKOOL_COOKIE)', 'BUSKOOL_UNAUTHORIZED');
       }
       if (e?.status === 423) {
         throw AppError.badRequest(
-          'باسکول نمایش این شماره را فعلاً قفل کرده (۴۲۳) — معمولاً چون همین شماره تازه گرفته شده یا سهمیهٔ نمایش پر است؛ کمی بعد دوباره تلاش کنید',
+          'پاسکال نمایش این شماره را فعلاً قفل کرده (۴۲۳) — معمولاً چون همین شماره تازه گرفته شده یا سهمیهٔ نمایش پر است؛ کمی بعد دوباره تلاش کنید',
           'BUSKOOL_LOCKED',
         );
       }
       if (e?.status === 403) {
         throw AppError.badRequest(
-          'باسکول درخواست را بلاک کرد (۴۰۳) — کمی صبر کنید و دوباره تلاش کنید',
+          'پاسکال درخواست را بلاک کرد (۴۰۳) — کمی صبر کنید و دوباره تلاش کنید',
           'BUSKOOL_BLOCKED',
         );
       }
-      throw AppError.badRequest(`گرفتن شماره از باسکول ناموفق بود: ${raw}`, 'BUSKOOL_PHONE_FAILED');
+      throw AppError.badRequest(`گرفتن شماره از پاسکال ناموفق بود: ${raw}`, 'BUSKOOL_PHONE_FAILED');
     }
 
-    // کد فرانت خود باسکول e.data.phone می‌خواند (chunks/1.js) — {phone}
+    // کد فرانت خود پاسکال e.data.phone می‌خواند (chunks/1.js) — {phone}
     // مستقیم هم برای اطمینان پذیرفته است
     const raw =
       (typeof resp?.data === 'object' && resp.data !== null ? resp.data.phone : undefined) ??
@@ -604,7 +604,7 @@ export class PriceUpdateService {
       resp?.phone;
     const phone = normalizePhone(raw);
     if (!phone) {
-      throw new BadRequestException(`شماره‌ای در پاسخ باسکول نبود — پاسخ: ${JSON.stringify(resp).slice(0, 160)}`);
+      throw new BadRequestException(`شماره‌ای در پاسخ پاسکال نبود — پاسخ: ${JSON.stringify(resp).slice(0, 160)}`);
     }
 
     // مصرف بودجه — فقط شمارهٔ واقعاً بیرون‌آمده
@@ -630,9 +630,9 @@ export class PriceUpdateService {
   // ═══════════════════════════ استخراج تک‌کاربر ═══════════════════════════
 
   /**
-   * پیش‌ایمپورت یک یوزرنیم باسکول (خواستهٔ مالک ۲۱-۱۱): اول چک دیتابیس با
-   * bUserName (هویت باسکولی، نه یوزرنیم آیمچ) — از قبل موجود = بدون هیچ تماس
-   * با باسکول «موجود» برمی‌گردد؛ غایب = شماره‌اش از باسکول گرفته می‌شود تا
+   * پیش‌ایمپورت یک یوزرنیم پاسکال (خواستهٔ مالک ۲۱-۱۱): اول چک دیتابیس با
+   * bUserName (هویت پاسکالی، نه یوزرنیم آیمچ) — از قبل موجود = بدون هیچ تماس
+   * با پاسکال «موجود» برمی‌گردد؛ غایب = شماره‌اش از پاسکال گرفته می‌شود تا
    * فرانت بلافاصله همان ایمپورت تک‌کاربرهٔ همیشگی را با شمارهٔ واقعی شروع کند.
    */
   async extractUser(
@@ -647,9 +647,9 @@ export class PriceUpdateService {
   }> {
     this.assertAdmin(adminPhone);
     const userName = input.userName.trim().replace(/^@/, '');
-    if (!userName) throw new BadRequestException('یوزرنیم باسکول را وارد کنید');
+    if (!userName) throw new BadRequestException('یوزرنیم پاسکال را وارد کنید');
 
-    // ۱) از قبل در ایمچ؟ — قبل از هر تماس با باسکول (خواستهٔ مالک)
+    // ۱) از قبل در ایمچ؟ — قبل از هر تماس با پاسکال (خواستهٔ مالک)
     const existing = await this.prisma.user.findFirst({
       where: { bUserName: userName },
       select: { id: true, userName: true, bVerified: true },
@@ -662,14 +662,14 @@ export class PriceUpdateService {
       };
     }
 
-    // ۲) پروفایل باسکول — s_id (= user_info.id) برای گرفتن شماره
+    // ۲) پروفایل پاسکال — s_id (= user_info.id) برای گرفتن شماره
     const bk = new BuskoolClient(() => false);
     const profile = await bk.call<{ user_info?: { id: number; user_name?: string } }>('/load_profile_by_user_name', {
       user_name: userName,
     });
     const sId = profile?.user_info?.id;
     if (!sId || !profile?.user_info?.user_name) {
-      throw new BadRequestException(`کاربر باسکول @${userName} پیدا نشد`);
+      throw new BadRequestException(`کاربر پاسکال @${userName} پیدا نشد`);
     }
 
     // ۳) نمونه‌آگهی — سنجش «چیزی برای ایمپورت دارد» (p_id دیگر برای شماره

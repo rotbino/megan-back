@@ -41,10 +41,10 @@ const PER_PAGE_DEFAULT = 16;
 const MATCH_SCAN_CAP = 1000;
 
 /** «جدیدترین» = تاریخ ثبت آگهی (خواستهٔ مالک ۱۸-۱۱): صدها آگهی تازه ایمپورت
- *  شده بود اما بالای «جدیدترین»، آگهی‌های چندسالهٔ باسکولی نشسته بودند که
+ *  شده بود اما بالای «جدیدترین»، آگهی‌های چندسالهٔ پاسکالی نشسته بودند که
  *  فروشنده‌شان همان روز قیمتش را باز کرده بود — سورت قبلی (مهر آپدیت قیمت
- *  اولویت‌دار) دقیقاً رفتار خود باسکول را آینه می‌کند: آگهی قدیمی + ری‌پرایس
- *  = همیشه صفحهٔ اول. تاریخ ثبت (created_at = p_created_at باسکول برای
+ *  اولویت‌دار) دقیقاً رفتار خود پاسکال را آینه می‌کند: آگهی قدیمی + ری‌پرایس
+ *  = همیشه صفحهٔ اول. تاریخ ثبت (created_at = p_created_at پاسکال برای
  *  ایمپورت‌ها، لحظهٔ ثبت برای آگهی‌های خودمان) تنها مهرِ «جدید بودن آگهی»
  *  است؛ مهر قیمت فقط tie-break می‌ماند و تازگی قیمت همچنان روی کارت محصول
  *  و بج انقضا دیده می‌شود. (مهر updated_at پایهٔ سورت نیست — قابل‌آلودگی به
@@ -59,7 +59,7 @@ const NATURAL_ORDER: Prisma.ProductOrderByWithRelationInput[] = [
   { isElevated: 'desc' },
   ...NEWEST_ORDER,
 ];
-const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای باسکول — seed شمارنده را دقیق‌تر می‌گذارد
+const PRODUCT_START_ID = 3_000_000; // بالاتر از idهای پاسکال — seed شمارنده را دقیق‌تر می‌گذارد
 const DAY_MS = 86_400_000;
 
 /** دورهٔ خرید دفتر → ضریب معادل ماهانه (تقریبی) — فید فروشندگان خریدار */
@@ -164,7 +164,7 @@ export interface ProductDto {
   rejectionReasons?: string[];
 }
 
-/** قالب تاریخ باسکول: «YYYY-MM-DD HH:mm:ss» */
+/** قالب تاریخ پاسکال: «YYYY-MM-DD HH:mm:ss» */
 const fmtDate = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '';
 
@@ -874,8 +874,8 @@ export class ProductsService {
     if (viewer && viewer.id === p.userId) return { counted: false as const };
 
     // شمارندهٔ بازدید نباید مهر زمانی آگهی را دست بزند — update عادی پریسما،
-    // @updatedAt را به «اکنون» می‌گذارد و هر بازدید، آگهی‌های چندسالهٔ باسکولی
-    // را «۲ دقیقه پیش» نشان می‌داد (گزارش مالک ۱۳-۱۱: مهرهای باسکول دقیق
+    // @updatedAt را به «اکنون» می‌گذارد و هر بازدید، آگهی‌های چندسالهٔ پاسکالی
+    // را «۲ دقیقه پیش» نشان می‌داد (گزارش مالک ۱۳-۱۱: مهرهای پاسکال دقیق
     // بمانند تا خریدار قدیمی بودن قیمت را بفهمد). $inc خام مستقیم به مونگو
     // می‌رود و updated_at را حفظ می‌کند؛ اتمیک هم هست.
     await this.prisma.productView.create({
@@ -1420,7 +1420,7 @@ export class ProductsService {
     return { id: updated.id, status: updated.status };
   }
 
-  /** POST /products/deleteMyProduct — حذف نرم (تب «حذف شده» عین باسکول)؛
+  /** POST /products/deleteMyProduct — حذف نرم (تب «حذف شده» عین پاسکال)؛
    *  سوابق قیمت/موجودی/حداقل فروش در ProductEditHistory می‌ماند تا در موارد
    *  اختلاف قابل رجوع باشد (خواسته مالک ۳-۱۱ — فروشنده‌ای که بعد از فروش
    *  آگهی را حذف کند، تاریخ از بین نمی‌رود). */
@@ -1574,7 +1574,7 @@ export class ProductsService {
   }
 
   /** POST /products/getSeller — پروفایل کسب‌وکار + آگهی‌های تاییدشده.
-   * غنی‌شده (خواسته «پروفایل عین باسکول»): مکان، وضعیت آنلاین، خلاصه نظرات،
+   * غنی‌شده (خواسته «پروفایل عین پاسکال»): مکان، وضعیت آنلاین، خلاصه نظرات،
    * احتمال پاسخگویی (درصد مکالمات که فروشنده جواب داده) و آمار عرضه.
    * کش ۳۰s — DB آتلاس راه دور است و این مسیر ~۱۰ کوئری دارد (هر کدام ~۲۰۰ms RTT)؛
    * وضعیت آنلاینِ زنده را کلاینت جدا از /presence/status می‌گیرد. مهر آنلاین
@@ -1618,7 +1618,7 @@ export class ProductsService {
         orderBy: { createdAt: 'desc' },
         select: { url: true, thumbUrl: true },
       }),
-      // گالری/گواهی‌های کسب‌وکار فروشنده (تصاویر مربوطه — عین باسکول)
+      // گالری/گواهی‌های کسب‌وکار فروشنده (تصاویر مربوطه — عین پاسکال)
       this.prisma.file.findMany({
         where: { relatedModel: 'User', relatedId: seller.id, fieldKey: 'gallery' },
         orderBy: { createdAt: 'asc' },
@@ -1637,7 +1637,7 @@ export class ProductsService {
       ),
       // میانگین امتیاز سرصفحه پروفایل — فقط از نظرهای تأییدشدهٔ ادمین
       // (قانون انتشار مالک ۲-۱۱؛ pending/rejected در امتیاز عمومی حساب نمی‌شوند)
-      // + کامنت‌های باسکولی (b_comment) هم در مجموع حساب می‌شوند (خاستهٔ مالک
+      // + کامنت‌های پاسکالی (b_comment) هم در مجموع حساب می‌شوند (خاستهٔ مالک
       // ۱۳-۱۱ — نویسندگان ساختگی user_for_b_comment؛ همان ترکیب صفحهٔ نظرات)
       this.prisma.sellerReview.aggregate({
         where: { sellerId: seller.id, status: 'approved' },
@@ -1686,7 +1686,7 @@ export class ProductsService {
         isVerified: seller.isVerified,
         businessDesc: seller.businessDesc ?? null,
         avatarUrl: avatarFile?.thumbUrl ?? avatarFile?.url ?? null,
-        // ── فیلدهای پروفایل کسب‌وکار (embedded myuser_profiles باسکول) ──
+        // ── فیلدهای پروفایل کسب‌وکار (embedded myuser_profiles پاسکال) ──
         address: (seller.profile as { address?: string } | null)?.address ?? null,
         // publicPhone حذف شد (امنیت ۱-۱۱): شمارهٔ موبایل هرگز در دیتای عمومی
         // نیست — فقط سرویس اختصاصی getSellerPhone آن را برمی‌گرداند.
@@ -1697,7 +1697,7 @@ export class ProductsService {
         gallery: userGallery.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
         certificates: userCertificates.map((f) => ({ url: f.url, thumbUrl: f.thumbUrl ?? f.url })),
         createdAt: fmtDate(seller.createdAt),
-        // ── غنی‌سازی پروفایل (باسکول‌گونه) ──
+        // ── غنی‌سازی پروفایل (پاسکال‌گونه) ──
         online: await this.presence.isOnline(seller.id),
         lastSeenAt: seller.lastSeenAt,
         provinceName: seller.provinceId != null ? locNames.provinces.get(seller.provinceId) ?? null : null,
@@ -1717,7 +1717,7 @@ export class ProductsService {
 
   // ─── جستجو ──────────────────────────────────────────────────────────────────
 
-  /** POST /products/searchSuggestions — پیشنهاد زنده هدر (مثل باسکول) */
+  /** POST /products/searchSuggestions — پیشنهاد زنده هدر (مثل پاسکال) */
   async searchSuggestions(typedText: string): Promise<string[]> {
     const q = typedText.trim();
     if (!q) return [];

@@ -24,13 +24,13 @@ const databaseUrl = m[1].trim().replace(/^"|"$/g, '');
 
 const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
-/** انواع کالای مرجع — دستهٔ برگ باسکول ← انواع پرکاربرد بازار ایران */
+/** انواع کالای مرجع — دستهٔ برگ پاسکال ← انواع پرکاربرد بازار ایران */
 const GOODS = [
-  // برنج (باسکول id=43) — agri.grains.rice / ctype
+  // برنج (پاسکال id=43) — agri.grains.rice / ctype
   { categoryId: 43, names: ['شیرودی', 'هاشمی', 'طارم', 'فجر', 'صدری', 'عنبربو', 'دم‌سیاه', 'گرده', 'کوهسار'] },
-  // نخود (باسکول id=74) — agri.pulses.chickpea / ctype
+  // نخود (پاسکال id=74) — agri.pulses.chickpea / ctype
   { categoryId: 74, names: ['کابل', 'ممبلی', 'لک', 'سفید ریز'] },
-  // تن ماهی (باسکول id=93) — food.canned.tuna / ctype
+  // تن ماهی (پاسکال id=93) — food.canned.tuna / ctype
   { categoryId: 93, names: ['آلباکور', 'زردبال', 'پارو'] },
 ];
 

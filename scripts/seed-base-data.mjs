@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * seed داده‌های پایه در MongoDB Atlas — upsert (اجرای مکرر ایمن است).
- * `_id` هر سند همان عدد باسکول است (پسته=44، اصفهان=4) تا فرانت بدون تغییر سوییچ کند.
- * نکته: نام شهرها در API باسکول فاصله ابتدایی دارد → اینجا trim می‌شود.
+ * `_id` هر سند همان عدد پاسکال است (پسته=44، اصفهان=4) تا فرانت بدون تغییر سوییچ کند.
+ * نکته: نام شهرها در API پاسکال فاصله ابتدایی دارد → اینجا trim می‌شود.
  * اجرا: node scripts/seed-base-data.mjs   (یا bun run seed:base-data)
  */
 import { readFileSync } from 'node:fs';
@@ -47,7 +47,7 @@ async function main() {
   const catNew = await upsertAll(db, 'Category', categories, (c) => ({
     _id: c.id,
     category_name: (c.category_name ?? '').trim(),
-    slug: (c.category_name ?? '').trim(), // اسلاگ فارسی مثل خود باسکول
+    slug: (c.category_name ?? '').trim(), // اسلاگ فارسی مثل خود پاسکال
     unit: c.unit ?? 'کیلوگرم',
     min: c.min ?? 100,
     example: c.example ?? null,
@@ -57,9 +57,9 @@ async function main() {
   console.log(`✔ categories: ${categories.length} سند (${catNew} جدید)`);
 
   // ── لوکیشن‌ها — درخت واحد (استان + شهر در یک کالکشن با type) ──
-  // کلید _id ترکیبی است («province:4» / «city:230») چون id های عددی باسکولِ
+  // کلید _id ترکیبی است («province:4» / «city:230») چون id های عددی پاسکالِ
   // استان و شهر از دو فضای جدا هستند و برخورد دارند (شهر ۴ ≠ استان ۴).
-  // عدد خام باسکول در buskool_id ذخیره می‌شود — API همان عدد را برمی‌گرداند.
+  // عدد خام پاسکال در buskool_id ذخیره می‌شود — API همان عدد را برمی‌گرداند.
   // (بخشِ جدا از upsertAll چون فیلتر _id باید همان کلید ترکیبی باشد)
   const provinces = readJson('provinces.json');
   const provOps = provinces.map((p) => ({

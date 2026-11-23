@@ -95,11 +95,11 @@ check('ردیف‌ها برمی‌گردند', listRows.length > 0 && listRows.l
 check('هر ردیف مالک دارد', listRows.every((r) => r.owner && r.owner.user_name));
 check('source از b_user_name استنتاج می‌شود', listRows.every((r) => r.owner.b_user_name != null || r.owner.b_user_name === null));
 const buskoolRows = listRows.filter((r) => r.owner?.b_user_name != null).length;
-console.log(`  • نمونه: ${listRows.length} ردیف، ${buskoolRows} باسکولی؛ مثلاً «${listRows[0]?.product_name}» مالک @${listRows[0]?.owner?.user_name}`);
+console.log(`  • نمونه: ${listRows.length} ردیف، ${buskoolRows} پاسکالی؛ مثلاً «${listRows[0]?.product_name}» مالک @${listRows[0]?.owner?.user_name}`);
 check('فیلد _photos آرایه است', listRows.every((r) => Array.isArray(r._photos)));
 check('فیلد _edits آرایه است', listRows.every((r) => Array.isArray(r._edits)));
 
-// ═════════ ۲. فیلتر منبع باسکولی ═════════
+// ═════════ ۲. فیلتر منبع پاسکالی ═════════
 console.log('\n— فیلتر source=buskool —');
 const buskoolFilter = await run('Product', [
   { $match: {} },
@@ -111,8 +111,8 @@ const buskoolFilter = await run('Product', [
 const buskoolCount = Number(buskoolFilter[0]?.n ?? 0);
 const buskoolUsers = await prisma.user.count({ where: { bUserName: { not: null } } });
 const buskoolExpected = await prisma.product.count({ where: { user: { bUserName: { not: null } } } });
-check('شمارش باسکولی با prisma رابطه‌ای برابری می‌کند', buskoolCount === buskoolExpected, `${buskoolCount} vs ${buskoolExpected}`);
-console.log(`  • آگهی باسکولی: ${buskoolCount} (از ${buskoolUsers} کاربر باسکولی)`);
+check('شمارش پاسکالی با prisma رابطه‌ای برابری می‌کند', buskoolCount === buskoolExpected, `${buskoolCount} vs ${buskoolExpected}`);
+console.log(`  • آگهی پاسکالی: ${buskoolCount} (از ${buskoolUsers} کاربر پاسکالی)`);
 
 // ═════════ ۳. آمار کلی (summary) ═════════
 console.log('\n— آمار کلی آگهی‌ها —');
@@ -143,7 +143,7 @@ const cnt = (k) => Number((sum[k] ?? [])[0]?.n ?? 0);
 check('total + buskool + native = کل آگهی‌ها', cnt('total') === cnt('buskool') + cnt('native') || cnt('total') === productCount, `${cnt('total')} = ${cnt('buskool')}+${cnt('native')}`);
 const editedExpected = await prisma.productEditHistory.groupBy({ by: ['productId'], where: { action: 'edit' } });
 check('editedByUser = تعداد آگهی‌های دارای action=edit', cnt('editedByUser') === editedExpected.length, `${cnt('editedByUser')} vs ${editedExpected.length}`);
-console.log(`  • کل=${cnt('total')} باسکول=${cnt('buskool')} خودی=${cnt('native')} ورود‌کرده=${cnt('ownerLoggedIn')} ویرایش‌شده=${cnt('editedByUser')} بدون‌عکس=${cnt('withoutPhotos')} در‌انتظار=${cnt('pending')}`);
+console.log(`  • کل=${cnt('total')} پاسکال=${cnt('buskool')} خودی=${cnt('native')} ورود‌کرده=${cnt('ownerLoggedIn')} ویرایش‌شده=${cnt('editedByUser')} بدون‌عکس=${cnt('withoutPhotos')} در‌انتظار=${cnt('pending')}`);
 
 // ═════════ ۴. آلبوم تصاویر ═════════
 console.log('\n— آلبوم تصاویر آگهی‌ها —');
@@ -183,7 +183,7 @@ check('تقریباً همهٔ ردیف‌ها آگهی دارند', withProduct
 const withOwner = imgRows.filter((r) => (r.ownerUser ?? []).length > 0).length;
 check('تقریباً همهٔ ردیف‌ها فروشنده دارند', withOwner >= imgRows.length - 1, `${withOwner}/${imgRows.length}`);
 const importedCount = imgRows.filter((r) => r.metadata?.importedFrom === 'buskool').length;
-console.log(`  • نمونهٔ آلبوم: ${imgRows.length} تصویر، ${importedCount} باسکولی؛ مثلاً «${imgRows[0]?.product?.product_name}» فروشنده @${imgRows[0]?.ownerUser?.[0]?.user_name}`);
+console.log(`  • نمونهٔ آلبوم: ${imgRows.length} تصویر، ${importedCount} پاسکالی؛ مثلاً «${imgRows[0]?.product?.product_name}» فروشنده @${imgRows[0]?.ownerUser?.[0]?.user_name}`);
 check('url همهٔ ردیف‌ها پر است', imgRows.every((r) => typeof r.url === 'string' && r.url));
 
 // ═════════ ۵. آمار تصاویر ═════════
@@ -201,7 +201,7 @@ const imgSum = (await run('File', [
 ]))[0] ?? {};
 const ic = (k) => Number((imgSum[k] ?? [])[0]?.n ?? 0);
 check('buskoolRemaining = buskool - replaced (تفکیک درست)', ic('buskoolRemaining') === ic('buskool') - Math.min(ic('replaced'), ic('buskool')) || ic('replaced') === 0, `remaining=${ic('buskoolRemaining')} buskool=${ic('buskool')} replaced=${ic('replaced')}`);
-console.log(`  • کل=${ic('total')} باسکولی=${ic('buskool')} تعویض‌شده=${ic('replaced')} باقی‌مانده=${ic('buskoolRemaining')}`);
+console.log(`  • کل=${ic('total')} پاسکالی=${ic('buskool')} تعویض‌شده=${ic('replaced')} باقی‌مانده=${ic('buskoolRemaining')}`);
 
 // ═════════ ۶. جستجو با شناسهٔ عددی (پیش‌حل) ═════════
 console.log('\n— جستجوی q عددی (شناسهٔ آگهی) —');

@@ -17,7 +17,7 @@ const SAVED_LIMIT = 200;
 /** سقف لیست ذخیره‌کنندگان — فقط شمار دقیق است، لیست همین‌قدر */
 const SAVERS_TAKE = 200;
 
-/** قالب تاریخ باسکول — یکدست با بقیهٔ API */
+/** قالب تاریخ پاسکال — یکدست با بقیهٔ API */
 const fmtDate = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '';
 

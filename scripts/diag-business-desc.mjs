@@ -1,6 +1,6 @@
-// عیب‌یابی فقط-خواندی «توضیحات کسب‌وکار» کاربران ایمپورت‌شده از باسکول.
-// سؤال: چند کاربر متن خودکار باسکول/اینکوباک در businessDesc دارند؟
-// چند متن واقعی شامل واژهٔ باسکول/اینکوباک است؟ الگوهای متن خودکار چیست؟
+// عیب‌یابی فقط-خواندی «توضیحات کسب‌وکار» کاربران ایمپورت‌شده از پاسکال.
+// سؤال: چند کاربر متن خودکار پاسکال/اینکوباک در businessDesc دارند؟
+// چند متن واقعی شامل واژهٔ پاسکال/اینکوباک است؟ الگوهای متن خودکار چیست؟
 // اجرا: node scripts/diag-business-desc.mjs   (بدون نوشتن در دیتابیس)
 import { config } from 'dotenv';
 config({ override: true });
@@ -19,23 +19,23 @@ function norm(t) {
     .trim();
 }
 
-/** منطق فعلی سرویس (کامیت 3d7a3aa) — فقط واریان باسکول */
+/** منطق فعلی سرویس (کامیت 3d7a3aa) — فقط واریان پاسکال */
 function isAutoOld(desc) {
   const t = norm(desc);
   return (
-    t.includes('در حال خرید و فروش عمده در بازار بزرگ باسکول') &&
+    t.includes('در حال خرید و فروش عمده در بازار بزرگ پاسکال') &&
     t.includes('برای ارتباط با من روی دکمه')
   );
 }
 
-/** منطق پیشنهادی جدید — هر دو نسل قالب (باسکول + اینکوباک قدیم) */
+/** منطق پیشنهادی جدید — هر دو نسل قالب (پاسکال + اینکوباک قدیم) */
 function isAutoNew(desc) {
   const t = norm(desc);
   const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');
   const brand =
-    /در حال خرید و فروش عمده در بازار بزرگ (باسکول|اینکوباک)/.test(t) ||
-    /در سامانه ?ی? ?(باسکول|اینکوباک) هستم/.test(t) ||
-    /در سایت (باسکول|اینکوباک)/.test(t);
+    /در حال خرید و فروش عمده در بازار بزرگ (پاسکال|اینکوباک)/.test(t) ||
+    /در سامانه ?ی? ?(پاسکال|اینکوباک) هستم/.test(t) ||
+    /در سایت (پاسکال|اینکوباک)/.test(t);
   return contact && brand;
 }
 
@@ -48,9 +48,9 @@ console.log(`کل کاربران ایمپورت‌شده: ${users.length}`);
 const withDesc = users.filter((u) => (u.businessDesc ?? '').trim());
 console.log(`دارای businessDesc غیرخالی: ${withDesc.length}`);
 
-const hasBuskool = withDesc.filter((u) => norm(u.businessDesc).includes('باسکول'));
+const hasBuskool = withDesc.filter((u) => norm(u.businessDesc).includes('پاسکال'));
 const hasInkubak = withDesc.filter((u) => norm(u.businessDesc).includes('اینکوباک'));
-console.log(`  شامل «باسکول»: ${hasBuskool.length}`);
+console.log(`  شامل «پاسکال»: ${hasBuskool.length}`);
 console.log(`  شامل «اینکوباک»: ${hasInkubak.length}`);
 
 const autoOld = withDesc.filter((u) => isAutoOld(u.businessDesc));
@@ -63,7 +63,7 @@ console.log(`  خودکارِ جدید که منطق فعلی می‌انداز�
 const realWithBrand = withDesc.filter(
   (u) => (hasBuskool.includes(u) || hasInkubak.includes(u)) && !isAutoNew(u.businessDesc),
 );
-console.log(`\nمتن واقعی (غیرقالبی) شامل باسکول/اینکوباک: ${realWithBrand.length}`);
+console.log(`\nمتن واقعی (غیرقالبی) شامل پاسکال/اینکوباک: ${realWithBrand.length}`);
 
 // الگوهای متن خودکار — بعد از حذف نام/شهر، چند قالب متمایز هست؟
 const patterns = new Map();

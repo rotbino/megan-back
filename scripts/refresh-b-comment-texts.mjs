@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * تکمیل متن کامنت‌های باسکول (خواستهٔ مالک ۱۵-۱۱) — «متن کامنت‌ها مهمه»
+ * تکمیل متن کامنت‌های پاسکال (خواستهٔ مالک ۱۵-۱۱) — «متن کامنت‌ها مهمه»
  * ===================================================================
  *
  * ماجرا (سنجش زندهٔ ۱۵-۱۱ عصر، کاربر baker): متن کامنت‌های confirmed=1
- * باسکول کاملاً عمومی است — بدون هیچ کوکی‌ای هم برمی‌گردد. متنِ
+ * پاسکال کاملاً عمومی است — بدون هیچ کوکی‌ای هم برمی‌گردد. متنِ
  * confirmed=0 (اکثریت قاطع) فقط برای سشنِ لاگین‌شده باز می‌شود؛ کوکی
  * مهمان پذیرفته می‌شود ولی چیزی باز نمی‌کند. بخشی از کامنت‌های خالی هم
  * «فقط-امتیازی»اند و هرگز متنی نداشته‌اند (baker: ۴ از ۱۷ تأییدشده).
- * سشن باسکول به IP ایران گره خورده — پس این اسکریپت را روی سیستم خودتان
+ * سشن پاسکال به IP ایران گره خورده — پس این اسکریپت را روی سیستم خودتان
  * (ایران) با کوکیِ بعد از لاگین اجرا کنید:
  *
  *   ۱) در مرورگر وارد buskool.com شوید
@@ -18,9 +18,9 @@
  *
  * چه می‌کند (idempotent — اجرای مکرر بی‌ضرر):
  *   • اول لاگین‌بودن سشن را می‌سنجد (GET /api/user — مهمان 401 می‌گیرد؛
- *     کشف ۱۵-۱۱: کوکی مهمان از باسکول پذیرفته می‌شود ولی چیزی باز نمی‌کند)
+ *     کشف ۱۵-۱۱: کوکی مهمان از پاسکال پذیرفته می‌شود ولی چیزی باز نمی‌کند)
  *   • فروشنده‌هایی که کامنت بدون متن (text='') دارند پیدا می‌کند
- *   • کامنت‌هایشان را با کوکی از باسکول می‌گیرد
+ *   • کامنت‌هایشان را با کوکی از پاسکال می‌گیرد
  *   • متنِ کامنت‌های موجود را پر می‌کند (متن پرشده هرگز با خالی بازنویسی نمی‌شود)
  *   • کامنت‌های جدید (نویسنده‌ای که نداریم) را لیستی اضافه می‌کند
  *   • گزارش کامل می‌دهد؛ اگر کوکی کار نکند با پیام روشن می‌ایستد
@@ -46,7 +46,7 @@ const prisma = new PrismaClient();
 
 const API = 'https://www.buskool.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-const DELAY_MS = 600; // ادب با باسکول
+const DELAY_MS = 600; // ادب با پاسکال
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cookie = (process.env.BUSKOOL_COOKIE ?? '').trim();
@@ -78,7 +78,7 @@ async function fetchComments(userId) {
         body: JSON.stringify({ user_id: userId }),
         signal: AbortSignal.timeout(25_000),
       });
-      if (res.status === 429 || res.status === 403) throw new Error(`HTTP ${res.status} — محدودیت باسکول`);
+      if (res.status === 429 || res.status === 403) throw new Error(`HTTP ${res.status} — محدودیت پاسکال`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const ctype = (res.headers.get('content-type') ?? '').split(';')[0];
       if (ctype.includes('text/html')) throw new Error('پاسخ HTML — سشن/کوکی پذیرفته نشد (IP خارج از ایران؟)');
@@ -95,7 +95,7 @@ async function main() {
     console.error('✖ BUSKOOL_COOKIE در .env تنظیم نیست — راهنما بالای همین فایل.');
     process.exit(1);
   }
-  console.log('── تکمیل متن کامنت‌های باسکول (با کوکی) ──\n');
+  console.log('── تکمیل متن کامنت‌های پاسکال (با کوکی) ──\n');
 
   // سنجش لاگین‌بودن سشن (کشف ۱۵-۱۱) — کوکیِ مهمان پذیرفته می‌شود ولی
   // متن confirmed=0 را باز نمی‌کند؛ قبل از زدن ۴۰۰ درخواست بی‌فایده بایستیم.
@@ -128,7 +128,7 @@ async function main() {
     console.log(status === 200 ? '✓ سشن لاگین است\n' : `؟ وضعیت سشن نامشخص (HTTP ${status}) — ادامه می‌دهیم\n`);
   }
 
-  // فروشنده‌های دارای کامنت بدون متن + شناسهٔ باسکولشان
+  // فروشنده‌های دارای کامنت بدون متن + شناسهٔ پاسکالشان
   const emptySellers = await prisma.bComment.findMany({
     where: { text: '' },
     select: { sellerId: true },
@@ -139,7 +139,7 @@ async function main() {
     select: { id: true, userName: true, b: true },
   });
   const withBkId = sellers.filter((s) => s.b && s.b.userId);
-  console.log(`فروشنده‌های دارای کامنت بدون متن: ${sellerIds.length} (با شناسهٔ باسکول: ${withBkId.length})\n`);
+  console.log(`فروشنده‌های دارای کامنت بدون متن: ${sellerIds.length} (با شناسهٔ پاسکال: ${withBkId.length})\n`);
   if (!withBkId.length) return;
 
   let sellersDone = 0, textsFilled = 0, newComments = 0, stillEmpty = 0, failed = 0;
@@ -164,8 +164,8 @@ async function main() {
     if (cookieWorks === null && list.length >= 5) {
       cookieWorks = withText.length > 0;
       if (!cookieWorks) {
-        console.error('\n✖ کوکی کار نمی‌کند — پاسخ باسکول همچنان بدون متن است.');
-        console.error('  یا سشن منقضی شده یا باسکول آن را به IP دیگری گره زده (از ایران با فیلترشکن خاموش اجرا کنید).');
+        console.error('\n✖ کوکی کار نمی‌کند — پاسخ پاسکال همچنان بدون متن است.');
+        console.error('  یا سشن منقضی شده یا پاسکال آن را به IP دیگری گره زده (از ایران با فیلترشکن خاموش اجرا کنید).');
         process.exit(1);
       }
       console.log('✓ کوکی سالم است — متن‌ها می‌آیند\n');

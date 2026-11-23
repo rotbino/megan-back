@@ -32,7 +32,7 @@ export class GetAdminProductListDto {
   @IsIn(PRODUCT_STATUSES as unknown as string[])
   status?: ProductStatusKey;
 
-  /** دسته (با تمام فرزندان) — id باسکولی مثل 44=پسته */
+  /** دسته (با تمام فرزندان) — id پاسکالی مثل 44=پسته */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -88,7 +88,7 @@ export class ReviewAdminProductDto {
   @IsBoolean()
   approve!: boolean;
 
-  /** دلایل رد — عین جعبه باسکول (آرایه) */
+  /** دلایل رد — عین جعبه پاسکال (آرایه) */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

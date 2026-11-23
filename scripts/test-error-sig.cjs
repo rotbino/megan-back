@@ -6,8 +6,8 @@ const { importErrorSignature } = require('../dist/importer/importer.service.js')
 
 // ── دسته‌های شناخته‌شده ──
 const cases = [
-  [new Error('کاربر باسکول @baker پیدا نشد'), 'user-not-found'],
-  [new Error('کاربر باسکول @ali_reza1374 پیدا نشد'), 'user-not-found'],
+  [new Error('کاربر پاسکال @baker پیدا نشد'), 'user-not-found'],
+  [new Error('کاربر پاسکال @ali_reza1374 پیدا نشد'), 'user-not-found'],
   [
     new Error('buskool /load_profile_by_user_name failed: HTTP 403 on /load_profile_by_user_name (backoff ×4)'),
     'http-403',
@@ -15,7 +15,7 @@ const cases = [
   [new Error('HTTP 404 on /get_product_by_id'), 'http-404'],
   [new Error('HTTP 400 on /get_product_list_by_user_name'), 'http-400'],
   [new Error('HTTP 500 on /x'), 'http-500'],
-  [new Error('پاسخ HTML — این اندپوینت کوکی باسکول می‌خواهد (BUSKOOL_COOKIE)'), 'html-cookie'],
+  [new Error('پاسخ HTML — این اندپوینت کوکی پاسکال می‌خواهد (BUSKOOL_COOKIE)'), 'html-cookie'],
   [Object.assign(new Error('Invalid `prisma.user.upsert()` invocation'), { code: 'P2002' }), 'prisma-P2002'],
 ];
 

@@ -7,7 +7,7 @@ import { PRODUCT_STATUSES, type ProductStatusKey } from '../admin-products/dto';
  *
  * nodeKey:
  *  • خالی/'all'   → همهٔ آگهی‌ها (نمای کلی)
- *  • 'unmapped'   → آگهی‌هایی که دستهٔ باسکولشان هنوز به v2 نگاشت نشده
+ *  • 'unmapped'   → آگهی‌هایی که دستهٔ پاسکالشان هنوز به v2 نگاشت نشده
  *  • کلید v2      → مثل 'agri.pulses.chickpea' (خودش + کل زیردرخت)
  *
  * attrs: فیلتر ویژگی‌های پایلوت — { attrKey: [label, …] } — تطبیق با

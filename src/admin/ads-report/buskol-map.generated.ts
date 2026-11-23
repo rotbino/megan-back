@@ -1,9 +1,9 @@
 // ⚠️ تولیدشده توسط scripts/gen-taxonomy-map.ts — دست‌نویسی ممنوع.
 // بازتولید: bun scripts/gen-taxonomy-map.ts
-// منبع: scripts/data/categories.json (درخت باسکول) + قواعد مهاجرت v2.
-// پوشش: 695 از 695 دستهٔ باسکول؛ تطبیق خودکار نام عمیق: 546؛ شبکهٔ ایمنی L1: 0 مورد.
+// منبع: scripts/data/categories.json (درخت پاسکال) + قواعد مهاجرت v2.
+// پوشش: 695 از 695 دستهٔ پاسکال؛ تطبیق خودکار نام عمیق: 546؛ شبکهٔ ایمنی L1: 0 مورد.
 
-/** id دستهٔ باسکول → کلید تاکسونومی v2 (کوچک‌ترین واحد مهاجرت آگهی‌ها) */
+/** id دستهٔ پاسکال → کلید تاکسونومی v2 (کوچک‌ترین واحد مهاجرت آگهی‌ها) */
 export const BUSKOL_TO_V2: Readonly<Record<number, string>> = {
   1: 'agri.fruit',
   2: 'agri.veg',
@@ -702,7 +702,7 @@ export const BUSKOL_TO_V2: Readonly<Record<number, string>> = {
   1092: 'apparel.fabric.cotton',
 };
 
-/** نام دستهٔ باسکول → کلید v2 — مقاومت در برابر دسته‌های تازهٔ ایمپورت */
+/** نام دستهٔ پاسکال → کلید v2 — مقاومت در برابر دسته‌های تازهٔ ایمپورت */
 export const BUSKOL_NAME_TO_V2: Readonly<Record<string, string>> = {
   'آب اکسیژنه': 'chemicals.industrial.peroxide',
   'آب شیرین کن صنعتی': 'machinery.cleaning.desalination',
@@ -764,7 +764,7 @@ export const BUSKOL_NAME_TO_V2: Readonly<Record<string, string>> = {
   'بادام': 'agri.nuts.almond',
   'بادمجان': 'agri.veg.eggplant',
   'بازی سرگرمی': 'sports.toys',
-  'باسکول': 'machinery.workshop.scale',
+  'پاسکال': 'machinery.workshop.scale',
   'بافت، پارچه ای و چرمی': 'sports.gifts',
   'بالابر ساختمان': 'machinery.construction.hoist',
   'بامیه': 'agri.veg.okra',

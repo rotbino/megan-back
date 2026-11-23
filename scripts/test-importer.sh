@@ -1,5 +1,5 @@
 #!/bin/bash
-# تست E2E ایمپورتر باسکول — علیه بک‌اند در حال اجرا (پیش‌فرض :4000)
+# تست E2E ایمپورتر پاسکال — علیه بک‌اند در حال اجرا (پیش‌فرض :4000)
 # جریان: ping → stats → source-info → گیت ادمین (403) → ایمپورت تک‌کاربرهٔ
 # il2016n با maxProducts=1 → پول جاب تا پایان → preview نتیجه.
 #
@@ -29,7 +29,7 @@ echo "$JOB"
 JOB_ID=$(echo "$JOB" | python3 -c "import sys,json;print(json.load(sys.stdin).get('data',{}).get('jobId',''))")
 [ -z "$JOB_ID" ] && { echo "✖ jobId نگرفتیم"; exit 1; }
 
-echo "── پول تا پایان (حداکثر ۲۴۰ ثانیه — فاصلهٔ پیش‌فرض باسکول ۵ ثانیه است):"
+echo "── پول تا پایان (حداکثر ۲۴۰ ثانیه — فاصلهٔ پیش‌فرض پاسکال ۵ ثانیه است):"
 for i in $(seq 1 48); do
   sleep 5
   STATUS=$(curl -s "$BASE/jobs/$JOB_ID" | python3 -c "

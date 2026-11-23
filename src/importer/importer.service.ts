@@ -1,5 +1,5 @@
 /**
- * سرویس ایمپورتر باسکول — مهاجرت دادهٔ یک کاربر باسکول (پروفایل، آواتار،
+ * سرویس ایمپورتر پاسکال — مهاجرت دادهٔ یک کاربر پاسکال (پروفایل، آواتار،
  * آگهی‌ها + عکس‌ها، کامنت‌ها) به دیتابیس ایمچ، با جاب پس‌زمینه و گزارش زنده.
  *
  * بازسازی ۱۳-۱۱ پس از گم‌شدن کد سشن قبل — قرارداد API عیناً از کلاینت فرانت
@@ -9,44 +9,44 @@
  * مشخصات:
  *   • جاب‌های درون‌حافظه‌ای با steps/log/counters + توقف ترکیبی — با refresh
  *     صفحه از بین نمی‌روند (سرور زنده است).
- *   • id آگهی همان id عددی باسکول (الگوی seed)؛ Counter روی max+1000.
+ *   • id آگهی همان id عددی پاسکال (الگوی seed)؛ Counter روی max+1000.
  *   • عکس‌ها (خواستهٔ مالک ۱۳-۱۱): دانلود امن → UploadsService.ingestExternal —
  *     «دقیقاً همان مسیر/پردازش/واترمارک آپلود عادی کاربر»: کلید
  *     users/{userId}/products/{pid}/gallery/… و users/{userId}/avatars/avatar/…،
- *     ردیف File با storageKey کامل. هیچ فولدر جداگانهٔ باسکولی (لوکال یا
+ *     ردیف File با storageKey کامل. هیچ فولدر جداگانهٔ پاسکالی (لوکال یا
  *     ابری) ساخته نمی‌شود — انگار که آگهی توسط خود کاربر ایجاد شده.
  *   • نویسنده‌های کامنت «کاربر کمکی» (stub) می‌شوند — با ایمپورت واقعی بعدی
  *     همان bUserId ادغام می‌شوند.
  *   • پروفایل کسب‌وکار (خواستهٔ مالک ۱۳-۱۱): توضیحات به ستون businessDesc
  *     می‌رود (همان فرم ویرایش/کاتالوگ عمومی) و address/isCompany/companyName
  *     با همان کلیدهای استاندارد profile embedded ذخیره می‌شوند؛ متن خودکار
- *     باسکول/اینکوباک (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک
- *     خودش (lib/seller-text فرانت) را نشان می‌دهد، نه کپی باسکول را.
+ *     پاسکال/اینکوباک (isBuskoolAutoDesc) رد می‌شود — صفحهٔ آیمچ متن پارامتریک
+ *     خودش (lib/seller-text فرانت) را نشان می‌دهد، نه کپی پاسکال را.
  *   • برندگذاری قدیمی (خواستهٔ مالک ۱۳-۱۱): نام قدیمی سایت «اینکوباک» بوده و
  *     متن‌های خودکار با آن ساخته می‌شده‌اند؛ در متن‌های «خودِ کاربر» هر
- *     اشاره‌ای به باسکول/اینکوباک با «آیمچ» جایگزین می‌شود (توضیحات کسب‌وکار،
+ *     اشاره‌ای به پاسکال/اینکوباک با «آیمچ» جایگزین می‌شود (توضیحات کسب‌وکار،
  *     توضیحات آگهی و متن کامنت‌ها) — aimchifyBrandMentions.
- *   • سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱): همهٔ فیلدهای ارزشمند باسکول
+ *   • سند رفتار پاسکال (خواستهٔ مالک ۱۳-۱۱): همهٔ فیلدهای ارزشمند پاسکال
  *     (ویژه بودن + نوع بسته، آمار، دامنهٔ فعالیت، کیف پول، coming_from و…)
- *     در فیلد JSON «b» ذخیره می‌شود — b-user-data.ts. ⚠️ ویژه بودن باسکول
+ *     در فیلد JSON «b» ذخیره می‌شود — b-user-data.ts. ⚠️ ویژه بودن پاسکال
  *     هرگز به activePakageType آیمچ کپی نمی‌شود؛ کاربر در آیمچ رایگان
  *     می‌ماند تا خودش با پرداخت واقعی ویژه شود.
  *   • آواتار: منبع اصلی فیلد profile_photo در پاسخ load_profile_by_user_name
  *     است (کوکی همان‌جا هست)؛ اندپوینت get_user_last_confirmed_profile_photo
  *     فقط fallback است — عکس «تأییدنشده»ها را برنمی‌گرداند.
- *   • تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل باسکول
+ *   • تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل پاسکال
  *     (relateds) به اسلات استاندارد گالری کاربر rehost می‌شوند
  *     (users/{userId}/avatars/gallery/…) تا کاتالوگ عمومی (/c/…) آنها را
  *     نشان دهد؛ کاربران قدیمی هم در اجرای بعدی لیست، از همان URLهای
  *     b.relateds بازآوری می‌شوند (idempotent با metadata.originalUrl).
- *   • سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن باسکول»):
- *     درخواست‌های مستقل باسکول هم‌زمان شروع می‌شوند (گیت نرخ با فاصلهٔ
+ *   • سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن پاسکال»):
+ *     درخواست‌های مستقل پاسکال هم‌زمان شروع می‌شوند (گیت نرخ با فاصلهٔ
  *     کوتاه بین «شروع» درخواست‌ها + سقف هم‌زمانی + عقب‌نشینی خودکار روی
  *     429/403 — buskool.client.ts)، جزئیات آگهی‌ها موازی گرفته می‌شوند و
  *     همهٔ تصاویر (آواتار + کسب‌وکار + آگهی‌ها) در یک استخر موازی مشترک
  *     دانلود/پردازش/ذخیره می‌شوند. جزئیات معماری: ابتدای importOneUser.
  *   • سیاست خطای رکورد (خواستهٔ مالک ۱۵-۱۱): خطای هر کاربر (مثل حساب
- *     پاک‌شدهٔ باسکول) جاب را نمی‌اندازد — با دلیلش روی خود رکورد ذخیره
+ *     پاک‌شدهٔ پاسکال) جاب را نمی‌اندازد — با دلیلش روی خود رکورد ذخیره
  *     می‌شود و بقیهٔ کاربران ادامه می‌یابند؛ قطعی اینترنت فقط وقفه است
  *     (net-watch) و تنها تکرار پیاپیِ همین خطا (پیش‌فرض ۱۰ بار) نشانهٔ
  *     مشکل سیستمی است و جاب را می‌بُرد.
@@ -127,7 +127,7 @@ export interface ImportJob {
   netWaitSince?: number | null;
   /** (۱۶-۱۱) توقف موقت دلسوله: درخواست pause ثبت شده و در نزدیک‌ترین
    *  ایستگاه امن، حلقهٔ اجرا منتظر ادامه می‌ماند — جاب «در حال اجرا» است
-   *  ولی هیچ درخواستی به باسکول/دیتابیس زده نمی‌شود */
+   *  ولی هیچ درخواستی به پاسکال/دیتابیس زده نمی‌شود */
   paused?: boolean;
   /** (۱۶-۱۱) درخواست توقف ثبت شده — بین درخواست‌ها اعمال می‌شود؛ دوبار زدن
    *  دکمهٔ توقف = توقف فوری (قطع همین‌جا). برای نمایش «توقف فوری» در پنل */
@@ -151,7 +151,7 @@ const STEP_DEFS: { key: string; label: string }[] = [
 ];
 
 const MAX_JOBS = 50;
-const PAGE = 20; // اندازهٔ صفحهٔ لیست آگهی‌های باسکول
+const PAGE = 20; // اندازهٔ صفحهٔ لیست آگهی‌های پاسکال
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const MAX_PHOTOS_PER_PRODUCT = 4;
 /** سقف تصاویر کسب‌وکار هر کاربر — همان سقف گالری فرم ویرایش پروفایل (۸) */
@@ -175,12 +175,12 @@ function envInt(name: string, def: number): number {
 /**
  * امضای خطا — «نوعِ» خطا بدون جزئیات رکورد (یوزرنیم/عدد/نقل‌قول) تا
  * خطاهای یکسانِ رکوردهای مختلف هم‌امضا دیده شوند و قانون «تکرار پیاپی
- * همین خطا» کار کند: کاربر پاک‌شدهٔ باسکول → user-not-found، هر ۴۰۴ →
+ * همین خطا» کار کند: کاربر پاک‌شدهٔ پاسکال → user-not-found، هر ۴۰۴ →
  * http-404، پاسخ HTML نیازمند کوکی → html-cookie، خطای Prisma → prisma-P2xxx.
  */
 export function importErrorSignature(err: unknown): string {
   const msg = String((err as Error)?.message ?? err);
-  if (msg.includes('کاربر باسکول') && msg.includes('پیدا نشد')) return 'user-not-found';
+  if (msg.includes('کاربر پاسکال') && msg.includes('پیدا نشد')) return 'user-not-found';
   const http = msg.match(/HTTP (\d{3})/);
   if (http) return `http-${http[1]}`;
   if (msg.includes('پاسخ HTML')) return 'html-cookie';
@@ -262,10 +262,10 @@ export class ImporterService {
       // فقط وقتی جابی در حال اجراست معنادار است (کسی سنجش نمی‌کند تا وقتی
       // عملی منتظر بماند) — برای نشان‌دادن «توقف موقت» در نوار وضعیت پنل
       netWaiting: netWaitingNow(),
-      // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های باسکول دقیقاً
+      // درایور ذخیرهٔ عکس‌ها — همان درایور آپلود عادی؛ عکس‌های پاسکال دقیقاً
       // در همان جا (users/{userId}/…) می‌نشینند. فرانت نشان می‌دهد.
       storageDriver: storage.DRIVER,
-      // وضعیت گامِ فعلی باسکول (۱۴-۱۱): فاصلهٔ مؤثر (بعد از عقب‌نشینی‌ها)،
+      // وضعیت گامِ فعلی پاسکال (۱۴-۱۱): فاصلهٔ مؤثر (بعد از عقب‌نشینی‌ها)،
       // هم‌زمانی و ضریب ادب — برای مشاهدهٔ زندهٔ رفتار ایمپورتر در پنل
       pace: buskoolPace(),
     };
@@ -289,7 +289,7 @@ export class ImporterService {
 
   /**
    * دیتابیس منبع — کالکشن user-buskool در «همان دیتابیس» ایمچ (خواستهٔ مالک
-   * ۱۳-۱۱: جدول را خودش با دامپ کاربران باسکول ساخته؛ دیگر دیتابیس جانبی
+   * ۱۳-۱۱: جدول را خودش با دامپ کاربران پاسکال ساخته؛ دیگر دیتابیس جانبی
    * لازم نیست). خواندن با $runCommandRaw تا شکل سندهای دامپ (فیلدهای اضافی)
    * مهم نباشد و فقط ستون‌های یوزرنیم/تلفن خوانده شود.
    */
@@ -302,7 +302,7 @@ export class ImporterService {
 
   /**
    * ستون‌های یوزرنیم/تلفن کالکشن منبع — ترتیب اولویت: env صریح، تشخیص خودکار
-   * از کلیدهای سند نمونه، پیش‌فرض. ریشهٔ باگ ۱۳-۱۱: دامپ واقعی باسکول فیلد
+   * از کلیدهای سند نمونه، پیش‌فرض. ریشهٔ باگ ۱۳-۱۱: دامپ واقعی پاسکال فیلد
    * «userName» (camelCase) دارد ولی پیش‌فرض قبلی user_name بود — find سند را
    * برمی‌گرداند ولی فیلتر JS همهٔ ردیف‌ها را می‌انداخت و خطای «ردیفی نبود»
    * می‌داد (با کالکشن ۵۵هزارتایی!). با تشخیص خودکار، جورشدن نام ستون دیگر
@@ -633,7 +633,7 @@ export class ImporterService {
   /**
    * ایستگاه امن توقف موقت (۱۶-۱۱) — در هر مرز عملیات (کاربر/صفحهٔ آگهی/
    * عکس/قطعهٔ لیست) صدا زده می‌شود: اگر pause درخواست شده، جاب همین‌جا
-   * می‌ایستد (بدون هیچ تماس با باسکول/دیتابیس) تا resume یا stop بیاید.
+   * می‌ایستد (بدون هیچ تماس با پاسکال/دیتابیس) تا resume یا stop بیاید.
    * stop در حین مکث هم فوراً جواب می‌گیرد (JOB_STOPPED پرتاب می‌شود).
    */
   private async waitWhilePaused(job: JobInternal): Promise<void> {
@@ -869,8 +869,8 @@ export class ImporterService {
             `↷ ${row.userName} رد شد — ${existing.failedImport ? 'ایمپورت ناقص قبلی (failedImport)' : 'قبلاً ایمپورت شده'}`,
           );
           // بازآوری تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): کاربرانِ ایمپورت‌شدهٔ
-          // قدیمی عکس‌های مربوطهٔ باسکول را فقط به‌صورت URL خام در b.relateds
-          // دارند — بدون تماس جدیدی با باسکول، از همان URLهای آرشیوشده در
+          // قدیمی عکس‌های مربوطهٔ پاسکال را فقط به‌صورت URL خام در b.relateds
+          // دارند — بدون تماس جدیدی با پاسکال، از همان URLهای آرشیوشده در
           // گالری‌شان rehost می‌شوند؛ idempotent است و در اجرای بعدی رد می‌شود.
           if (!existing.failedImport) {
             const b = asBUserData(existing.b);
@@ -878,7 +878,7 @@ export class ImporterService {
               try {
                 const { done } = await this.ingestUserRelateds(job, existing.id, b.relateds);
                 if (done > 0) {
-                  this.log(job, 'success', `  ↳ ${done} تصویر کسب‌وکار باسکول به گالری‌اش اضافه شد`);
+                  this.log(job, 'success', `  ↳ ${done} تصویر کسب‌وکار پاسکال به گالری‌اش اضافه شد`);
                 }
               } catch (err) {
                 if ((err as Error).message === 'JOB_STOPPED') throw err;
@@ -925,7 +925,7 @@ export class ImporterService {
             failStreakCount = 1;
           }
           // فقط تکرار پیاپیِ «همین خطا» نشانهٔ مشکل سیستمی است (بلاک شدن
-          // باسکول/تغییر API) — قطعی اینترنت اصلاً به اینجا نمی‌رسد
+          // پاسکال/تغییر API) — قطعی اینترنت اصلاً به اینجا نمی‌رسد
           // (نگهبان شبکه همان‌جا منتظر می‌ماند — net-watch.ts)
           if (failStreakCount >= maxRepeatFails) {
             throw new Error(
@@ -953,10 +953,10 @@ export class ImporterService {
     this.finishJob(job);
   }
 
-  /** یک کاربر باسکول را کامل ایمپورت می‌کند — خروجی: رکورد User ایمچ.
+  /** یک کاربر پاسکال را کامل ایمپورت می‌کند — خروجی: رکورد User ایمچ.
    *
-   * معماری سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن باسکول»):
-   * درخواست‌های مستقل باسکول (آمار، کامنت‌ها، لیست آگهی‌ها، آواتارِ
+   * معماری سرعت (خواستهٔ مالک ۱۴-۱۱ — «سریع‌تر، بدون بلاک شدن پاسکال»):
+   * درخواست‌های مستقل پاسکال (آمار، کامنت‌ها، لیست آگهی‌ها، آواتارِ
    * fallback) بلافاصله پس از پروفایل «هم‌زمان» شروع می‌شوند — گیتِ نرخِ
    * BuskoolClient خودش فاصلهٔ ادب و سقف هم‌زمانی را رعایت می‌کند. کارهای
    * دیتابیس در همین حین انجام می‌شوند، جزئیات آگهی‌ها موازی گرفته می‌شوند
@@ -972,9 +972,9 @@ export class ImporterService {
     // ── ۱. پروفایل ──
     await this.waitWhilePaused(job);
     this.step(job, 'profile', 'active');
-    this.log(job, 'info', `دریافت پروفایل @${userName} از باسکول…`);
+    this.log(job, 'info', `دریافت پروفایل @${userName} از پاسکال…`);
     const profile: BkProfileResp = await bk.call('/load_profile_by_user_name', { user_name: userName });
-    if (!profile?.user_info?.user_name) throw new Error(`کاربر باسکول @${userName} پیدا نشد`);
+    if (!profile?.user_info?.user_name) throw new Error(`کاربر پاسکال @${userName} پیدا نشد`);
     const ui = profile.user_info;
     const pf = profile.profile;
 
@@ -996,7 +996,7 @@ export class ImporterService {
         : bk.call<BkAvatarResp>('/get_user_last_confirmed_profile_photo', { user_id: ui.id }).catch(() => null),
     );
 
-    // ── کارهای دیتابیس در حین پرواز درخواست‌های باسکول ──
+    // ── کارهای دیتابیس در حین پرواز درخواست‌های پاسکال ──
 
     // شماره موبایل: دستی > جدول منبع > ساختگی از bUserId
     const phone =
@@ -1015,28 +1015,28 @@ export class ImporterService {
     // «درباره کسب‌وکار» (خواستهٔ مالک ۱۳-۱۱): متنِ خودِ کاربر به ستون
     // businessDesc می‌رود — همان جایی که فرم ویرایش پروفایل آیمچ می‌نویسد
     // (users/updateProfile) و کاتالوگ عمومی می‌خواند (getSeller)؛ متن
-    // خودکار باسکول/اینکوباک (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن
+    // خودکار پاسکال/اینکوباک (کاربر چیزی ننوشته) رد می‌شود تا صفحه، متن
     // پارامتریک آیمچ را نشان دهد (lib/seller-text در فرانت). در متن خودِ
-    // کاربر هم نام باسکول/اینکوباک با آیمچ جایگزین می‌شود (خواستهٔ مالک).
+    // کاربر هم نام پاسکال/اینکوباک با آیمچ جایگزین می‌شود (خواستهٔ مالک).
     const descAuto = isBuskoolAutoDesc(pf?.description);
     const descClean = aimchifyBrandMentions((pf?.description ?? '').trim());
     const businessDesc = descAuto ? null : descClean || null;
 
-    // ── سند رفتار باسکول (خواستهٔ مالک ۱۳-۱۱) ──
-    // ویژه بودن باسکول فقط اینجا ثبت می‌شود — هرگز به activePakageType
+    // ── سند رفتار پاسکال (خواستهٔ مالک ۱۳-۱۱) ──
+    // ویژه بودن پاسکال فقط اینجا ثبت می‌شود — هرگز به activePakageType
     // آیمچ کپی نمی‌شود؛ کاربر در آیمچ رایگان می‌ماند تا خودش با پرداخت
     // واقعی ویژه شود (بعداً با تماس/تخفیف دعوتش می‌کنیم).
     // در ایمپورت مجدد، مهرهای CRM (contactedAt) و تاریخ اولین ایمپورت
     // (importedAt) از سند قبلی حفظ می‌شوند.
     // ⚠️ تطبیق «قبلاً ایمپورت شده؟» با bUserName است نه userName — یوزرنیم
-    // آیمچ از ۲۰-۱۱ تصادفی و مستقل از یوزرنیم باسکول است (خواستهٔ مالک).
+    // آیمچ از ۲۰-۱۱ تصادفی و مستقل از یوزرنیم پاسکال است (خواستهٔ مالک).
     const existingDoc = await this.prisma.user.findFirst({
       where: { bUserName: userName },
       select: { b: true },
     });
     const prevB = asBUserData(existingDoc?.b);
 
-    // آمار باسکول — از همان ابتدای جاب موازی در پرواز بود، الان آماده است
+    // آمار پاسکال — از همان ابتدای جاب موازی در پرواز بود، الان آماده است
     const statsResp = await statsP;
     const st = statsResp?.statistics?.user_info;
 
@@ -1095,8 +1095,8 @@ export class ImporterService {
 
     // فیلدهای نمایشی پروفایل با «همان کلیدهای استاندارد» فرم ویرایش پروفایل
     // آیمچ (profile embedded: address/isCompany/companyName/activityDomain)
-    // ذخیره می‌شوند تا کاتالوگ عمومی، دفتر خرید و فرم ویرایش، دادهٔ باسکول
-    // را «در جای خودش» ببینند؛ داده‌های مختص باسکول همه در b است.
+    // ذخیره می‌شوند تا کاتالوگ عمومی، دفتر خرید و فرم ویرایش، دادهٔ پاسکال
+    // را «در جای خودش» ببینند؛ داده‌های مختص پاسکال همه در b است.
     const profileJson = {
       address: pf?.address ?? null,
       isCompany: pf?.is_company === 1 || Boolean((pf?.company_name ?? '').trim()),
@@ -1106,10 +1106,10 @@ export class ImporterService {
 
     // ── ثبت/به‌روزرسانی کاربر ──
     // قاعدهٔ هویت (خواستهٔ مالک ۲۰-۱۱):
-    //   • userName آیمچ = شناسهٔ تصادفی مستقل — هرگز یوزرنیم باسکول نیست و
+    //   • userName آیمچ = شناسهٔ تصادفی مستقل — هرگز یوزرنیم پاسکال نیست و
     //     در آپدیتِ ایمپورت مجدد دست نمی‌خورد.
-    //   • bUserName = یوزرنیم باسکول (کلید تطبیق ایمپورت/آپدیت قیمت‌ها).
-    //   • bVerified = احراز باسکول (فقط دادهٔ رفتاری)؛ isVerified واقعی آیمچ
+    //   • bUserName = یوزرنیم پاسکال (کلید تطبیق ایمپورت/آپدیت قیمت‌ها).
+    //   • bVerified = احراز پاسکال (فقط دادهٔ رفتاری)؛ isVerified واقعی آیمچ
     //     فقط از فلوی مدارک + تأیید ادمین پر می‌شود و اینجا هرگزtrueنمی‌شود.
     const existingUser = await this.prisma.user.findFirst({
       where: { bUserName: userName },
@@ -1127,14 +1127,14 @@ export class ImporterService {
       b: bData as object,
       businessDesc,
       bUserName: userName,
-      // احراز باسکول — در سمت b_verified (خواستهٔ مالک ۲۰-۱۱)
+      // احراز پاسکال — در سمت b_verified (خواستهٔ مالک ۲۰-۱۱)
       bVerified: ui.is_verified === 1,
     };
     const user = existingUser
       ? await this.prisma.user.update({
-          // ⚠️ activePakageType عمداً دست نمی‌خورد — ویژه شدن باسکول فقط در
+          // ⚠️ activePakageType عمداً دست نمی‌خورد — ویژه شدن پاسکال فقط در
           // b.premium ثبت می‌شود؛ در آیمچ فقط پرداخت واقعی کاربر را ویژه می‌کند.
-          // isVerified هم عمداً دست نمی‌خورد (هویت آیمچ مستقل از باسکول).
+          // isVerified هم عمداً دست نمی‌خورد (هویت آیمچ مستقل از پاسکال).
           // userName هم دست نمی‌خورد — شناسهٔ آیمچ از روز اول مستقل است.
           where: { id: existingUser.id },
           data: {
@@ -1147,7 +1147,7 @@ export class ImporterService {
           data: {
             ...baseData,
             phone,
-            // یوزرنیم آیمچ — تصادفی و غیربرابر با یوزرنیم باسکول
+            // یوزرنیم آیمچ — تصادفی و غیربرابر با یوزرنیم پاسکال
             userName: await uniqueUserName(this.prisma, userName),
             role: 'USER',
             failedImport: false,
@@ -1159,7 +1159,7 @@ export class ImporterService {
       this.log(
         job,
         'info',
-        `در باسکول ویژه بوده (بستهٔ ${bData.premium.packageTitle}) — فقط در داده‌های باسکولی ثبت شد؛ در آیمچ رایگان می‌ماند تا خودش پرداخت کند`,
+        `در پاسکال ویژه بوده (بستهٔ ${bData.premium.packageTitle}) — فقط در داده‌های پاسکالی ثبت شد؛ در آیمچ رایگان می‌ماند تا خودش پرداخت کند`,
       );
     }
     this.log(
@@ -1167,22 +1167,22 @@ export class ImporterService {
       'info',
       businessDesc
         ? `دربارهٔ کسب‌وکار در جای خودش (توضیحات کسب و کار) ثبت شد${
-            descClean !== (pf?.description ?? '').trim() ? ' — اشاره به باسکول/اینکوباک با «آیمچ» جایگزین شد' : ''
+            descClean !== (pf?.description ?? '').trim() ? ' — اشاره به پاسکال/اینکوباک با «آیمچ» جایگزین شد' : ''
           }`
-        : 'متن «درباره کسب‌وکار» خالی/خودکارِ باسکول بود — ثبت نشد (صفحه متن پیش‌فرض آیمچ را نشان می‌دهد)',
+        : 'متن «درباره کسب‌وکار» خالی/خودکارِ پاسکال بود — ثبت نشد (صفحه متن پیش‌فرض آیمچ را نشان می‌دهد)',
     );
     this.log(
       job,
       'success',
-      `کاربر ${ui.first_name} ${ui.last_name} (@${userName}) ثبت شد — یوزرنیم آیمچ: @${user.userName} • ایمچ #${user.id.slice(-6)} • باسکول #${ui.id}${
-        ui.is_verified === 1 ? ' • احراز باسکول → فقط دادهٔ رفتاری (b_verified)' : ''
+      `کاربر ${ui.first_name} ${ui.last_name} (@${userName}) ثبت شد — یوزرنیم آیمچ: @${user.userName} • ایمچ #${user.id.slice(-6)} • پاسکال #${ui.id}${
+        ui.is_verified === 1 ? ' • احراز پاسکال → فقط دادهٔ رفتاری (b_verified)' : ''
       }`,
     );
 
     // ── ۲. آواتار — تعیین منبع (دانلود/ذخیره در استخر مشترک تصاویر، مرحلهٔ ۵) ──
     // منبع اصلی (خواستهٔ مالک ۱۳-۱۱): فیلد profile_photo در پاسخ
     // load_profile_by_user_name — همان درخواستی که برای پروفایل زده‌ایم و
-    // کوکی باسکول رویش هست (نمونهٔ پاسخ: URL مستقیم profile-photos آروان).
+    // کوکی پاسکال رویش هست (نمونهٔ پاسخ: URL مستقیم profile-photos آروان).
     // اندپوینت جداگانهٔ get_user_last_confirmed_profile_photo فقط fallback
     // است — برای کاربرانی که عکسشان هنوز «تأییدشده» نیست خالی برمی‌گردد و
     // همین باعث می‌شد آواتار برخی کاربران رد شود.
@@ -1199,7 +1199,7 @@ export class ImporterService {
     }
     if (!avUrl) {
       this.step(job, 'avatar', 'skipped');
-      this.log(job, 'info', 'آواتاری روی باسکول ثبت نشده است');
+      this.log(job, 'info', 'آواتاری روی پاسکال ثبت نشده است');
     }
 
     // (تصاویر کسب‌وکار relateds — خواستهٔ مالک ۱۴-۱۱ — همراه آواتار و عکس‌های
@@ -1210,7 +1210,7 @@ export class ImporterService {
     this.step(job, 'products', 'active');
     const items = await itemsP;
     this.bump(job, 'productsTotal', items.length);
-    this.log(job, 'info', `${items.length} آگهی عمومی از باسکول دریافت شد`);
+    this.log(job, 'info', `${items.length} آگهی عمومی از پاسکال دریافت شد`);
 
     const catById = await this.getCatById();
 
@@ -1265,7 +1265,7 @@ export class ImporterService {
     this.step(job, 'products', 'done');
     this.log(job, 'success', `${items.length} آگهی در دیتابیس ثبت/بروزرسانی شد`);
 
-    // Counter محصول باید از idهای باسکول جلوتر بماند (الگوی seed)
+    // Counter محصول باید از idهای پاسکال جلوتر بماند (الگوی seed)
     if (maxProductId > 0) {
       const cur = await this.prisma.counter.findUnique({ where: { id: 'product' } });
       const next = Math.max(cur?.seq ?? 0, maxProductId + 1000);
@@ -1276,10 +1276,10 @@ export class ImporterService {
       });
     }
 
-    // ── ۴. کامنت‌ها (قبل از تصاویر — پاسخ باسکول از ابتدای جاب آماده بوده و
+    // ── ۴. کامنت‌ها (قبل از تصاویر — پاسخ پاسکال از ابتدای جاب آماده بوده و
     //    ثبت DB سبک است؛ اگر وسط تصاویر جاب متوقف شود، این داده از قبل ثبت شده است) ──
     await this.waitWhilePaused(job);
-    // (خواستهٔ مالک ۱۳-۱۱) نویسندگان کامنت‌های باسکول کاربر واقعی ایمچ نیستند —
+    // (خواستهٔ مالک ۱۳-۱۱) نویسندگان کامنت‌های پاسکال کاربر واقعی ایمچ نیستند —
     // دیگر برایشان User با شمارهٔ موبایل ساختگی ساخته نمی‌شود (اشغال شمارهٔ
     // واقعی + پر شدن جدول کاربران از کاربران الکی). نام/شهرشان در جدول
     // user_for_b_comment و خود کامنت در b_comment می‌نشیند؛ نمایش در
@@ -1296,7 +1296,7 @@ export class ImporterService {
       // برای همه: findMany نویسنده‌ها ← createMany غایب‌ها (id سمت کلاینت) ←
       // findMany کامنت‌های موجود ← createMany جدیدها + آپدیت فقط تغییرکرده‌ها.
       if (list.length) {
-        // جدیدترین کامنتِ هر نویسنده ملاک است (تکراری‌های احتمالی باسکول)
+        // جدیدترین کامنتِ هر نویسنده ملاک است (تکراری‌های احتمالی پاسکال)
         const byAuthor = new Map<string, BkCommentsResp['comments'][number]>();
         for (const c of list) {
           const key = c.user_id ? `u${c.user_id}` : `c${c.c_id}`;
@@ -1336,7 +1336,7 @@ export class ImporterService {
                 bCommentId: c.c_id ?? null,
                 firstName: c.first_name ?? '',
                 lastName: c.last_name ?? '',
-                // شهر نویسنده از خود باسکول — زیر کامنت نمایش داده می‌شود
+                // شهر نویسنده از خود پاسکال — زیر کامنت نمایش داده می‌شود
                 city: (c.city ?? '').trim() || null,
               };
             }),
@@ -1403,13 +1403,13 @@ export class ImporterService {
         this.log(job, 'warn', `${empty} کامنت بدون متن است — با BUSKOOL_COOKIE متن کامل گرفته می‌شود`);
       } else if (empty > 0) {
         // کوکی هست ولی باز متن خالی آمد — علت را دقیق بگوییم (کشف ۱۵-۱۱:
-        // کوکیِ مهمان از سمت باسکول پذیرفته می‌شود ولی چیزی باز نمی‌کند)
+        // کوکیِ مهمان از سمت پاسکال پذیرفته می‌شود ولی چیزی باز نمی‌کند)
         const loggedIn = await buskoolSessionLoggedIn();
         const why =
           loggedIn === false
             ? 'کوکی لاگین نیست (سشن مهمان) — بعد از ورود به حساب در buskool.com کوکی تازه بگیرید'
             : loggedIn === true
-              ? 'سشن لاگین است ولی باسکول متن این کامنت‌ها را نمی‌دهد (فقط-امتیازی یا منتظر تأیید)'
+              ? 'سشن لاگین است ولی پاسکال متن این کامنت‌ها را نمی‌دهد (فقط-امتیازی یا منتظر تأیید)'
               : 'سشن منقضی/بی‌اثر است یا شبکه خطا داد';
         this.log(
           job,
@@ -1426,7 +1426,7 @@ export class ImporterService {
     this.step(job, 'images', 'active');
 
     // ۵.الف) تصاویر کسب‌وکار (خواستهٔ مالک ۱۴-۱۱): عکس‌های «مربوطهٔ» پروفایل
-    // باسکول همان تصاویر کسب‌وکار کاربرند — به اسلات استاندارد گالری کاربر
+    // پاسکال همان تصاویر کسب‌وکار کاربرند — به اسلات استاندارد گالری کاربر
     // rehost می‌شوند تا کاتالوگ عمومی (/c/…) آنها را نشان دهد؛ idempotent با
     // metadata.originalUrl
     const relatedCapped = relatedUrls.slice(0, MAX_RELATEDS_PER_USER);
@@ -1442,10 +1442,10 @@ export class ImporterService {
     const relatedTodo = relatedCapped.filter((u) => !relatedSeen.has(u));
     const relatedAlready = relatedCapped.length - relatedTodo.length;
     if (relatedCapped.length) {
-      this.log(job, 'info', `تصاویر کسب‌وکار باسکول (${relatedCapped.length} مورد)…`);
+      this.log(job, 'info', `تصاویر کسب‌وکار پاسکال (${relatedCapped.length} مورد)…`);
     } else {
       this.step(job, 'relateds', 'skipped');
-      this.log(job, 'info', 'تصویر کسب‌وکاری روی باسکول ثبت نشده است');
+      this.log(job, 'info', 'تصویر کسب‌وکاری روی پاسکال ثبت نشده است');
     }
 
     // ۵.ب) آگهی‌های بدون عکسِ قبلاً ذخیره‌شده — یک کوئری برای همه (قبلاً یکی‌یکی)
@@ -1571,7 +1571,7 @@ export class ImporterService {
           }
         } else {
           // همان مسیر/پردازش آگهی معمولی (خواستهٔ مالک ۱۳-۱۱):
-          // users/{userId}/products/{pid}/gallery/… — از ۲۰-۱۱ واترمارک باسکول
+          // users/{userId}/products/{pid}/gallery/… — از ۲۰-۱۱ واترمارک پاسکال
           // همین لحظه پاک می‌شود و نسخهٔ تمیز بالا می‌رود («انگار که آگهی
           // توسط کاربر ایجاد شده»)؛ ردیف File با storageKey کامل.
           const res = await this.netRetry(job, () =>
@@ -1616,7 +1616,7 @@ export class ImporterService {
 
     // گزارش پاک‌سازی واترمارک همین کاربر (۲۰-۱۱)
     if (wmCleanedUser > 0) {
-      this.log(job, 'success', `واترمارک باسکول از ${wmCleanedUser} تصویر این کاربر پاک شد`);
+      this.log(job, 'success', `واترمارک پاسکال از ${wmCleanedUser} تصویر این کاربر پاک شد`);
     }
 
     // جمع‌بندی مراحل تصویری
@@ -1640,7 +1640,7 @@ export class ImporterService {
   }
 
   /**
-   * تصاویر کسب‌وکار باسکول (relateds) → اسلات استاندارد گالری کاربر
+   * تصاویر کسب‌وکار پاسکال (relateds) → اسلات استاندارد گالری کاربر
    * (File: relatedModel=User, fieldKey=gallery) — همان‌جایی که فرم ویرایش
    * پروفایل می‌نویسد و کاتالوگ عمومی (getSeller → /c/…) می‌خواند.
    *
@@ -1712,7 +1712,7 @@ export class ImporterService {
     return { done, already: capped.length - todo.length };
   }
 
-  /** لیست صفحه‌بندی‌شدهٔ آگهی‌های عمومی باسکول — صفحات ترتیبی‌اند (شمارهٔ
+  /** لیست صفحه‌بندی‌شدهٔ آگهی‌های عمومی پاسکال — صفحات ترتیبی‌اند (شمارهٔ
    *  رکورد ادامهٔ صفحهٔ قبل است) ولی خودِ این حلقه از ابتدای جاب موازی با
    *  بقیهٔ درخواست‌های کاربر در پرواز است. */
   private async fetchProductItems(
@@ -1743,7 +1743,7 @@ export class ImporterService {
     return items;
   }
 
-  /** دادهٔ ساخت/آپدیت یک آگهی باسکول — خروجی دو شیء آماده برای createMany/
+  /** دادهٔ ساخت/آپدیت یک آگهی پاسکال — خروجی دو شیء آماده برای createMany/
    *  update (ثبت لیستی ۱۵-۱۱؛ الگوی scripts/seed-products.mjs) */
   private async buildProductData(
     job: JobInternal,
@@ -1760,7 +1760,7 @@ export class ImporterService {
     const sub = catById.get(m.sub_category_id);
     if (sub && sub.parentId != null) categoryId = sub.parentId;
 
-    // اگر دستهٔ باسکول در پایگاه ما نیست، زنجیره را بساز (تاجای ریشه)
+    // اگر دستهٔ پاسکال در پایگاه ما نیست، زنجیره را بساز (تاجای ریشه)
     if (!catById.has(m.sub_category_id)) {
       await this.ensureCategory(m.sub_category_id, m.sub_category_name, m.category_id, catById);
       await this.ensureCategory(m.category_id, m.category_name, null, catById);
@@ -1769,13 +1769,13 @@ export class ImporterService {
     }
 
     const name = (m.product_name ?? '').trim();
-    // مهرهای زمانی دقیق باسکول (خواستهٔ مالک ۱۳-۱۱): ثبت/آپدیت/آپدیت قیمت
-    // عیناً همان باسکول می‌مانند — «۲ دقیقه پیش» روی آگهی چندسالهٔ قدیمی،
+    // مهرهای زمانی دقیق پاسکال (خواستهٔ مالک ۱۳-۱۱): ثبت/آپدیت/آپدیت قیمت
+    // عیناً همان پاسکال می‌مانند — «۲ دقیقه پیش» روی آگهی چندسالهٔ قدیمی،
     // یعنی قیمت تازه است و خریدار گمراه می‌شود.
     // زنجیرهٔ fallback (۱۵-۱۱): مهر غایب هرگز به «لحظهٔ ایمپورت» نمی‌افتد —
     // چون سورت لیست‌ها با همین مهرهاست، آگهی قدیمی با مهر تازهٔ جعلی بالای
-    // «جدیدترین» می‌نشیند. قیمت غایب ← updated_at باسکول؛ آپدیت غایب ←
-    // آپدیت قیمت ← ثبت باسکول.
+    // «جدیدترین» می‌نشیند. قیمت غایب ← updated_at پاسکال؛ آپدیت غایب ←
+    // آپدیت قیمت ← ثبت پاسکال.
     const bkUpdated = this.bkDate(m.updated_at);
     const priceUpdatedAt = this.bkDate(m.last_price_update) ?? bkUpdated;
     const updatedAt = bkUpdated ?? priceUpdatedAt ?? this.bkDate(m.p_created_at) ?? new Date();
@@ -1785,12 +1785,12 @@ export class ImporterService {
       // آپدیت موجود‌ها — همان فیلدهای قبلی upsert
       update: {
         productName: name,
-        // <hr/> جداکنندهٔ خطوط باسکول → خط نو (خواستهٔ مالک ۱۴-۱۱)
+        // <hr/> جداکنندهٔ خطوط پاسکال → خط نو (خواستهٔ مالک ۱۴-۱۱)
         description,
         // مهر غایب = مقدار موجود حفظ می‌شود (null ننویس — کارت به مهر قدیمی
         // تکیه می‌کند)
         ...(priceUpdatedAt ? { priceUpdatedAt } : {}),
-        // پنجرهٔ اعتبار ۳روزه برای آگهی باسکولی بی‌معناست — قیمتش ماه‌ها/سال‌ها
+        // پنجرهٔ اعتبار ۳روزه برای آگهی پاسکالی بی‌معناست — قیمتش ماه‌ها/سال‌ها
         // قدیمی است و بج «قیمت منقضی شده» پنل بلافاصله می‌افتاد؛ کهنگی عمومی
         // با متن قرمز «بیش از یک ماه آپدیت نشده» در صفحهٔ آگهی گفته می‌شود.
         // با اولین ویرایش واقعی فروشنده، پنجرهٔ انتخابی خودش فعال می‌شود.
@@ -1864,7 +1864,7 @@ export class ImporterService {
     return row;
   }
 
-  /** ساخت زنجیرهٔ دستهٔ غایب (id عددی باسکول) */
+  /** ساخت زنجیرهٔ دستهٔ غایب (id عددی پاسکال) */
   private async ensureCategory(
     id: number,
     name: string,
@@ -1914,8 +1914,8 @@ export class ImporterService {
       });
       return;
     }
-    // پروفایل باسکول اصلاً نیامده — stub حداقلی با شمارهٔ ساختگی یکتا.
-    // یوزرنیم آیمچِ stub هم تصادفی است (الگوی bk-f- قدیمی یوزرنیم باسکول را
+    // پروفایل پاسکال اصلاً نیامده — stub حداقلی با شمارهٔ ساختگی یکتا.
+    // یوزرنیم آیمچِ stub هم تصادفی است (الگوی bk-f- قدیمی یوزرنیم پاسکال را
     // لو می‌داد — خواستهٔ مالک ۲۰-۱۱)
     try {
       const phone = await this.uniqueFakePhone(0, userName);
@@ -1945,7 +1945,7 @@ export class ImporterService {
   /** شمارهٔ ساختگی یکتا — پیشوند «08» + رقم (خواستهٔ مالک ۱۳-۱۱): هیچ شمارهٔ
    *  موبایل واقعی ایرانی (۰۹…) را اشغال نمی‌کند. فقط برای stub های
    *  failedImport (نشانگر «ایمپورت شکست‌خورده») استفاده می‌شود — نویسندگان
-   *  کامنت باسکول دیگر اصلاً User نمی‌شوند (جدول user_for_b_comment). */
+   *  کامنت پاسکال دیگر اصلاً User نمی‌شوند (جدول user_for_b_comment). */
   private async uniqueFakePhone(bkId: number, userName: string): Promise<string> {
     for (let i = 0; i < 50; i++) {
       const candidate = `08${String(100000000 + ((bkId + i * 7919) % 900000000)).slice(-9)}`;
@@ -1953,14 +1953,14 @@ export class ImporterService {
         where: { phone: candidate },
         select: { userName: true, bUserName: true },
       });
-      // مالکِ مجاز: خودِ این کاربر باسکول — با bUserName (جدید) یا userName
+      // مالکِ مجاز: خودِ این کاربر پاسکال — با bUserName (جدید) یا userName
       // (رکوردهای قدیمی پیش از جداسازی هویت)
       if (!owner || owner.bUserName === userName || owner.userName === userName) return candidate;
     }
     return `08${String(Date.now()).slice(-9)}`;
   }
 
-  /** تاریخ باسکول «2026-09-27 14:29:20» → Date (UTC) */
+  /** تاریخ پاسکال «2026-09-27 14:29:20» → Date (UTC) */
   private bkDate(s: string | null | undefined): Date | null {
     if (!s) return null;
     const d = new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z');
@@ -2080,7 +2080,7 @@ export class ImporterService {
   // ═══════════════════════════ پیش‌نمایش ═══════════════════════════
 
   /** خواندن دادهٔ ایمپورت‌شدهٔ یک کاربر از دیتابیس ایمچ (قرارداد فرانت).
-   *  ورودی یوزرنیم باسکول است — تطبیق با bUserName (یوزرنیم آیمچ از ۲۰-۱۱
+   *  ورودی یوزرنیم پاسکال است — تطبیق با bUserName (یوزرنیم آیمچ از ۲۰-۱۱
    *  تصادفی است)؛ fallback هم‌نامی با userName برای رکوردهای پیش از مهاجرت. */
   async preview(userName: string) {
     const user = await this.prisma.user.findFirst({
@@ -2100,7 +2100,7 @@ export class ImporterService {
         take: 10,
         include: { author: true },
       }),
-      // کامنت‌های باسکولی همین فروشنده — نویسندهٔ ساختگی user_for_b_comment
+      // کامنت‌های پاسکالی همین فروشنده — نویسندهٔ ساختگی user_for_b_comment
       this.prisma.bComment.findMany({
         where: { sellerId: user.id },
         orderBy: { createdAt: 'desc' },
@@ -2146,7 +2146,7 @@ export class ImporterService {
         id: user.id,
         phone: user.phone,
         userName: user.userName,
-        // هویت دوگانه (خواستهٔ مالک ۲۰-۱۱) — یوزرنیم آیمچ مستقل + هویت باسکول
+        // هویت دوگانه (خواستهٔ مالک ۲۰-۱۱) — یوزرنیم آیمچ مستقل + هویت پاسکال
         bUserName: user.bUserName,
         bVerified: user.bVerified,
         firstName: user.firstName,
@@ -2155,7 +2155,7 @@ export class ImporterService {
         isSeller: user.isSeller,
         role: user.role,
         createdAt: user.createdAt.toISOString(),
-        // داده‌های باسکول از سند b؛ fallback رکوردهای قدیمی (پیش از b)
+        // داده‌های پاسکال از سند b؛ fallback رکوردهای قدیمی (پیش از b)
         bUserId: b?.userId ?? ((pj.bUserId as number) ?? null),
         bActivePackageType: b?.premium.packageType ?? user.activePakageType,
         bPremium: b ? b.premium : null,
@@ -2201,7 +2201,7 @@ export class ImporterService {
           localUrl: url.startsWith('http') ? null : url,
         })),
       })),
-      // کامنت‌های واقعی اول، بعد کامنت‌های باسکولی — همان ترتیب صفحهٔ عمومی
+      // کامنت‌های واقعی اول، بعد کامنت‌های پاسکالی — همان ترتیب صفحهٔ عمومی
       reviews: [
         ...reviews.map((r) => ({
           id: r.id,
@@ -2224,7 +2224,7 @@ export class ImporterService {
             firstName: r.author.firstName,
             lastName: r.author.lastName,
             city: r.author.city,
-            isStub: true, // نویسندهٔ باسکولی — کاربر ایمچ نیست
+            isStub: true, // نویسندهٔ پاسکالی — کاربر ایمچ نیست
           },
         })),
       ],
@@ -2245,7 +2245,7 @@ function normalizeFa(text: string | null | undefined): string {
 }
 
 /**
- * تشخیص متن خودکار «دربارهٔ کسب‌وکار» باسکول — دو نسل قالب دارد:
+ * تشخیص متن خودکار «دربارهٔ کسب‌وکار» پاسکال — دو نسل قالب دارد:
  *
  * نسل اینکوباک (نام قدیمی سایت — گزارش مالک ۱۳-۱۱؛ ۳ مورد از ۴ مورد در
  * دیتای فعلی همین شکل است):
@@ -2253,13 +2253,13 @@ function normalizeFa(text: string | null | undefined): string {
  *  من رو دکمه ی ارسال پیام کلیک کنید. خوشحال می شوم اگر پروفایل من را
  *  با دوستان خود به اشتراک بگذارید.»
  *
- * نسل باسکول (نمونهٔ مالک ۱۳-۱۱):
+ * نسل پاسکال (نمونهٔ مالک ۱۳-۱۱):
  * «بشیر قربانی هستم از شهر مریوان در حال خرید و فروش عمده در بازار بزرگ
- *  باسکول. برای ارتباط با من روی دکمه ی ارسال پیام بزنید. خوشحال می شوم
+ *  پاسکال. برای ارتباط با من روی دکمه ی ارسال پیام بزنید. خوشحال می شوم
  *  پروفایل من را با همکارانتان به اشتراک بگذارید.»
  *
  * اسکلت مشترک: جملهٔ «برای ارتباط با من رو[ی] دکمه …» + «… به اشتراک
- * بگذارید.» + اشاره به برند (باسکول/اینکوباک، با ی/ک عربی هم). این متن
+ * بگذارید.» + اشاره به برند (پاسکال/اینکوباک، با ی/ک عربی هم). این متن
  * محصول خودِ کاربر نیست → در businessDesc نمی‌نشیند تا صفحهٔ آیمچ متن
  * پارامتریک خودش (lib/seller-text فرانت) را نشان دهد (خواستهٔ مالک).
  */
@@ -2268,16 +2268,16 @@ export function isBuskoolAutoDesc(desc: string | null | undefined): boolean {
   const t = normalizeFa(desc);
   const contact = t.includes('برای ارتباط با من رو') && t.includes('به اشتراک بگذارید');
   const brand =
-    /در حال خرید و فروش عمده در بازار بزرگ (باسکول|اینکوباک)/.test(t) ||
-    /در سامانه ?ی? ?(باسکول|اینکوباک) هستم/.test(t) ||
-    /در (وب ?سایت|سایت) (باسکول|اینکوباک)/.test(t);
+    /در حال خرید و فروش عمده در بازار بزرگ (پاسکال|اینکوباک)/.test(t) ||
+    /در سامانه ?ی? ?(پاسکال|اینکوباک) هستم/.test(t) ||
+    /در (وب ?سایت|سایت) (پاسکال|اینکوباک)/.test(t);
   return contact && brand;
 }
 
 /**
  * جایگزینی نام برندهای قدیمی با «آیمچ» در متن‌های «خودِ کاربر» (خواستهٔ
- * مالک ۱۳-۱۱: «کلا اگر در توضیحات کلمه باسکول دیدی با آیمچ جایگزین کن»):
- * «باسکول» و نام قدیمی‌اش «اینکوباک». ک/ك عربی هم پوشیده داده می‌شود.
+ * مالک ۱۳-۱۱: «کلا اگر در توضیحات کلمه پاسکال دیدی با آیمچ جایگزین کن»):
+ * «پاسکال» و نام قدیمی‌اش «اینکوباک». ک/ك عربی هم پوشیده داده می‌شود.
  * فقط همین دو واژه — بقیهٔ متن دست نمی‌خورد.
  */
 export function aimchifyBrandMentions(text: string | null | undefined): string {
@@ -2353,7 +2353,7 @@ export async function fetchImage(
     try {
       r = await fetchImageOnce(rawUrl);
     } catch (err) {
-      // قطع شبکه — مثل API باسکول بایست تا وصل شود و همان عکس ادامه یابد
+      // قطع شبکه — مثل API پاسکال بایست تا وصل شود و همان عکس ادامه یابد
       if (!firstNetErrAt) firstNetErrAt = Date.now();
       else if (Date.now() - firstNetErrAt > 10 * 60_000) return null;
       await waitForOnline(stop);
@@ -2398,7 +2398,7 @@ async function fetchImageOnce(rawUrl: string): Promise<{ buf: Buffer; mime: stri
     }
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0 || buf.length > 8 * 1024 * 1024) return null;
-    // امضای واقعی تصویر؟ (CDN باسکول گاهی octet-stream می‌فرستد) — mime از
+    // امضای واقعی تصویر؟ (CDN پاسکال گاهی octet-stream می‌فرستد) — mime از
     // بایت‌ها، نه از هدر؛ UploadsService همان پردازش آپلود عادی را اجرا می‌کند.
     if (buf[0] === 0xff && buf[1] === 0xd8) return { buf, mime: 'image/jpeg' };
     if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e) return { buf, mime: 'image/png' };

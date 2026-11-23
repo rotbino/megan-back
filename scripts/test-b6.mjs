@@ -39,7 +39,7 @@ async function login(phone) {
   return v.json?.data?.accessToken;
 }
 
-/** تصویر تستی jpeg — بافت پرجزئیات > ۲۰KB (قاعده باسکول) */
+/** تصویر تستی jpeg — بافت پرجزئیات > ۲۰KB (قاعده پاسکال) */
 async function makeJpeg(label) {
   const { default: sharp } = await import('sharp');
   const W = 1100, H = 750;
@@ -74,7 +74,7 @@ async function makeJpeg(label) {
   const adminJwt = await adminLogin();
   check('ورود کاربر و ادمین', !!userToken && !!adminJwt);
 
-  // ۰.۵) یک آگهی برای تست denorm نشان احراز هویت (کرمان/شهر بابک — زوج واقعی باسکول)
+  // ۰.۵) یک آگهی برای تست denorm نشان احراز هویت (کرمان/شهر بابک — زوج واقعی پاسکال)
   const cp = await post('products/createProduct', {
     subCategoryId: 44, // پسته
     productName: 'آگهی تست B6',

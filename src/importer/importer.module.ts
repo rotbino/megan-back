@@ -14,7 +14,7 @@ import { DaymatController } from './daymat.controller';
 import { DaymatService } from './daymat.service';
 
 /**
- * ایمپورتر باسکول — ابزار داخلی ادمین (بازسازی ۱۳-۱۱).
+ * ایمپورتر پاسکال — ابزار داخلی ادمین (بازسازی ۱۳-۱۱).
  * PrismaModule گلوبال است. عکس‌ها از طریق UploadsService وارد می‌شوند تا
  * «دقیقاً همان مسیر/پردازش/واترمارک آپلود عادی کاربر» را بگیرند
  * (users/{userId}/… — خواستهٔ مالک ۱۳-۱۱)؛ درایور پاک‌سازی درون سرویس

@@ -5,7 +5,7 @@ import { ProductsService } from '../products/products.service';
 import { LocationsService } from '../locations/locations.service';
 import type { AuthUser } from '../common/guards';
 
-/** سقف علاقه‌مندی‌ها — مثل ظرفیت لیست‌های CRM باسکول */
+/** سقف علاقه‌مندی‌ها — مثل ظرفیت لیست‌های CRM پاسکال */
 const FAVORITES_LIMIT = 200;
 
 export interface FavoriteSellerDto {

@@ -23,7 +23,7 @@ const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
 
 // تولید یوزرنیم عمومی به utils مشترک رفت (src/common/user-name.ts) — ثبت‌نام و
-// ایمپورتر باسکول از یک سازنده استفاده می‌کنند (قاعدهٔ هویت ۲۰-۱۱).
+// ایمپورتر پاسکال از یک سازنده استفاده می‌کنند (قاعدهٔ هویت ۲۰-۱۱).
 
 @Injectable()
 export class AuthService implements OnModuleInit, OnModuleDestroy {
@@ -197,8 +197,8 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
     // ۱) رابطه‌های سادهٔ مالکیت — فقط جابه‌جایی مالک (بدون قید یکتا)
     // آگهی‌ها با دستور خام جابه‌جا می‌شوند: updateMany عادی @updatedAt را به
-    // «اکنون» می‌گذارد و ادغام اکانت، مهرهای دقیق باسکول (ثبت/آپدیت/قیمت)
-    // را پاک می‌کرد (خواستهٔ مالک ۱۳-۱۱: مهرهای آگهی عین باسکول بمانند).
+    // «اکنون» می‌گذارد و ادغام اکانت، مهرهای دقیق پاسکال (ثبت/آپدیت/قیمت)
+    // را پاک می‌کرد (خواستهٔ مالک ۱۳-۱۱: مهرهای آگهی عین پاسکال بمانند).
     await p.$runCommandRaw({
       update: 'Product',
       updates: [
@@ -402,9 +402,9 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     }
 
     // ۹) ادغام پرچم‌ها/کیف پول/بسته — فیلدهای خالی از حساب جذب‌شده پر می‌شوند.
-    // هویت باسکولی حساب جذب‌شده هم به مالک جدید می‌رسد (خواستهٔ مالک ۲۰-۱۱):
+    // هویت پاسکالی حساب جذب‌شده هم به مالک جدید می‌رسد (خواستهٔ مالک ۲۰-۱۱):
     // بدون این، پس از ادغام bUserName گم می‌شد و «ایمپورت از وب» و آپدیت
-    // قیمت‌های بعدی باسکول برای این کاربر کار نمی‌کرد.
+    // قیمت‌های بعدی پاسکال برای این کاربر کار نمی‌کرد.
     const betterPackage =
       (stale.packageExpiresAt?.getTime() ?? 0) > (keeper.packageExpiresAt?.getTime() ?? 0);
     await p.user.update({
@@ -433,7 +433,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
           : stale.profile !== null
             ? { profile: stale.profile as Prisma.InputJsonValue }
             : {}),
-        // سند رفتار باسکول — الگوی profile: مالک خودش دارد وگرنه از جذب‌شده
+        // سند رفتار پاسکال — الگوی profile: مالک خودش دارد وگرنه از جذب‌شده
         ...(keeper.b !== null
           ? { b: keeper.b as Prisma.InputJsonValue }
           : stale.b !== null
@@ -505,7 +505,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     // کد مصرف شد
     await this.prisma.otpCode.delete({ where: { id: latest.id } }).catch(() => undefined);
 
-    // ورود/ثبت‌نام یکجا — مثل باسکول
+    // ورود/ثبت‌نام یکجا — مثل پاسکال
     let user = await this.prisma.user.findUnique({ where: { phone } });
     let isNewUser = false;
     if (!user) {

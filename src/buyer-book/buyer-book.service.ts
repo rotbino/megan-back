@@ -20,7 +20,7 @@ const RECENT_WINDOW_MS = 7 * 86_400_000;
 /** تلاش تولید آیدی تصادفی آزاد */
 const FRESH_RETRIES = 10;
 
-/** قالب تاریخ باسکول — یکدست با بقیهٔ API */
+/** قالب تاریخ پاسکال — یکدست با بقیهٔ API */
 const fmtDate = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().slice(0, 19).replace('T', ' ') : '';
 
