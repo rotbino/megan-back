@@ -822,6 +822,41 @@ export class PriceUpdateService {
     }
   }
 
+  /** ثبت دستی شمارهٔ موبایل روی رکورد «در انتظار ایمپورت» (خواستهٔ مالک
+   *  ۲۴-۱۱): وقتی گرفتن خودکار از پاسکال به هر دلیلی نشد، شماره را مالک
+   *  دستی از باسکول می‌گیرد و در مودال وارد می‌کند؛ اینجا اول در دیتابیس
+   *  ذخیره می‌شود و بعد فرانت بلافاصله ایمپورت کامل را شروع می‌کند —
+   *  بدون مصرف سهمیهٔ ۲۰تایی کوکی. */
+  async setPendingPhone(
+    adminPhone: string,
+    input: { bUserName: string; phone: string },
+  ): Promise<{ saved: boolean; phone: string; at: string }> {
+    this.assertAdmin(adminPhone);
+    const bUserName = (input.bUserName ?? '').trim().replace(/^@/, '');
+    if (!bUserName) {
+      throw AppError.badRequest('یوزرنیم پاسکال لازم است', 'PENDING_USER_REQUIRED');
+    }
+    const phone = normalizePhone(input.phone);
+    if (!phone) {
+      throw AppError.badRequest(
+        'شمارهٔ موبایل معتبر نیست — ۱۱ رقم و با ۰۹ شروع شود (مثل ۰۹۱۲۳۴۵۶۷۸۹)؛ ارقام فارسی هم می‌نویسید خودکار تبدیل می‌شود',
+        'PHONE_INVALID',
+      );
+    }
+    const upd = await this.prisma.pendingImportUser.updateMany({
+      where: { bUserName },
+      data: { phone, phoneTakenAt: new Date() },
+    });
+    if (upd.count === 0) {
+      throw AppError.badRequest(
+        `رکورد «در انتظار ایمپورت» برای @${bUserName} پیدا نشد — شاید همین الان ایمپورت شده و از لیست خارج شده؛ لیست را تازه کنید`,
+        'PENDING_NOT_FOUND',
+      );
+    }
+    this.logger.log(`pending phone-set manual @${bUserName} (بدون مصرف سهمیهٔ کوکی)`);
+    return { saved: true, phone, at: new Date().toISOString() };
+  }
+
   // ═══════════════════════════ استخراج تک‌کاربر ═══════════════════════════
 
   /**

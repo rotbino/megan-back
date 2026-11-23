@@ -11,7 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ok } from '../common/api-response';
 import { PriceUpdateService } from './price-update.service';
-import { ExtractUserDto, FetchPhoneDto, PendingListDto, SetPascalCookieDto, UpdateScanDto } from './dto';
+import { ExtractUserDto, FetchPhoneDto, PendingListDto, SetPascalCookieDto, SetPendingPhoneDto, UpdateScanDto } from './dto';
 
 @ApiTags('importer')
 @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -71,6 +71,20 @@ export class PriceUpdateController {
         pId: dto.pId,
         sProfileId: dto.sProfileId,
         bUserName: dto.bUserName,
+      }),
+    );
+  }
+
+  @Post('set-phone')
+  @ApiOperation({
+    summary:
+      'ثبت دستی شمارهٔ موبایل روی رکورد «در انتظار ایمپورت» — وقتی گرفتن خودکار از پاسکال به هر دلیلی نشد؛ شماره اول در دیتابیس ذخیره می‌شود (بدون مصرف سهمیهٔ کوکی) و فرانت بلافاصله ایمپورت کامل را شروع می‌کند (خواستهٔ مالک ۲۴-۱۱)',
+  })
+  async setPhone(@Body() dto: SetPendingPhoneDto) {
+    return ok(
+      await this.priceUpdate.setPendingPhone(dto.adminPhone, {
+        bUserName: dto.bUserName,
+        phone: dto.phone,
       }),
     );
   }
