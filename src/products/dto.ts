@@ -433,3 +433,13 @@ export class WebImportStartDto {
   @IsIn(['full', 'prices'])
   mode!: 'full' | 'prices';
 }
+
+/** POST /products/getMarketReport (۲۵-۱۱) — گزارش بازار صنف فروشنده
+ *  بدون پارامتر: صنفِ پرآگهی‌ترین آگهی‌های خودش. subCategoryId اختیاری برای
+ *  صنف دیگری از آگهی‌هایش (تعویض صنف در UI). */
+export class GetMarketReportDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  subCategoryId?: number;
+}

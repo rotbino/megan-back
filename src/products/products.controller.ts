@@ -6,6 +6,7 @@ import {
   BulkUpdatePricesDto,
   CreateProductDto,
   DeleteMyProductDto,
+  GetMarketReportDto,
   GetMyProductDetailDto,
   GetMyProductStatsDto,
   GetProductByIdDto,
@@ -27,6 +28,7 @@ import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 import { WebImportService } from './web-import.service';
+import { MarketReportService } from './market-report.service';
 
 @ApiTags('products')
 /** حد نرخ ریزتر از سراسری — لیست/جزئیات + ثبت آگهی */
@@ -36,6 +38,7 @@ export class ProductsController {
   constructor(
     private readonly products: ProductsService,
     private readonly webImport: WebImportService,
+    private readonly marketReport: MarketReportService,
   ) {}
 
   @Post('getProductList')
@@ -99,6 +102,18 @@ export class ProductsController {
   @ApiOperation({ summary: 'آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت' })
   async getMyProducts(@CurrentUser() user: AuthUser) {
     return ok(await this.products.getMyProducts(user.id));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('getMarketReport')
+  @ApiOperation({
+    summary:
+      'گزارش بازار صنف فروشنده (۲۵-۱۱) — میانه/بازه/تغییر قلم‌های صنف از آگهی‌های واقعی؛ رایگان: ۳ قلم شخصی + شاخص + تلنگر؛ بستهٔ فعال: جدول کامل',
+  })
+  async getMarketReport(@CurrentUser() user: AuthUser, @Body() dto: GetMarketReportDto) {
+    return ok(await this.marketReport.getMarketReport(user, dto));
   }
 
   // ─── «ثبت گروهی محصول» — ایمپورت از وب (۱۸-۱۱) ─────────────────────
