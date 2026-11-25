@@ -13,6 +13,7 @@ import {
   computeTiers,
   computeCities,
   changeAndSpark,
+  freshRows,
   type ReportTier,
   type ReportCity,
 } from './market-report.service';
@@ -26,7 +27,7 @@ import type { GetItemReportDto } from './dto';
 //     قیمت در برابر سایر فروشنده‌های همان قلم (تجمیمی).
 //  ۲. getBuyAdvisor — مشاور خرید دوره‌ای: سبد خرید دوره‌ای خریدار (BuyerCategory)
 //     × قیمت بازار؛ سیگنال «الان بخر / صبر کن» از فاصلهٔ قیمت امروز تا
-//     میانگین ۸ هفتهٔ همان قلم.
+//     میانگین روزهای اخیر همان قلم (پنجرهٔ ۷ روزه — بازار روزانه نوسان دارد).
 //  ۳. getOpportunityMap — نقشهٔ فرصت فروش: تقاضا (درخواست خرید ۳۰ روز + بازدید
 //     آگهی‌ها) ÷ عرضه (فروشنده‌های همان صنف) — صادقانه «تقاضای ثبت‌شده»
 //     نه «فروش تضمینی».
@@ -42,6 +43,7 @@ const FREE_ROWS = 3;
 const ADVISOR_ITEMS = 5;
 const OPPORTUNITY_TOP = 30;
 const INDEX_TOP = 12;
+const TREND_WINDOW_DAYS = 7; // روند روزانه — فقط هفتهٔ اخیر
 
 @Injectable()
 export class ReportsService {
@@ -95,10 +97,23 @@ export class ReportsService {
         unit: true,
         minSaleAmount: true,
         cityId: true,
+        priceUpdatedAt: true,
       },
     });
     const ofGroup = rows.filter((r) => normalizeItemName(r.productName) === group);
-    const sellers = new Set(ofGroup.map((r) => r.userId)).size;
+    const totalSellers = new Set(ofGroup.map((r) => r.userId)).size;
+
+    // گِیت تازگی: مبنا فقط قیمت‌های به‌روزشده (۳ روز؛ وگرنه ۷ روز)
+    const allRows = ofGroup.map((r) => ({
+      id: r.id,
+      price: r.minSalePrice,
+      userId: r.userId,
+      unit: r.unit,
+      minSaleAmount: r.minSaleAmount,
+      cityId: r.cityId,
+      priceUpdatedAt: r.priceUpdatedAt,
+    }));
+    const { rows: fresh, basisDays } = freshRows(allRows);
 
     const category = await this.marketReport.categoryInfo(leaf);
     const cityNames = await cityNamesFor(this.prisma, ofGroup.map((r) => r.cityId));
@@ -119,35 +134,36 @@ export class ReportsService {
       generatedAt: new Date().toISOString(),
     };
 
-    if (sellers < MIN_SELLERS) {
-      // صداقت: قلم هنوز آمار ندارد — عدد نصفه نمی‌سازیم
-      return { ...base, sufficient: false, sellers };
+    if (basisDays == null) {
+      // صداقت: قیمت‌های به‌روزشدهٔ کافی نیست — عدد کهنه نمی‌سازیم
+      return { ...base, sufficient: false, sellers: totalSellers };
     }
+    const sellers = new Set(fresh.map((r) => r.userId)).size;
 
-    // پارازیت‌زدایی هم‌قرارداد رصد صنف
-    const prices = ofGroup.map((r) => r.minSalePrice);
+    // پارازیت‌زدایی هم‌قرارداد رصد صنف — روی قیمت‌های تازه
+    const prices = fresh.map((r) => r.price);
     const m1 = median(prices)!;
     const kept = prices.filter((p) => p >= m1 / 3 && p <= m1 * 3);
     const use = kept.length >= MIN_SELLERS ? kept : prices;
     const med = median(use)!;
-    const healthyRows = ofGroup.filter(
-      (r) => r.minSalePrice >= m1 / 3 && r.minSalePrice <= m1 * 3,
-    );
-    const useRows = healthyRows.length >= MIN_SELLERS ? healthyRows : ofGroup;
+    const healthyRows = fresh.filter((r) => r.price >= m1 / 3 && r.price <= m1 * 3);
+    const useRows = healthyRows.length >= MIN_SELLERS ? healthyRows : fresh;
     const reportRows = useRows.map((r) => ({
-      price: r.minSalePrice,
+      id: r.id,
+      price: r.price,
       userId: r.userId,
       minSaleAmount: r.minSaleAmount,
       cityId: r.cityId,
+      priceUpdatedAt: r.priceUpdatedAt,
     }));
 
-    // تاریخچهٔ قیمت همان قلم — تغییر هفتگی + اسپارک
+    // تاریخچهٔ قیمت همان قلم — تغییر هفته + روند روزانه (پنجرهٔ ۷ روزه)
     const pidToUser = new Map<number, string>();
-    for (const r of ofGroup) pidToUser.set(r.id, r.userId);
+    for (const r of fresh) pidToUser.set(r.id, r.userId);
     const history = await this.prisma.productEditHistory.findMany({
       where: {
-        productId: { in: ofGroup.map((r) => r.id) },
-        createdAt: { gte: new Date(Date.now() - 56 * DAY_MS) }, // پنجرهٔ ۸ هفتهٔ غلتان — هم‌قاعد market-report
+        productId: { in: fresh.map((r) => r.id) },
+        createdAt: { gte: new Date(Date.now() - TREND_WINDOW_DAYS * DAY_MS) },
       },
       select: { productId: true, before: true, after: true, createdAt: true },
     });
@@ -163,7 +179,7 @@ export class ReportsService {
       });
     }
     const { changePct, spark } = changeAndSpark(
-      ofGroup.map((r) => r.id),
+      fresh.map((r) => r.id),
       historyByProduct,
       pidToUser,
       med,
@@ -178,12 +194,13 @@ export class ReportsService {
       ? Math.round((use.filter((p) => p < product.minSalePrice).length / use.length) * 100)
       : null;
 
-    const units = new Set(ofGroup.map((r) => r.unit));
+    const units = new Set(fresh.map((r) => r.unit).filter((u): u is string => u != null));
     return {
       ...base,
       sufficient: true,
       sellers,
-      listings: ofGroup.length,
+      listings: fresh.length,
+      basisDays,
       median: Math.round(med),
       min: Math.round(Math.min(...use)),
       max: Math.round(Math.max(...use)),
@@ -216,7 +233,7 @@ export class ReportsService {
       const agg = await this.marketReport.getAggregate(leaf);
       const category = await this.marketReport.categoryInfo(leaf);
       const items = agg.items.slice(0, ADVISOR_ITEMS).map((it) => {
-        // سیگنال: قیمت امروز نسبت به میانگین ۸ هفتهٔ خود قلم
+        // سیگنال: قیمت امروز نسبت به میانگین روزهای پیش از امروز (نقاط روزانهٔ ۷ روز اخیر)
         let signal: 'buy' | 'wait' | null = null;
         let devPct: number | null = null;
         if (it.spark && it.spark.length >= 3) {
@@ -236,6 +253,7 @@ export class ReportsService {
           min: it.min,
           max: it.max,
           changePct: it.changePct,
+          basisDays: it.basisDays,
           spark: packageActive ? it.spark : null,
           cities: packageActive ? (it.cities ?? null) : null,
           tiers: packageActive ? (it.tiers ?? null) : null,

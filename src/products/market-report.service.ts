@@ -26,19 +26,24 @@ import type { GetMarketReportDto } from './dto';
 //     کنار گذاشته می‌شوند و آمار روی باقیٔ سالم دوباره ساخته می‌شود —
 //     پروبِ زنده نشان داد بازه‌های ۱۰۰× واقعی در داده هست (کود اوره:
 //     ۱٬۵۰۰ تا ۳٬۳۰۰٬۰۰۰).
-//  ۶. تغییر هفتگی: از تاریخچهٔ price-sync (ProductEditHistory) فقط جایی
-//     که ≥۳ تغییر واقعی در ۱۴ روز ثبت شده باشد؛ نبود → «—» (داده تازه
-//     نیست). با تکرار هفتگی price-sync این ستون خودش پُر می‌شود.
-//  ۷. رایگان: ۳ قلم شخصی (قلم‌هایی که خود فروشنده آگهی دارد) + شاخص صنف
+//  ۶. تازگی مبنای قیمت (۲۶-۱۱ — مالک): قیمت‌ها در ایران روزانه نوسان
+//     می‌کنند؛ فقط آگهی‌های «به‌روزشده» ملاک‌اند — پنجرهٔ ۳ روز اگر
+//     ≥۳ فروشندهٔ به‌روزشده باشد، وگرنه ۷ روز (حداکثر). قیمت‌های کهنه
+//     هیچ‌وقت مبنای مقایسه نمی‌شوند؛ نبود دادهٔ تازه = «داده کافی نیست».
+//  ۷. تغییر و روند: هر دو فقط از همان هفتهٔ اخیر — «تغییر هفته» = میانهٔ
+//     تغییر قیمت‌های ثبت‌شدهٔ ۷ روز اخیر (≥۳ فروشنده)؛ روند = نقاط روزانه
+//     از تاریخچهٔ price-sync (≥۲ روز داده).
+//  ۸. رایگان: ۳ قلم شخصی (قلم‌هایی که خود فروشنده آگهی دارد) + شاخص صنف
 //     + تلنگر «چند قلم دیگر تغییر کردند»؛ بستهٔ فعال = جدول کامل ۳۰ قلم.
-//  ۸. کش: بخش تجمیعی (مستقل از کاربر) ۵ دقیقه روی هر صنف کش می‌شود —
+//  ۹. کش: بخش تجمیعی (مستقل از کاربر) ۵ دقیقه روی هر صنف کش می‌شود —
 //     فروشندگان یک صنف همه همان محاسبه را می‌بینند.
 
 const MIN_SELLERS = 3;
 const TOP_ITEMS = 30;
 const FREE_PERSONAL_ITEMS = 3;
-const CHANGE_WINDOW_DAYS = 14;
-const SPARK_WINDOW_DAYS = 56; // پنجرهٔ روند اسپارک/نمودار: ۸ هفتهٔ غلتان (قیمت امروز نقطهٔ آخر)
+const CHANGE_WINDOW_DAYS = 7; // تغییر و روند: فقط هفتهٔ اخیر — بازار روزانه نوسان دارد
+/** مبنای تازگی قیمت: ۳ روز اگر ≥۳ فروشندهٔ به‌روزشده، وگرنه ۷ روز (حداکثر) */
+const BASIS_WINDOWS: readonly number[] = [3, 7];
 const OUTLIER_LO = 1 / 3;
 const OUTLIER_HI = 3;
 const DAY_MS = 86_400_000;
@@ -66,10 +71,27 @@ export interface ReportCity {
 
 /** سطر خام یک آگهی برای محاسبهٔ پله/شهر — فقط فیلد سبک */
 export interface ReportRow {
+  id: number;
   price: number;
   userId: string;
   minSaleAmount: number;
   cityId: number;
+  /** آخرین به‌روزرسانی قیمت — null یعنی قدیمی (ملاک نیست) */
+  priceUpdatedAt: Date | null;
+}
+
+/** گِیت تازگی مبنا: فقط سطرهای به‌روزشده؛ ۳ روز اگر ≥MIN_SELLERS فروشنده،
+ *  وگرنه ۷ روز؛ هیچ‌کدام → basisDays=null (قلم «دادهٔ کافی نیست») */
+export function freshRows<T extends ReportRow>(rows: T[]): { rows: T[]; basisDays: 3 | 7 | null } {
+  const now = Date.now();
+  for (const days of BASIS_WINDOWS) {
+    const since = now - days * DAY_MS;
+    const fresh = rows.filter((r) => r.priceUpdatedAt != null && r.priceUpdatedAt.getTime() >= since);
+    if (new Set(fresh.map((r) => r.userId)).size >= MIN_SELLERS) {
+      return { rows: fresh, basisDays: days as 3 | 7 };
+    }
+  }
+  return { rows: [] as T[], basisDays: null };
 }
 
 /** نرمال‌سازی نام قلم — «سیب قرمز و زرد» ≡ «سیب زرد و قرمز»
@@ -175,16 +197,16 @@ export function computeCities(
   return res.length ? res : null;
 }
 
-/** تغییر هفتگی + اسپارک هفتگی از تاریخچهٔ price-sync — هم‌قرارداد v1 */
+/** تغییر هفته + روند روزانه از تاریخچهٔ price-sync — هم‌قرارداد v1 */
 export function changeAndSpark(
   productIds: number[],
   historyByProduct: Map<number, Array<{ before: number; after: number; at: Date }>>,
   pidToUser: Map<number, string>,
   med: number,
-): { changePct: number | null; spark: Array<{ weekStart: string; value: number }> | null } {
+): { changePct: number | null; spark: Array<{ dayStart: string; value: number }> | null } {
   const listingChanges: number[] = [];
   const changedSellers = new Set<string>();
-  // «تغییر هفته» فقط تغییر‌های اخیر (۱۴ روز) — معنای هفته‌ای دقیق بماند
+  // «تغییر هفته» فقط تغییرهای هفتهٔ اخیر (۷ روز)
   const changeSince = Date.now() - CHANGE_WINDOW_DAYS * DAY_MS;
   for (const pid of productIds) {
     const hs = historyByProduct.get(pid);
@@ -198,22 +220,22 @@ export function changeAndSpark(
     listingChanges.length >= MIN_SELLERS && changedSellers.size >= MIN_SELLERS
       ? Math.round((median(listingChanges) ?? 0) * 1000) / 10
       : null;
-  // اسپارک هفتگی از کل پنجرهٔ ۸ هفته‌ای (هر هفته میانهٔ قیمت‌های همان هفته)
-  const weekBuckets = new Map<number, number[]>();
-  const nowWeek = Math.floor(Date.now() / (7 * DAY_MS));
+  // روند روزانهٔ هفتهٔ اخیر: هر روز میانهٔ قیمت‌های همان روز؛ امروز = میانهٔ مبنا
+  const dayBuckets = new Map<number, number[]>();
+  const nowDay = Math.floor(Date.now() / DAY_MS);
   for (const pid of productIds) {
     for (const h of historyByProduct.get(pid) ?? []) {
-      const wk = Math.floor(h.at.getTime() / (7 * DAY_MS));
-      (weekBuckets.get(wk) ?? weekBuckets.set(wk, []).get(wk)!).push(h.after);
+      const d = Math.floor(h.at.getTime() / DAY_MS);
+      (dayBuckets.get(d) ?? dayBuckets.set(d, []).get(d)!).push(h.after);
     }
   }
-  (weekBuckets.get(nowWeek) ?? weekBuckets.set(nowWeek, []).get(nowWeek)!).push(med);
+  (dayBuckets.get(nowDay) ?? dayBuckets.set(nowDay, []).get(nowDay)!).push(med);
   const spark =
-    weekBuckets.size >= 2
-      ? [...weekBuckets.entries()]
+    dayBuckets.size >= 2
+      ? [...dayBuckets.entries()]
           .sort((a, b) => a[0] - b[0])
-          .map(([wk, ps]) => ({
-            weekStart: new Date(wk * 7 * DAY_MS).toISOString(),
+          .map(([d, ps]) => ({
+            dayStart: new Date(d * DAY_MS).toISOString(),
             value: Math.round(median(ps) ?? 0),
           }))
       : null;
@@ -241,8 +263,10 @@ export interface MarketReportItem {
   min: number | null;
   max: number | null;
   changePct: number | null;
-  /** نقطه‌های هفتگی برای اسپارک‌لاین — فقط وقتی ≥۲ هفته داده باشد */
-  spark: Array<{ weekStart: string; value: number }> | null;
+  /** نقاط روزانهٔ هفتهٔ اخیر — فقط وقتی ≥۲ روز داده باشد */
+  spark: Array<{ dayStart: string; value: number }> | null;
+  /** پنجرهٔ تازگی مبنا: ۳ یا ۷ روز — null وقتی دادهٔ تازه کافی نیست */
+  basisDays: 3 | 7 | null;
   mixedUnit: boolean;
   /** پله‌های حجمی (خرده/میانه/عمده) — null یعنی دادهٔ پشتیبانِ پله نیست */
   tiers: ReportTier[] | null;
@@ -446,6 +470,7 @@ export class MarketReportService {
         unit: true,
         minSaleAmount: true,
         cityId: true,
+        priceUpdatedAt: true,
       },
     });
 
@@ -477,7 +502,7 @@ export class MarketReportService {
       g.prices.push(r.minSalePrice);
       g.units.add(r.unit);
       g.productIds.push(r.id);
-      g.rows.push({ price: r.minSalePrice, userId: r.userId, minSaleAmount: r.minSaleAmount, cityId: r.cityId });
+      g.rows.push({ id: r.id, price: r.minSalePrice, userId: r.userId, minSaleAmount: r.minSaleAmount, cityId: r.cityId, priceUpdatedAt: r.priceUpdatedAt });
       // نام نمونهٔ خواناتر (بلندترین) برای نمایش
       if (r.productName.length > g.sample.length) g.sample = r.productName;
     }
@@ -488,7 +513,7 @@ export class MarketReportService {
     const allIds = [...groups.values()].flatMap((g) => g.productIds);
     const history = allIds.length
       ? await this.prisma.productEditHistory.findMany({
-          where: { productId: { in: allIds }, createdAt: { gte: new Date(Date.now() - SPARK_WINDOW_DAYS * DAY_MS) } },
+          where: { productId: { in: allIds }, createdAt: { gte: new Date(Date.now() - CHANGE_WINDOW_DAYS * DAY_MS) } },
           select: { productId: true, before: true, after: true, createdAt: true },
         })
       : [];
@@ -509,35 +534,41 @@ export class MarketReportService {
     const changePcts: number[] = [];
 
     for (const g of groups.values()) {
-      if (g.users.size < MIN_SELLERS) {
+      // گِیت تازگی: فقط قیمت‌های به‌روزشده ملاک‌اند (۳ روز، وگرنه ۷ روز)
+      const { rows: frRows, basisDays } = freshRows(g.rows);
+      if (basisDays == null) {
         insufficient++;
         continue;
       }
+      const prices = frRows.map((r) => r.price);
+      const freshIds = frRows.map((r) => r.id);
+      const freshUsers = new Set(frRows.map((r) => r.userId));
 
       // پارازیت‌زدایی: بازهٔ [⅓میانه، ۳×میانه] و بازسازی آمار روی سالم‌ها
-      const m1 = median(g.prices)!;
-      const kept = g.prices.filter((p) => p >= m1 * OUTLIER_LO && p <= m1 * OUTLIER_HI);
-      const use = kept.length >= MIN_SELLERS ? kept : g.prices;
+      const m1 = median(prices)!;
+      const kept = prices.filter((p) => p >= m1 * OUTLIER_LO && p <= m1 * OUTLIER_HI);
+      const use = kept.length >= MIN_SELLERS ? kept : prices;
       const med = median(use)!;
 
       // سطرهای سالمِ همان گروه — برای پلهٔ حجمی + برش شهری
-      const healthyRows = g.rows.filter((r) => r.price >= m1 * OUTLIER_LO && r.price <= m1 * OUTLIER_HI);
-      const useRows = healthyRows.length >= MIN_SELLERS ? healthyRows : g.rows;
+      const healthyRows = frRows.filter((r) => r.price >= m1 * OUTLIER_LO && r.price <= m1 * OUTLIER_HI);
+      const useRows = healthyRows.length >= MIN_SELLERS ? healthyRows : frRows;
 
-      // تغییر هفتگی + اسپارک — از تاریخچهٔ price-sync (هم‌قرارداد v1)
-      const { changePct, spark } = changeAndSpark(g.productIds, historyByProduct, pidToUser, med);
+      // تغییر هفته + روند روزانه — از تاریخچهٔ price-sync (هم‌قرارداد v1)
+      const { changePct, spark } = changeAndSpark(freshIds, historyByProduct, pidToUser, med);
       if (changePct != null) changePcts.push(changePct);
 
       items.push({
         name: g.sample,
         unit: g.units.size === 1 ? [...g.units][0] : leaf.unit,
-        sellers: g.users.size,
-        listings: g.listings,
+        sellers: freshUsers.size,
+        listings: frRows.length,
         median: Math.round(med),
         min: Math.round(Math.min(...use)),
         max: Math.round(Math.max(...use)),
         changePct,
         spark,
+        basisDays,
         mixedUnit: g.units.size > 1,
         tiers: computeTiers(useRows),
         cities: computeCities(useRows, cityNames, MIN_SELLERS, 3),
