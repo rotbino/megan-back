@@ -443,3 +443,10 @@ export class GetMarketReportDto {
   @IsInt()
   subCategoryId?: number;
 }
+
+/** POST /products/getItemReport (۲۵-۱۱ راند ۲) — گزارش تک‌کالا روی خود آگهی */
+export class GetItemReportDto {
+  @Type(() => Number)
+  @IsInt()
+  productId!: number;
+}

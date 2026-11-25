@@ -43,6 +43,34 @@ const OUTLIER_HI = 3;
 const DAY_MS = 86_400_000;
 const CACHE_TTL_MS = TTL.FIVE_MIN;
 
+/** پلهٔ حجمی قلم — «خرده/میانه/عمده» از پراکندگی حداقل‌سفارشِ فروشنده‌ها */
+export interface ReportTier {
+  label: 'خرده' | 'میانه' | 'عمده';
+  /** کوچک‌ترین حداقل‌سفارشِ این پله (به واحد دسته) */
+  from: number;
+  sellers: number;
+  /** میانهٔ قیمت پله */
+  median: number;
+}
+
+/** برش شهری قلم — فقط شهرهای ≥۳ فروشندهٔ متمایز */
+export interface ReportCity {
+  cityId: number;
+  cityName: string;
+  sellers: number;
+  median: number;
+  min: number;
+  max: number;
+}
+
+/** سطر خام یک آگهی برای محاسبهٔ پله/شهر — فقط فیلد سبک */
+export interface ReportRow {
+  price: number;
+  userId: string;
+  minSaleAmount: number;
+  cityId: number;
+}
+
 /** نرمال‌سازی نام قلم — «سیب قرمز و زرد» ≡ «سیب زرد و قرمز»
  *  (مجموعهٔ واژه‌های مرتب‌شده بدون «و»)؛ رقم‌ها می‌مانند (کالیبر ۲۰/۲۲
  *  قلم متفاوت است). عربی→فارسی (ي/ك)، جداکننده‌ها → فاصله. */
@@ -59,11 +87,131 @@ export function normalizeItemName(name: string): string {
   return [...new Set(words)].sort().join(' ');
 }
 
-function median(nums: number[]): number | null {
+/** میانهٔ — هم‌قرارداد v1؛ عمومی برای بقیهٔ گزارشات */
+export function median(nums: number[]): number | null {
   if (!nums.length) return null;
   const s = [...nums].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/** نام شهرها به‌شناسهٔ عددی — یک کوئری برای همهٔ شهرهای موجود */
+export async function cityNamesFor(
+  prisma: Pick<PrismaService, 'location'>,
+  cityIds: number[],
+): Promise<Map<number, string>> {
+  const ids = [...new Set(cityIds)].filter((id) => id != null && id > 0);
+  if (!ids.length) return new Map();
+  const rows = await prisma.location.findMany({
+    where: { type: 'city', buskolId: { in: ids } },
+    select: { buskolId: true, name: true },
+  });
+  return new Map(rows.map((r) => [r.buskolId, r.name]));
+}
+
+/** پله‌های حجمی (خرده/میانه/عمده) — ترسوم حداقل‌سفارش‌ها؛ هر پله ≥۲ فروشندهٔ
+ *  متمایز وگرنه حذف؛ کمتر از ۲ پله → اصلاً تیر نیست (null). */
+export function computeTiers(rows: ReportRow[]): ReportTier[] | null {
+  if (rows.length < 6) return null;
+  const amounts = rows.map((r) => r.minSaleAmount).sort((a, b) => a - b);
+  const p33 = amounts[Math.floor(rows.length / 3)];
+  const p66 = amounts[Math.floor((rows.length * 2) / 3)];
+  if (p33 == null || p66 == null || p33 === p66) return null; // همه یک حداقل‌سفارش‌اند — پله معنا ندارد
+  const defs: Array<{ label: ReportTier['label']; lo: number; hi: number }> = [
+    { label: 'خرده', lo: -1, hi: p33 },
+    { label: 'میانه', lo: p33, hi: p66 },
+    { label: 'عمده', lo: p66, hi: Number.MAX_SAFE_INTEGER },
+  ];
+  const tiers: ReportTier[] = [];
+  for (const d of defs) {
+    const bucket = rows.filter((r) => r.minSaleAmount >= d.lo && r.minSaleAmount < d.hi);
+    const sellers = new Set(bucket.map((r) => r.userId)).size;
+    if (sellers < 2) continue;
+    const med = median(bucket.map((r) => r.price));
+    if (med == null) continue;
+    tiers.push({
+      label: d.label,
+      from: Math.min(...bucket.map((r) => r.minSaleAmount)),
+      sellers,
+      median: Math.round(med),
+    });
+  }
+  return tiers.length >= 2 ? tiers : null;
+}
+
+/** برش شهری — گروه‌بندی سطرها بر شهر؛ فقط شهرهای ≥minSellers فروشندهٔ متمایز */
+export function computeCities(
+  rows: ReportRow[],
+  cityNames: Map<number, string>,
+  minSellers: number,
+  top: number,
+): ReportCity[] | null {
+  const byCity = new Map<number, { prices: number[]; users: Set<string> }>();
+  for (const r of rows) {
+    if (!r.cityId) continue;
+    let c = byCity.get(r.cityId);
+    if (!c) byCity.set(r.cityId, (c = { prices: [], users: new Set() }));
+    c.prices.push(r.price);
+    c.users.add(r.userId);
+  }
+  const cities: ReportCity[] = [];
+  for (const [cityId, c] of byCity) {
+    const name = cityNames.get(cityId);
+    if (!name || c.users.size < minSellers) continue;
+    const med = median(c.prices);
+    if (med == null) continue;
+    cities.push({
+      cityId,
+      cityName: name,
+      sellers: c.users.size,
+      median: Math.round(med),
+      min: Math.round(Math.min(...c.prices)),
+      max: Math.round(Math.max(...c.prices)),
+    });
+  }
+  cities.sort((a, b) => b.sellers - a.sellers);
+  const res = cities.slice(0, top);
+  return res.length ? res : null;
+}
+
+/** تغییر هفتگی + اسپارک هفتگی از تاریخچهٔ price-sync — هم‌قرارداد v1 */
+export function changeAndSpark(
+  productIds: number[],
+  historyByProduct: Map<number, Array<{ before: number; after: number; at: Date }>>,
+  pidToUser: Map<number, string>,
+  med: number,
+): { changePct: number | null; spark: Array<{ weekStart: string; value: number }> | null } {
+  const listingChanges: number[] = [];
+  const changedSellers = new Set<string>();
+  for (const pid of productIds) {
+    const hs = historyByProduct.get(pid);
+    if (!hs?.length) continue;
+    changedSellers.add(pidToUser.get(pid) ?? String(pid));
+    for (const h of hs) listingChanges.push((h.after - h.before) / h.before);
+  }
+  const changePct =
+    listingChanges.length >= MIN_SELLERS && changedSellers.size >= MIN_SELLERS
+      ? Math.round((median(listingChanges) ?? 0) * 1000) / 10
+      : null;
+  const weekBuckets = new Map<number, number[]>();
+  const nowWeek = Math.floor(Date.now() / (7 * DAY_MS));
+  for (const pid of productIds) {
+    for (const h of historyByProduct.get(pid) ?? []) {
+      const wk = Math.floor(h.at.getTime() / (7 * DAY_MS));
+      (weekBuckets.get(wk) ?? weekBuckets.set(wk, []).get(wk)!).push(h.after);
+    }
+  }
+  (weekBuckets.get(nowWeek) ?? weekBuckets.set(nowWeek, []).get(nowWeek)!).push(med);
+  const spark =
+    weekBuckets.size >= 2
+      ? [...weekBuckets.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([wk, ps]) => ({
+            weekStart: new Date(wk * 7 * DAY_MS).toISOString(),
+            value: Math.round(median(ps) ?? 0),
+          }))
+      : null;
+  return { changePct, spark };
 }
 
 interface GroupRaw {
@@ -74,6 +222,8 @@ interface GroupRaw {
   users: Set<string>;
   units: Set<string>;
   listings: number;
+  /** سطرهای خام برای پلهٔ حجمی + برش شهری */
+  rows: ReportRow[];
 }
 
 export interface MarketReportItem {
@@ -88,6 +238,10 @@ export interface MarketReportItem {
   /** نقطه‌های هفتگی برای اسپارک‌لاین — فقط وقتی ≥۲ هفته داده باشد */
   spark: Array<{ weekStart: string; value: number }> | null;
   mixedUnit: boolean;
+  /** پله‌های حجمی (خرده/میانه/عمده) — null یعنی دادهٔ پشتیبانِ پله نیست */
+  tiers: ReportTier[] | null;
+  /** برش شهری (تا ۳ شهر) — null یعنی هیچ شهری ≥۳ فروشنده ندارد */
+  cities: ReportCity[] | null;
   /** قیمت خود فروشنده در همین قلم — فقط برای خودش (حریم: نام دیگران نه) */
   mine: { price: number; diffPct: number | null; expired: boolean } | null;
 }
@@ -126,11 +280,7 @@ export class MarketReportService {
       };
     }
 
-    const agg = await this.cache.wrap<Aggregate>(
-      `market-report:cat:${leaf.id}`,
-      { ttlMs: CACHE_TTL_MS },
-      () => this.buildAggregate(leaf),
-    );
+    const agg = await this.getAggregate(leaf);
 
     // ── لایهٔ شخصی (بیرون از کش): آگهی‌های خودِ فروشنده در همین صنف ──
     const mine = await this.prisma.product.findMany({
@@ -208,13 +358,27 @@ export class MarketReportService {
 
   // ─── داخلی ────────────────────────────────────────────────────────────
 
-  /** بستهٔ فعال مؤثر (انقضا لحاظ‌شده) */
-  private async packageActive(userId: string): Promise<boolean> {
+  /** بخش تجمیعی صنف (کش ۵ دقیقه) — هم‌فقرهٔ getMarketReport و بقیهٔ گزارشات */
+  async getAggregate(leaf: CategoryNode): Promise<Aggregate> {
+    return this.cache.wrap<Aggregate>(
+      `market-report:cat:${leaf.id}`,
+      { ttlMs: CACHE_TTL_MS },
+      () => this.buildAggregate(leaf),
+    );
+  }
+
+  /** بستهٔ فعال مؤثر (انقضا لحاظ‌شده) — عمومی؛ بقیهٔ گزارشات هم می‌پرسند */
+  async packageActiveOf(userId: string): Promise<boolean> {
     const me = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { activePakageType: true, packageExpiresAt: true },
     });
     return effectivePakageType(me?.activePakageType ?? 0, me?.packageExpiresAt) > 0;
+  }
+
+  /** بستهٔ فعال — wrapper خصوصی برای سازگاری */
+  private async packageActive(userId: string): Promise<boolean> {
+    return this.packageActiveOf(userId);
   }
 
   /** صنفِ کاربر: پرآگهی‌ترین دستهٔ برگِ confirmed او؛ یا دستهٔ صریحِ مجاز */
@@ -243,8 +407,8 @@ export class MarketReportService {
     return this.categories.getCategoryById(topId);
   }
 
-  /** مسیر خوانا: ریشه ← میانی ← برگ (هر چه موجود) */
-  private async categoryInfo(leaf: CategoryNode) {
+  /** مسیر خوانا: ریشه ← میانی ← برگ (هر چه موجود) — عمومی؛ بقیهٔ گزارشات هم */
+  async categoryInfo(leaf: CategoryNode) {
     const path: string[] = [leaf.category_name];
     if (leaf.parent_id != null) {
       const mid = await this.categories.getCategoryById(leaf.parent_id);
@@ -268,8 +432,19 @@ export class MarketReportService {
         minSalePrice: { gt: 0 },
         ownerPaused: false,
       },
-      select: { id: true, productName: true, minSalePrice: true, userId: true, unit: true },
+      select: {
+        id: true,
+        productName: true,
+        minSalePrice: true,
+        userId: true,
+        unit: true,
+        minSaleAmount: true,
+        cityId: true,
+      },
     });
+
+    // نام شهرهای موجود در صنف — یک کوئری
+    const cityNames = await cityNamesFor(this.prisma, rows.map((r) => r.cityId));
 
     // گروه‌بندی نام نرمال‌شده
     const groups = new Map<string, GroupRaw>();
@@ -280,7 +455,15 @@ export class MarketReportService {
       if (!k) continue;
       let g = groups.get(k);
       if (!g) {
-        g = { sample: r.productName, prices: [], productIds: [], users: new Set(), units: new Set(), listings: 0 };
+        g = {
+          sample: r.productName,
+          prices: [],
+          productIds: [],
+          users: new Set(),
+          units: new Set(),
+          listings: 0,
+          rows: [],
+        };
         groups.set(k, g);
       }
       g.listings++;
@@ -288,6 +471,7 @@ export class MarketReportService {
       g.prices.push(r.minSalePrice);
       g.units.add(r.unit);
       g.productIds.push(r.id);
+      g.rows.push({ price: r.minSalePrice, userId: r.userId, minSaleAmount: r.minSaleAmount, cityId: r.cityId });
       // نام نمونهٔ خواناتر (بلندترین) برای نمایش
       if (r.productName.length > g.sample.length) g.sample = r.productName;
     }
@@ -330,43 +514,13 @@ export class MarketReportService {
       const use = kept.length >= MIN_SELLERS ? kept : g.prices;
       const med = median(use)!;
 
-      // تغییر هفتگی قلم: میانهٔ تغییرات واقعی آگهی‌های همان قلم — فقط اگر
-      // تغییرات به ≥۳ فروشندهٔ متمایز برسد (نه ۳ تغییر از یک فروشنده)
-      const listingChanges: number[] = [];
-      const changedSellers = new Set<string>();
-      for (const pid of g.productIds) {
-        const hs = historyByProduct.get(pid);
-        if (!hs?.length) continue;
-        changedSellers.add(pidToUser.get(pid) ?? String(pid));
-        for (const h of hs) {
-          listingChanges.push((h.after - h.before) / h.before);
-        }
-      }
-      const changePct =
-        listingChanges.length >= MIN_SELLERS && changedSellers.size >= MIN_SELLERS
-          ? Math.round(median(listingChanges)! * 1000) / 10
-          : null;
-      if (changePct != null) changePcts.push(changePct);
+      // سطرهای سالمِ همان گروه — برای پلهٔ حجمی + برش شهری
+      const healthyRows = g.rows.filter((r) => r.price >= m1 * OUTLIER_LO && r.price <= m1 * OUTLIER_HI);
+      const useRows = healthyRows.length >= MIN_SELLERS ? healthyRows : g.rows;
 
-      // اسپارک‌لاین: میانگین قیمت قلم به تفکیک هفته (قیمت بعد از هر تغییر)
-      const weekBuckets = new Map<number, number[]>();
-      const nowWeek = Math.floor(Date.now() / (7 * DAY_MS));
-      for (const pid of g.productIds) {
-        for (const h of historyByProduct.get(pid) ?? []) {
-          const wk = Math.floor(h.at.getTime() / (7 * DAY_MS));
-          (weekBuckets.get(wk) ?? weekBuckets.set(wk, []).get(wk)!).push(h.after);
-        }
-      }
-      (weekBuckets.get(nowWeek) ?? weekBuckets.set(nowWeek, []).get(nowWeek)!).push(med);
-      const spark =
-        weekBuckets.size >= 2
-          ? [...weekBuckets.entries()]
-              .sort((a, b) => a[0] - b[0])
-              .map(([wk, ps]) => ({
-                weekStart: new Date(wk * 7 * DAY_MS).toISOString(),
-                value: Math.round(median(ps)!),
-              }))
-          : null;
+      // تغییر هفتگی + اسپارک — از تاریخچهٔ price-sync (هم‌قرارداد v1)
+      const { changePct, spark } = changeAndSpark(g.productIds, historyByProduct, pidToUser, med);
+      if (changePct != null) changePcts.push(changePct);
 
       items.push({
         name: g.sample,
@@ -379,6 +533,8 @@ export class MarketReportService {
         changePct,
         spark,
         mixedUnit: g.units.size > 1,
+        tiers: computeTiers(useRows),
+        cities: computeCities(useRows, cityNames, MIN_SELLERS, 3),
         mine: null,
       });
     }
