@@ -147,7 +147,7 @@ export class ReportsService {
     const history = await this.prisma.productEditHistory.findMany({
       where: {
         productId: { in: ofGroup.map((r) => r.id) },
-        createdAt: { gte: new Date(Date.now() - 14 * DAY_MS) },
+        createdAt: { gte: new Date(Date.now() - 56 * DAY_MS) }, // پنجرهٔ ۸ هفتهٔ غلتان — هم‌قاعد market-report
       },
       select: { productId: true, before: true, after: true, createdAt: true },
     });

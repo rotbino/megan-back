@@ -38,6 +38,7 @@ const MIN_SELLERS = 3;
 const TOP_ITEMS = 30;
 const FREE_PERSONAL_ITEMS = 3;
 const CHANGE_WINDOW_DAYS = 14;
+const SPARK_WINDOW_DAYS = 56; // پنجرهٔ روند اسپارک/نمودار: ۸ هفتهٔ غلتان (قیمت امروز نقطهٔ آخر)
 const OUTLIER_LO = 1 / 3;
 const OUTLIER_HI = 3;
 const DAY_MS = 86_400_000;
@@ -183,16 +184,21 @@ export function changeAndSpark(
 ): { changePct: number | null; spark: Array<{ weekStart: string; value: number }> | null } {
   const listingChanges: number[] = [];
   const changedSellers = new Set<string>();
+  // «تغییر هفته» فقط تغییر‌های اخیر (۱۴ روز) — معنای هفته‌ای دقیق بماند
+  const changeSince = Date.now() - CHANGE_WINDOW_DAYS * DAY_MS;
   for (const pid of productIds) {
     const hs = historyByProduct.get(pid);
     if (!hs?.length) continue;
+    const recent = hs.filter((h) => h.at.getTime() >= changeSince);
+    if (!recent.length) continue;
     changedSellers.add(pidToUser.get(pid) ?? String(pid));
-    for (const h of hs) listingChanges.push((h.after - h.before) / h.before);
+    for (const h of recent) listingChanges.push((h.after - h.before) / h.before);
   }
   const changePct =
     listingChanges.length >= MIN_SELLERS && changedSellers.size >= MIN_SELLERS
       ? Math.round((median(listingChanges) ?? 0) * 1000) / 10
       : null;
+  // اسپارک هفتگی از کل پنجرهٔ ۸ هفته‌ای (هر هفته میانهٔ قیمت‌های همان هفته)
   const weekBuckets = new Map<number, number[]>();
   const nowWeek = Math.floor(Date.now() / (7 * DAY_MS));
   for (const pid of productIds) {
@@ -482,7 +488,7 @@ export class MarketReportService {
     const allIds = [...groups.values()].flatMap((g) => g.productIds);
     const history = allIds.length
       ? await this.prisma.productEditHistory.findMany({
-          where: { productId: { in: allIds }, createdAt: { gte: new Date(Date.now() - CHANGE_WINDOW_DAYS * DAY_MS) } },
+          where: { productId: { in: allIds }, createdAt: { gte: new Date(Date.now() - SPARK_WINDOW_DAYS * DAY_MS) } },
           select: { productId: true, before: true, after: true, createdAt: true },
         })
       : [];
