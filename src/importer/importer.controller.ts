@@ -9,6 +9,7 @@ import {
   ListImportDto,
   MigrateBDto,
   PauseJobDto,
+  PendingImportDto,
   SingleImportDto,
   StopJobDto,
 } from './dto';
@@ -86,6 +87,15 @@ export class ImporterController {
   @ApiOperation({ summary: 'شروع ایمپورت لیستی از کالکشن user-buskool — رد شدن از ایمپورت‌شده‌ها' })
   startList(@Body() dto: ListImportDto) {
     return ok(this.importer.startList(dto));
+  }
+
+  @Post('pending-import')
+  @ApiOperation({
+    summary:
+      'ایمپورت گروهی رکوردهای «در انتظار ایمپورت» که موبایل دارند — قدیمی‌ترین اول؛ مثل ایمپورت لیستی با همان سیاست خطای رکورد؛ رکوردهای بدون شماره رد می‌شوند',
+  })
+  startPendingImport(@Body() dto: PendingImportDto) {
+    return ok(this.importer.startPendingImport(dto));
   }
 
   @Get('jobs/:id')

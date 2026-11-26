@@ -105,7 +105,9 @@ export interface LogLine {
 
 export interface ImportJob {
   id: string;
-  kind: 'single' | 'list';
+  /** single = تک‌کاربره | list = لیستی از کالکشن user-buskool | pending = گروهی
+   *  از جدول «در انتظار ایمپورت» با شماره‌های گرفته‌شده (۲۶-۱۱) */
+  kind: 'single' | 'list' | 'pending';
   status: JobStatus;
   userName?: string;
   totalUsers?: number;
@@ -670,7 +672,21 @@ export class ImporterService {
     return { jobId: job.id };
   }
 
-  private newJob(kind: 'single' | 'list', userName?: string): JobInternal {
+  /** ایمپورت گروهی «در انتظارهایی که موبایل دارند» (خواستهٔ مالک ۲۶-۱۱) —
+   *  مثل ایمپورت لیستی ولی منبع جدول PendingImportUser با شماره‌های
+   *  گرفته‌شده است؛ رکوردهای بدون شماره عمداً رد می‌شوند (شماره‌شان هنوز
+   * گرفته نشده — دکمهٔ «ایمپورت» فرانت همان‌جا شماره می‌گیرد) */
+  startPendingImport(input: { adminPhone: string; maxProductsPerUser?: number }) {
+    this.assertAdmin(input.adminPhone);
+    if ([...this.jobs.values()].some((j) => j.status === 'running')) {
+      throw new ForbiddenException('یک جاب ایمپورت در حال اجراست — اول منتظر بمانید یا آن را متوقف کنید');
+    }
+    const job = this.newJob('pending');
+    void this.runPendingImport(job, input).catch((err) => this.failJob(job, err));
+    return { jobId: job.id };
+  }
+
+  private newJob(kind: 'single' | 'list' | 'pending', userName?: string): JobInternal {
     const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const job: JobInternal = {
       id,
@@ -949,6 +965,113 @@ export class ImporterService {
       job.pascalRequests = bk.requests;
       // نوار پیشرفت با واقعیت هم‌قدم بماند (آخرین قطعه ممکن است ناقص باشد)
       if (consumed > job.totalUsers) job.totalUsers = consumed;
+    }
+    this.finishJob(job);
+  }
+
+  /** حلقهٔ ایمپورت گروهی «در انتظارها» (۲۶-۱۱) — منبع: جدول
+   *  PendingImportUser با شمارهٔ موبایلِ گرفته‌شده؛ همان سیاست خطای رکوردِ
+   *  runList (رکورد خراب ≠ جاب خراب؛ فقط تکرار پیاپیِ یکسان سیستمی تلقی
+   *  می‌شود)؛ ترتیب: قدیمی‌ترین انتظار اول (صف FIFO — آن‌که دیرتر منتظر
+   *  مانده زودتر ایمپورت می‌شود). */
+  private async runPendingImport(job: JobInternal, input: { maxProductsPerUser?: number }) {
+    // همهٔ رکوردهای انتظار که موبایل دارند — بدون فیلتر روز (گروهی یعنی همه)
+    const rows = await this.netRetry(job, () =>
+      this.prisma.pendingImportUser.findMany({
+        where: { phone: { not: null } },
+        orderBy: [{ bCreatedAt: 'asc' }, { createdAt: 'asc' }],
+        select: { bUserName: true, phone: true },
+      }),
+    );
+    if (!rows.length) {
+      this.log(job, 'warn', 'رکوردی در «در انتظار ایمپورت» موبایل ندارد — اول با دکمهٔ «ایمپورت» صفحهٔ آپدیت شماره بگیرید');
+      job.totalUsers = 0;
+      this.finishJob(job);
+      return;
+    }
+
+    // ضدتکرار: آن‌هایی که همین حالا در ایمچ موجود‌اند (جای دیگر ایمپورت شده —
+    // موفق یا ناقص failedImport) از صف خارج و از لیست انتظار هم پاک می‌شوند
+    const existing = await this.netRetry(job, () =>
+      this.prisma.user.findMany({
+        where: { bUserName: { in: rows.map((r) => r.bUserName) } },
+        select: { bUserName: true },
+      }),
+    );
+    const existingNames = new Set(existing.map((e) => e.bUserName));
+    const targets = rows.filter((r) => !existingNames.has(r.bUserName));
+    for (const name of existingNames) {
+      await this.dropPendingImport(job, String(name));
+    }
+
+    job.totalUsers = targets.length;
+    job.usersDone = 0;
+    job.usersFailed = 0;
+    if (!targets.length) {
+      this.log(job, 'warn', `${rows.length.toLocaleString('fa-IR')} رکوردِ دارای موبایل همگی قبلاً ایمپورت شده‌اند — کاری نیست`);
+      this.finishJob(job);
+      return;
+    }
+    this.log(
+      job,
+      'info',
+      `ایمپورت گروهی ${targets.length.toLocaleString('fa-IR')} کاربرِ «در انتظار» که موبایل دارند — قدیمی‌ترین اول`,
+    );
+
+    const bk = new PascalClient(() => job.stopRequested);
+    // همان سیاست خطای رکورد runList
+    const maxRepeatFails = envInt('IMPORTER_MAX_REPEAT_FAILS', 10);
+    const maxConsecFails = envInt('IMPORTER_MAX_CONSECUTIVE_FAILS', 15);
+    let consecutiveFails = 0;
+    let failStreakSig = '';
+    let failStreakCount = 0;
+
+    for (const [i, row] of targets.entries()) {
+      if (job.stopRequested) throw new Error('JOB_STOPPED');
+      await this.waitWhilePaused(job);
+      job.currentUserIndex = i + 1;
+      job.currentUser = row.bUserName;
+      job.steps.forEach((s) => (s.status = 'pending'));
+
+      try {
+        await this.netRetry(job, () =>
+          this.importOneUser(job, bk, row.bUserName, row.phone ?? undefined, input.maxProductsPerUser ?? 0),
+        );
+        job.usersDone = (job.usersDone ?? 0) + 1;
+        consecutiveFails = 0;
+        failStreakSig = '';
+        failStreakCount = 0;
+        job.pascalRequests = bk.requests;
+        await this.dropPendingImport(job, row.bUserName);
+        this.log(
+          job,
+          'success',
+          `✔ ${row.bUserName} (${(i + 1).toLocaleString('fa-IR')}/${job.totalUsers.toLocaleString('fa-IR')})`,
+        );
+      } catch (err) {
+        if ((err as Error).message === 'JOB_STOPPED') throw err;
+        job.usersFailed = (job.usersFailed ?? 0) + 1;
+        const reason = String((err as Error).message ?? err);
+        const sig = importErrorSignature(err);
+        this.log(job, 'error', `✖ ${row.bUserName}: ${reason} — ذخیره شد، ادامه با کاربر بعدی`);
+        await this.markFailedImport(row.bUserName, reason, sig).catch(() => undefined);
+        consecutiveFails++;
+        if (sig === failStreakSig) failStreakCount++;
+        else {
+          failStreakSig = sig;
+          failStreakCount = 1;
+        }
+        if (failStreakCount >= maxRepeatFails) {
+          throw new Error(
+            `${failStreakCount.toLocaleString('fa-IR')} شکست پیاپی با خطای یکسان (${sig}) — احتمالاً مشکل سیستمی؛ جاب متوقف شد`,
+          );
+        }
+        if (consecutiveFails >= maxConsecFails) {
+          throw new Error(
+            `${consecutiveFails.toLocaleString('fa-IR')} شکست پیاپی با خطاهای گوناگون — احتمالاً مشکل سیستمی؛ جاب متوقف شد`,
+          );
+        }
+      }
     }
     this.finishJob(job);
   }

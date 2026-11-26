@@ -82,6 +82,21 @@ export class StopJobDto {
   adminPhone!: string;
 }
 
+/** POST /importer/pending-import — ایمپورت گروهی رکوردهای «در انتظار ایمپورت»
+ *  که موبایل دارند (خواستهٔ مالک ۲۶-۱۱) — مثل ایمپورت لیستی ولی منبع جدول
+ *  انتظار با شماره‌های گرفته‌شده است */
+export class PendingImportDto {
+  @Matches(/^09\d{9}$/, { message: 'شماره ادمین نامعتبر است' })
+  adminPhone!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(500, { message: 'حداکثر آگهی هر کاربر ۵۰۰ است — برای همه، ۰ بگذارید' })
+  maxProductsPerUser?: number;
+}
+
 /** POST /importer/jobs/:id/pause و :id/resume — توقف موقت/ادامهٔ جاب
  *  (خواستهٔ مالک ۱۶-۱۱: «هر موقع خواستم پالز کنم یا پلی کنم») */
 export class PauseJobDto {
