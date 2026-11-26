@@ -22,6 +22,8 @@ export interface TaxonomyCountNode {
   key: string;
   name: string;
   icon?: string;
+  /** مثال «نوع کالا» — فقط برگ‌ها (۲۷-۱۱)؛ پلیس‌هولدر فرم‌های فرانت */
+  example?: string;
   count: number;
   attrs?: TaxonomyAttr[];
   children?: TaxonomyCountNode[];
@@ -219,6 +221,7 @@ export class AdsReportService {
               name: n.name,
               count: counts.get(n.key) ?? 0,
               ...(n.icon ? { icon: n.icon } : {}),
+              ...(n.example ? { example: n.example } : {}),
               ...(n.attrs?.length ? { attrs: n.attrs } : {}),
             };
             if (n.children?.length) out.children = build(n.children);
