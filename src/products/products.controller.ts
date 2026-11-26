@@ -6,8 +6,6 @@ import {
   BulkUpdatePricesDto,
   CreateProductDto,
   DeleteMyProductDto,
-  GetMarketReportDto,
-  GetItemReportDto,
   GetMyProductDetailDto,
   GetMyProductStatsDto,
   GetProductByIdDto,
@@ -29,8 +27,6 @@ import { CurrentUser, MaybeCurrentUser } from '../common/decorators/current-user
 import type { AuthUser } from '../common/guards';
 import { ok } from '../common/api-response';
 import { WebImportService } from './web-import.service';
-import { MarketReportService } from './market-report.service';
-import { ReportsService } from './reports.service';
 
 @ApiTags('products')
 /** حد نرخ ریزتر از سراسری — لیست/جزئیات + ثبت آگهی */
@@ -40,8 +36,6 @@ export class ProductsController {
   constructor(
     private readonly products: ProductsService,
     private readonly webImport: WebImportService,
-    private readonly marketReport: MarketReportService,
-    private readonly reports: ReportsService,
   ) {}
 
   @Post('getProductList')
@@ -105,65 +99,6 @@ export class ProductsController {
   @ApiOperation({ summary: 'آگهی‌های کاربر جاری + شمارنده تب‌ها + ظرفیت' })
   async getMyProducts(@CurrentUser() user: AuthUser) {
     return ok(await this.products.getMyProducts(user.id));
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('getMarketReport')
-  @ApiOperation({
-    summary:
-      'گزارش بازار صنف فروشنده (۲۵-۱۱) — میانه/بازه/تغییر قلم‌های صنف از آگهی‌های واقعی؛ رایگان: ۳ قلم شخصی + شاخص + تلنگر؛ بستهٔ فعال: جدول کامل',
-  })
-  async getMarketReport(@CurrentUser() user: AuthUser, @Body() dto: GetMarketReportDto) {
-    return ok(await this.marketReport.getMarketReport(user, dto));
-  }
-
-  // ─── گزارشات ایمچ (۲۵-۱۱ راند ۲) ───────────────────────────────────
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('getItemReport')
-  @ApiOperation({
-    summary:
-      'گزارش تک‌کالا — جایگاه قیمت این آگهی در بازار همان قلم + پلهٔ حجمی + برش شهری؛ تماماً تجمیعی',
-  })
-  async getItemReport(@CurrentUser() user: AuthUser, @Body() dto: GetItemReportDto) {
-    return ok(await this.reports.getItemReport(user, dto));
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('getBuyAdvisor')
-  @ApiOperation({
-    summary:
-      'مشاور خرید دوره‌ای — سبد خرید دوره‌ای خریدار × قیمت بازار؛ سیگنال خرید/صبر؛ ۳ ردیف رایگان',
-  })
-  async getBuyAdvisor(@CurrentUser() user: AuthUser) {
-    return ok(await this.reports.getBuyAdvisor(user));
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('getOpportunityMap')
-  @ApiOperation({
-    summary:
-      'نقشهٔ فرصت فروش — تقاضا (درخواست ۳۰ روز + بازدید) ÷ عرضه (فروشنده) بر صنف؛ ۳ ردیف رایگان',
-  })
-  async getOpportunityMap(@CurrentUser() user: AuthUser) {
-    return ok(await this.reports.getOpportunityMap(user));
-  }
-
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('getPriceIndex')
-  @ApiOperation({
-    summary: 'شاخص قیمت ایمچ — عمومی؛ فقط درصد تغییر هفتگی بر صنف‌های پرآگهی',
-  })
-  async getPriceIndex() {
-    return ok(await this.reports.getPriceIndex());
   }
 
   // ─── «ثبت گروهی محصول» — ایمپورت از وب (۱۸-۱۱) ─────────────────────

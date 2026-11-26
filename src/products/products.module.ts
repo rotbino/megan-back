@@ -2,8 +2,6 @@ import { Module } from '@nestjs/common';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { WebImportService } from './web-import.service';
-import { MarketReportService } from './market-report.service';
-import { ReportsService } from './reports.service';
 import { AuthModule } from '../auth/auth.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { LocationsModule } from '../locations/locations.module';
@@ -15,7 +13,7 @@ import { PresenceModule } from '../presence/presence.module';
 @Module({
   imports: [AuthModule, CategoriesModule, LocationsModule, UploadsModule, CallsModule, PresenceModule],
   controllers: [ProductsController],
-  providers: [ProductsService, WebImportService, MarketReportService, ReportsService],
+  providers: [ProductsService, WebImportService],
   exports: [ProductsService],
 })
 export class ProductsModule {}
