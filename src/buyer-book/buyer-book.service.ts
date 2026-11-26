@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { AppError } from '../common/errors/app-error';
 import { LocationsService } from '../locations/locations.service';
+import { v2KeyForBuskol, v2PathForKey } from '../common/taxonomy';
 import type { UpdateBookSettingsDto } from './dto';
 
 /** قاعدهٔ آیدی سفارشی دفتر — عین استاب سندباکس و فرانت (مودال تنظیمات) */
@@ -67,6 +68,10 @@ export interface BuyerBookBuyerInfoDto {
 /** کالای دفتر — هم‌شکل BuyerBookItem فرانت؛ فقط confirmed عمومی است */
 export interface BuyerBookItemDto {
   categoryId: number;
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — نام‌های نمایشی همین‌ها هستند و فارسی‌های
+   *  باسکول (name/rootName/parentName قبلی) پشت صحنه ماندند */
+  v2Key: string | null;
+  v2Path: string[];
   name: string;
   rootName: string;
   parentName: string;
@@ -605,11 +610,17 @@ export class BuyerBookService {
     const goods = await this.goodNameMap(rows.map((r) => r.goodId));
     return rows.map((r) => {
       const cat = cats.get(r.categoryId);
+      // (۲۶-۱۱) دستهٔ نمایشی دفتر = تاکسونومی ایمچ — مسیر v2 جایگزین
+      // مسیر باسکول می‌شود (فالبک باسکول فقط وقتی نگاشت نباشد)
+      const v2Key = v2KeyForBuskol(r.categoryId, cat?.name ?? null);
+      const v2Path = v2PathForKey(v2Key);
       return {
         categoryId: r.categoryId,
-        name: cat?.name ?? `دسته ${r.categoryId}`,
-        rootName: cat?.rootName ?? '',
-        parentName: cat?.parentName ?? '',
+        v2Key,
+        v2Path,
+        name: v2Path.at(-1) ?? cat?.name ?? `دسته ${r.categoryId}`,
+        rootName: v2Path[0] ?? cat?.rootName ?? '',
+        parentName: v2Path.length > 1 ? v2Path[v2Path.length - 2] : cat?.parentName ?? '',
         unit: r.unit,
         minAmount: r.volumeMin,
         period: r.period,

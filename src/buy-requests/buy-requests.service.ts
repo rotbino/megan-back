@@ -9,6 +9,7 @@ import { SecurityService } from '../security/security.service';
 import { effectivePakageType } from '../packages/packages.service';
 import { volumeScore } from '../common/matching/match-score';
 import { ActiveUsersService } from '../common/active-users/active-users.module';
+import { v2KeyForBuskol, v2PathForKey, isTaxonomyKey, buskolIdsForKey } from '../common/taxonomy';
 import type { AuthUser } from '../common/guards';
 import {
   CreateBuyRequestDto,
@@ -29,6 +30,9 @@ export interface BuyRequestDto {
   name: string | null;
   categoryId: number;
   subcategoryName: string;
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — چیرپ‌های باسکول پشت صحنه */
+  v2Key: string | null;
+  v2Path: string[];
   requirementAmount: number;
   unit: string;
   /** ObjectId مگان (رشته) — در پاسکال عدد بود؛ فقط کلید/ارجاع فرانت */
@@ -52,7 +56,8 @@ export interface MyBuyRequestDto {
   id: number;
   subcategoryName: string;
   /** slug دسته — مقصد مستقیم دکمهٔ «فروشندگان پیشنهادی» هر ردیف:
-   *  لیست محصولات همان دسته با تطابق نیاز (خواستهٔ مالک ۱۱-۱۱) */
+   *  لیست محصولات همان دسته با تطابق نیاز (خواستهٔ مالک ۱۱-۱۱)
+   *  (۲۶-۱۱): کلید v2 تاکسونومی ایمچ — دستهٔ باسکول پشت صحنه است */
   categorySlug: string;
   productType: string;
   requirementAmount: number;
@@ -114,7 +119,12 @@ export class BuyRequestsService {
   async createBuyRequest(user: AuthUser, dto: CreateBuyRequestDto) {
     // انتخاب‌گرهای فرانت تا دسته برگ پایین می‌روند؛ نوع کالا (Good) جدول جدا
     // دارد و هرگز نود درخت نیست (خواسته مالک ۳۰-۱۰) — فقط وجود دسته چک می‌شود.
-    const sub = await this.categories.getCategoryById(dto.subCategoryId);
+    // (۲۶-۱۱): ویزارد فرانت درخت v2 ایمچ را نشان می‌دهد و v2Key می‌فرستد —
+    // اینجا به دستهٔ باسکول نماینده ترجمه می‌شود (باسکول پشت صحنه می‌ماند)
+    const subCategoryId =
+      dto.subCategoryId ??
+      (dto.v2Key ? await this.categories.representativeBuskolId(dto.v2Key) : null);
+    const sub = subCategoryId != null ? await this.categories.getCategoryById(subCategoryId) : null;
     if (!sub) throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     const typeName = dto.name?.trim();
 
@@ -225,7 +235,11 @@ export class BuyRequestsService {
       ];
     }
     // فیلتر درختی دسته — تب دوم صفحه خریداران (خود دسته + زیر‌شاخه‌ها)
-    if (dto.categoryId != null) {
+    // (۲۶-۱۱): v2Key تاکسونومی ایمچ — همان درخت، ترجمهٔ استاتیک به idهای باسکول
+    if (dto.v2Key && isTaxonomyKey(dto.v2Key)) {
+      const ids = buskolIdsForKey(dto.v2Key) ?? [];
+      where.categoryId = { in: ids.length > 0 ? ids : [-1] };
+    } else if (dto.categoryId != null) {
       const subtree = await this.categories.getSubtreeIds(dto.categoryId);
       where.categoryId = { in: subtree.length > 0 ? subtree : [-1] };
     }
@@ -366,21 +380,25 @@ export class BuyRequestsService {
 
     return {
       items: rows.map(
-        (r): MyBuyRequestDto => ({
-          id: r.id,
-          subcategoryName: catMap.get(r.categoryId)?.category_name ?? '—',
-          categorySlug: catMap.get(r.categoryId)?.slug ?? String(r.categoryId),
-          productType: r.name ?? '',
-          requirementAmount: r.requirementAmount,
-          unit: r.unit,
-          provinceId: r.provinceId,
-          cityId: r.cityId,
-          status: r.status,
-          goal: (r.goal as MyBuyRequestDto['goal']) ?? 'price_and_buy',
-          hasHistory: r.hasHistory,
-          createdAt: r.createdAt,
-          rejectionReasons: r.rejectionReason ? [r.rejectionReason] : [],
-        }),
+        (r): MyBuyRequestDto => {
+          const catName = catMap.get(r.categoryId)?.category_name ?? null;
+          const v2Key = v2KeyForBuskol(r.categoryId, catName);
+          return {
+            id: r.id,
+            subcategoryName: catMap.get(r.categoryId)?.category_name ?? '—',
+            categorySlug: v2Key ?? catMap.get(r.categoryId)?.slug ?? String(r.categoryId),
+            productType: r.name ?? '',
+            requirementAmount: r.requirementAmount,
+            unit: r.unit,
+            provinceId: r.provinceId,
+            cityId: r.cityId,
+            status: r.status,
+            goal: (r.goal as MyBuyRequestDto['goal']) ?? 'price_and_buy',
+            hasHistory: r.hasHistory,
+            createdAt: r.createdAt,
+            rejectionReasons: r.rejectionReason ? [r.rejectionReason] : [],
+          };
+        },
       ),
       counts: countMap,
     };
@@ -703,11 +721,15 @@ export class BuyRequestsService {
     names: NameMaps,
   ): BuyRequestDto {
     const buyer = names.users.get(r.userId);
+    // دستهٔ عمومی ایمچ (۲۶-۱۱) — نام باسکول فقط برای فالبک نمایش می‌ماند
+    const v2Key = v2KeyForBuskol(r.categoryId, names.cats.get(r.categoryId) ?? null);
     return {
       id: r.id,
       name: r.name,
       categoryId: r.categoryId,
       subcategoryName: names.cats.get(r.categoryId) ?? '—',
+      v2Key,
+      v2Path: v2PathForKey(v2Key),
       requirementAmount: r.requirementAmount,
       unit: r.unit,
       myuserId: r.userId,

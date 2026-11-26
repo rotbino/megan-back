@@ -10,6 +10,7 @@ import { PushService } from '../push/push.service';
 import { CHAT_EVENTS, emitToUser, isUserOnline } from '../chat/io-holder';
 import { BuyerBookService } from '../buyer-book/buyer-book.service';
 import { ActiveUsersService } from '../common/active-users/active-users.module';
+import { buskolIdsForKey, isTaxonomyKey, v2KeyForBuskol, v2PathForKey } from '../common/taxonomy';
 import {
   BUYER_BOOK_MAX,
   BUYER_PERIODS,
@@ -70,6 +71,9 @@ export interface BuyerDirectoryEntry {
   buyerName: string;
   role: string;
   categoryId: number;
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — نمایشی همین است؛ باسکول پشت صحنه */
+  v2Key: string | null;
+  v2Path: string[];
   categoryName: string;
   /** نام دستهٔ ریشه — برای آیکون کارت */
   rootName: string;
@@ -132,11 +136,16 @@ export class BuyersService {
       max: BUYER_BOOK_MAX,
       items: rows.map((r) => {
         const cat = cats.get(r.categoryId);
+        // (۲۶-۱۱) نام‌های نمایشی = تاکسونومی ایمچ (فالبک باسکول)
+        const v2Key = v2KeyForBuskol(r.categoryId, cat?.name ?? null);
+        const v2Path = v2PathForKey(v2Key);
         return {
           categoryId: r.categoryId,
-          name: cat?.name ?? `دسته ${r.categoryId}`,
-          rootName: cat?.rootName ?? '',
-          parentName: cat?.parentName ?? '',
+          v2Key,
+          v2Path,
+          name: v2Path.at(-1) ?? cat?.name ?? `دسته ${r.categoryId}`,
+          rootName: v2Path[0] ?? cat?.rootName ?? '',
+          parentName: v2Path.length > 1 ? v2Path[v2Path.length - 2] : cat?.parentName ?? '',
           unit: r.unit,
           minAmount: r.volumeMin,
           period: r.period,
@@ -151,7 +160,19 @@ export class BuyersService {
 
   /** POST /buyers/saveMyBook — جایگزینی کامل (تیک برگ‌ها + حداقل + دوره) */
   async saveMyBook(userId: string, dto: SaveMyBookDto) {
-    const items = dto.items ?? [];
+    // (۲۶-۱۱): فرانت درخت v2 ایمچ را نشان می‌دهد و v2Key می‌فرستد — اینجا
+    // به دستهٔ باسکول نماینده ترجمه می‌شود (باسکول پشت صحنه)؛ DTO همچنان
+    // categoryId مستقیم را هم می‌پذیرد (مسیرهای قدیمی)
+    const items: Array<BuyerBookItemDto & { categoryId: number }> = [];
+    for (const raw of dto.items ?? []) {
+      const categoryId =
+        raw.categoryId ??
+        (raw.v2Key ? await this.categories.representativeBuskolId(raw.v2Key) : null);
+      if (categoryId == null) {
+        throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
+      }
+      items.push({ ...raw, categoryId });
+    }
     if (items.length > BUYER_BOOK_MAX) {
       throw AppError.badRequest(`حداکثر ${BUYER_BOOK_MAX} دسته در دفتر خرید ممکن است.`, 'BOOK_MAX');
     }
@@ -221,7 +242,7 @@ export class BuyersService {
           data: { usageCount: { decrement: n } },
         }),
       ),
-      ...items.map((it: BuyerBookItemDto) => {
+      ...items.map((it) => {
         const cat = cats.get(it.categoryId);
         const prev = prevByCat.get(it.categoryId);
         const goodId = goodIdOf.get(it.categoryId) ?? null;
@@ -274,9 +295,12 @@ export class BuyersService {
 
     // مجموعهٔ دسته‌های زیر دستهٔ انتخابی (خودش + زیر‌شاخه‌ها) — ردیف‌های دفتر
     // خرید همیشه برگ‌اند؛ فیلتر درختی درست درمی‌آید
-    const leafSet = dto.categoryId
-      ? new Set(await this.categories.getSubtreeIds(dto.categoryId))
-      : null;
+    // (۲۶-۱۱): v2Key تاکسونومی ایمچ — همان درخت، ترجمهٔ استاتیک به idهای باسکول
+    const leafSet = dto.v2Key && isTaxonomyKey(dto.v2Key)
+      ? new Set(buskolIdsForKey(dto.v2Key) ?? [])
+      : dto.categoryId
+        ? new Set(await this.categories.getSubtreeIds(dto.categoryId))
+        : null;
 
     // ردیف‌های دفتر خرید در این دسته‌ها (سقف اطمینان ۵۰۰۰ — دایرکتوری سبک می‌ماند)
     // فقط تاییدشده‌ها — ردیف تازه تا بازبینی ادمین برای فروشندگان نامرئی است
@@ -360,6 +384,10 @@ export class BuyersService {
       const u = userById.get(r.userId);
       if (!u) continue; // ردیف کاربر غیرفعال/غایب — رها
       const cat = cats.get(r.categoryId);
+      // (۲۶-۱۱) دستهٔ نمایشی دفتر خریداران = تاکسونومی ایمچ — مسیر v2
+      // جایگزین مسیر باسکول؛ فالبک باسکول فقط وقتی نگاشت نباشد
+      const v2Key = v2KeyForBuskol(r.categoryId, cat?.name ?? null);
+      const v2Path = v2PathForKey(v2Key);
       const last = u.lastSeenAt ?? u.createdAt;
       items.push({
         id: r.id,
@@ -367,9 +395,11 @@ export class BuyersService {
         buyerName: `${u.firstName} ${u.lastName}`.trim() || 'خریدار ایمچ',
         role: buyerRole(r.unit, r.volumeMin),
         categoryId: r.categoryId,
-        categoryName: cat?.name ?? `دسته ${r.categoryId}`,
-        rootName: cat?.rootName ?? '',
-        categoryPath: [cat?.rootName, cat?.parentName].filter(Boolean).join(' / '),
+        v2Key,
+        v2Path,
+        categoryName: v2Path.at(-1) ?? cat?.name ?? `دسته ${r.categoryId}`,
+        rootName: v2Path[0] ?? cat?.rootName ?? '',
+        categoryPath: v2Path.length > 1 ? v2Path.slice(0, -1).join(' / ') : v2Path.join(' / '),
         unit: r.unit,
         minAmount: r.volumeMin,
         period: r.period,

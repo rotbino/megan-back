@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdsReportModule } from '../admin/ads-report/ads-report.module';
+import { CategoriesModule } from '../categories/categories.module';
 import { CatalogV2Controller } from './catalog-v2.controller';
 
 /**
@@ -8,7 +9,7 @@ import { CatalogV2Controller } from './catalog-v2.controller';
  * عمومی‌سازی است: فقط confirmed، بدون تلفن، بدون گره‌های ادمینی.
  */
 @Module({
-  imports: [AdsReportModule],
+  imports: [AdsReportModule, CategoriesModule],
   controllers: [CatalogV2Controller],
 })
 export class CatalogV2Module {}

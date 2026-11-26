@@ -174,10 +174,18 @@ export class CreateProductDto {
   @Length(2, 150)
   productName!: string;
 
-  /** دسته برگ انتخابی (مثل پسته=44) */
+  /** دسته برگ انتخابی (مثل پسته=44) — باسکول پشت صحنه */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
-  subCategoryId!: number;
+  subCategoryId?: number;
+
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — انتخاب‌گر فرانت درخت v2 را نشان می‌دهد و
+   *  کلید برگ v2 را می‌فرستد؛ سرور نمایندهٔ باسکول را جایگزین می‌کند
+   *  (subCategoryId برای سازگاری مسیرهای قدیمی می‌ماند) */
+  @IsOptional()
+  @IsString()
+  v2Key?: string;
 
   @Type(() => Number)
   @IsInt()

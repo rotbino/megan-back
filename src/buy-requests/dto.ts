@@ -3,10 +3,17 @@ import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Matches, Max, Max
 
 /** POST /buy-requests/createBuyRequest — خروجی ویزارد ۵ مرحله‌ای فرانت */
 export class CreateBuyRequestDto {
-  /** دسته برگ (مثل قیسی زیر میوه خشک) */
+  /** دسته برگ (مثل قیسی زیر میوه خشک) — باسکول پشت صحنه */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
-  subCategoryId!: number;
+  subCategoryId?: number;
+
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — ویزارد فرانت درخت v2 را نشان می‌دهد و
+   *  کلید برگ v2 را می‌فرستد؛ سرور نمایندهٔ باسکول را جایگزین می‌کند */
+  @IsOptional()
+  @IsString()
+  v2Key?: string;
 
   /** «نوع کالا» — آزاد مثل: پاجوش پیارم (اختیاری، مثل پاسکال) */
   @IsOptional()
@@ -58,6 +65,11 @@ export class GetBuyRequestListDto {
   @Type(() => Number)
   @IsInt()
   categoryId?: number;
+
+  /** (۲۶-۱۱) کلید v2 ایمچ — فیلتر درختی همان، روی تاکسونومی عمومی سایت */
+  @IsOptional()
+  @IsString()
+  v2Key?: string;
 
   @IsOptional()
   @Type(() => Number)

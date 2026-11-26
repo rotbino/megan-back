@@ -24,9 +24,17 @@ export const BUYER_PERIODS = ['daily', 'weekly', 'monthly', 'yearly', 'occasiona
 
 /** ردیف دفتر خرید — دستهٔ برگ + حداقل حجم + دوره + نوع اختیاری؛ واحد از خود دسته می‌آید */
 export class BuyerBookItemDto {
+  /** دستهٔ برگ باسکول — پشت صحنه (۲۶-۱۱) */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
-  categoryId!: number;
+  categoryId?: number;
+
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — فرانت درخت v2 را نشان می‌دهد و کلید v2
+   *  می‌فرستد؛ سرور نمایندهٔ باسکول را جایگزین می‌کند */
+  @IsOptional()
+  @IsString()
+  v2Key?: string;
 
   /** حداقل خرید در هر دوره */
   @Type(() => Number)
@@ -62,6 +70,11 @@ export class GetBuyerDirectoryDto {
   @Type(() => Number)
   @IsInt()
   categoryId?: number;
+
+  /** (۲۶-۱۱) کلید v2 ایمچ — فیلتر درختی همان، روی تاکسونومی عمومی سایت */
+  @IsOptional()
+  @IsString()
+  v2Key?: string;
 
   /** جستجو در نام کالا/مسیر دسته */
   @IsOptional()

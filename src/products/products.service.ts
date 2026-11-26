@@ -4,6 +4,7 @@ import { Prisma, type Product } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService, TTL } from '../common/cache/cache.module';
 import { AppError } from '../common/errors/app-error';
+import { buskolIdsForKey, isTaxonomyKey, v2KeyForBuskol, v2PathForKey } from '../common/taxonomy';
 import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
@@ -128,6 +129,12 @@ export interface ProductDto {
   categoryName: string;
   subCategoryId: number;
   subCategoryName: string;
+  /** (۲۶-۱۱) دستهٔ عمومی ایمچ — مشتق از نگاشت استاتیک در لحظهٔ خواندن؛
+   *  فارسی‌های باسکول بالای پشت صحنه می‌مانند و سایت فقط این فیلدها را نشان
+   *  می‌دهد (v2Path مثل [کشاورزی و باغبانی، حبوبات، نخود]) */
+  v2Key: string | null;
+  v2Path: string[];
+  v2LeafName: string | null;
   provinceId: number;
   provinceName: string;
   cityId: number;
@@ -235,14 +242,25 @@ export class ProductsService {
           ...(await this.activeUsers.activeUserWhere()),
         };
 
-        // فیلتر دسته — خودش + درخت فرزندان
+        // فیلتر دسته — «کلید v2 تاکسونومی ایمچ» (۲۶-۱۱): مقدار ASCII نقطه‌گذر
+        // است و مستقیم به idهای باسکولِ همان گره ترجمه می‌شود (باسکول پشت صحنه
+        // می‌ماند). مقدار فارسی = slug/نام باسکول (مسیر پشتیبان ادمین/دیتای کهنه)
         if (dto.categorySlug) {
-          const ids = await this.categories.getSubtreeIds(dto.categorySlug);
-          if (ids.length === 0) return { items: [], total: 0, page, pageCount: 0 };
-          where.OR = [
-            { subCategoryId: { in: ids } },
-            { categoryId: { in: ids } },
-          ];
+          if (isTaxonomyKey(dto.categorySlug)) {
+            const v2Ids = buskolIdsForKey(dto.categorySlug) ?? [];
+            if (v2Ids.length === 0) return { items: [], total: 0, page, pageCount: 0 };
+            where.OR = [
+              { subCategoryId: { in: v2Ids } },
+              { categoryId: { in: v2Ids } },
+            ];
+          } else {
+            const ids = await this.categories.getSubtreeIds(dto.categorySlug);
+            if (ids.length === 0) return { items: [], total: 0, page, pageCount: 0 };
+            where.OR = [
+              { subCategoryId: { in: ids } },
+              { categoryId: { in: ids } },
+            ];
+          }
         }
 
         // جستجو — نام محصول + نام دسته (resolve از درخت کش‌شده، بدون ستون denorm)
@@ -429,8 +447,12 @@ export class ProductsService {
     }
 
     // فیلتر دستهٔ انتخابی (چیپ) — تقاطع subtree با دسته‌های نیاز
+    // (۲۶-۱۱): چیپ‌های عمومی سایت کلید v2 می‌فرستند — همان ترجمهٔ استاتیک؛
+    // مقدار فارسی = مسیر باسکول پشتیبان
     if (dto.categorySlug) {
-      const ids = await this.categories.getSubtreeIds(dto.categorySlug);
+      const ids = isTaxonomyKey(dto.categorySlug)
+        ? buskolIdsForKey(dto.categorySlug) ?? []
+        : await this.categories.getSubtreeIds(dto.categorySlug);
       const universe = new Set<number>(needs.map((n) => n.leafId));
       const finalIds = ids.length === 0 ? [] : hasRequests ? ids.filter((i) => universe.has(i)) : ids;
       if (finalIds.length === 0) {
@@ -607,13 +629,21 @@ export class ProductsService {
 
   /** چیپ‌های دستهٔ فید — دسته‌های برگِ نیازها (یا ردپای فعالیت در فالبک) */
   private async feedCategories(ids: number[]): Promise<{ slug: string; name: string }[]> {
-    const uniq = [...new Set(ids)].slice(0, 12);
-    if (uniq.length === 0) return [];
-    const rows = await this.prisma.category.findMany({
-      where: { id: { in: uniq } },
-      select: { slug: true, categoryName: true },
-    });
-    return rows.map((r) => ({ slug: r.slug, name: r.categoryName }));
+    // (۲۶-۱۱) چیپ‌های دستهٔ فید فروشندگان = دستهٔ عمومی ایمچ (v2): هر id
+    // باسکول به کلید v2 ترجمه و یکتا می‌شود؛ slug چیپ = کلید v2 و name =
+    // نام برگ v2. کلیک چیپ همان مسیر categorySlug=v2Key بالا را می‌رود.
+    const seen = new Set<string>();
+    const out: { slug: string; name: string }[] = [];
+    for (const id of ids) {
+      const key = v2KeyForBuskol(id);
+      if (!key || seen.has(key)) continue;
+      const path = v2PathForKey(key);
+      if (!path.length) continue;
+      seen.add(key);
+      out.push({ slug: key, name: path[path.length - 1] });
+      if (out.length >= 12) break;
+    }
+    return out;
   }
 
   // ─── جزئیات ────────────────────────────────────────────────────────────────
@@ -786,7 +816,12 @@ export class ProductsService {
     }
 
     // اعتبارسنجی ارجاع‌ها — دسته/استان/شهر باید فعال باشند
-    const sub = await this.categories.getCategoryById(dto.subCategoryId);
+    // (۲۶-۱۱): فرانت درخت v2 را نشان می‌دهد و v2Key می‌فرستد — اینجا به
+    // دستهٔ باسکول نماینده ترجمه و مثل قبل روی رکورد ذخیره می‌شود
+    const subCategoryId =
+      dto.subCategoryId ??
+      (dto.v2Key ? await this.categories.representativeBuskolId(dto.v2Key) : null);
+    const sub = subCategoryId != null ? await this.categories.getCategoryById(subCategoryId) : null;
     if (!sub) {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     }
@@ -1204,8 +1239,12 @@ export class ProductsService {
     if (!p || p.userId !== user.id) throw AppError.notFound('محصول یافت نشد.');
     if (p.status === 'deleted') throw AppError.notFound('این آگهی حذف شده است.');
 
-    // همان اعتبارسنجی ارجاع‌های ثبت جدید
-    const sub = await this.categories.getCategoryById(dto.subCategoryId);
+    // همان اعتبارسنجی ارجاع‌های ثبت جدید — v2Key فرانت ویرایش هم می‌فرستد
+    // (۲۶-۱۱): ترجمه به دستهٔ باسکول نماینده، عین ثبت جدید
+    const subCategoryId =
+      dto.subCategoryId ??
+      (dto.v2Key ? await this.categories.representativeBuskolId(dto.v2Key) : null);
+    const sub = subCategoryId != null ? await this.categories.getCategoryById(subCategoryId) : null;
     if (!sub) {
       throw AppError.badRequest('دسته انتخابی معتبر نیست.', 'BAD_CATEGORY');
     }
@@ -1825,6 +1864,13 @@ export class ProductsService {
   ): ProductDto {
     const photos = gallery.map((f) => f.url);
     const photoThumbs = gallery.map((f) => f.thumbUrl ?? f.url);
+    // دستهٔ ایمچ (۲۶-۱۱) — مشتق از id باسکول زیردسته؛ فالبک با نام باسکول
+    // برای دسته‌های تازهٔ ایمپورت‌شدهٔ بیرون از نگاشت id
+    const v2Key = v2KeyForBuskol(
+      p.subCategoryId,
+      names.cats.get(p.subCategoryId) ?? null,
+    );
+    const v2Path = v2PathForKey(v2Key);
     const features = Array.isArray(p.features)
       ? (p.features as Array<{ key: string; value: string }>)
       : [];
@@ -1847,6 +1893,9 @@ export class ProductsService {
       categoryName: names.cats.get(p.categoryId) ?? UNKNOWN,
       subCategoryId: p.subCategoryId,
       subCategoryName: names.cats.get(p.subCategoryId) ?? UNKNOWN,
+      v2Key: v2Key ?? null,
+      v2Path: v2Path.length ? v2Path : v2Key ? [v2Key] : [],
+      v2LeafName: v2Path.at(-1) ?? null,
       provinceId: p.provinceId,
       provinceName: names.provs.get(p.provinceId) ?? UNKNOWN,
       cityId: p.cityId,

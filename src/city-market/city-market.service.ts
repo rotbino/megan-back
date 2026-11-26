@@ -6,6 +6,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { LocationsService } from '../locations/locations.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { ActiveUsersService } from '../common/active-users/active-users.module';
+import { buskolIdsForKey, isTaxonomyKey, v2KeyForBuskol, v2PathForKey } from '../common/taxonomy';
 import type { ProductDto } from '../products/products.service';
 import type { GetCityMarketProductsDto } from './dto';
 
@@ -83,8 +84,12 @@ export class CityMarketService {
         };
 
         // فیلتر دسته — خودش + درخت فرزندان (عین getProductList)
+        // (۲۶-۱۱): مقدار ASCII نقطه‌گذر = کلید v2 تاکسونومی ایمچ → ترجمهٔ
+        // استاتیک به idهای باسکول (باسکول پشت صحنه)؛ فارسی = مسیر باسکول پشتیبان
         if (dto.categorySlug) {
-          const ids = await this.categories.getSubtreeIds(dto.categorySlug);
+          const ids = isTaxonomyKey(dto.categorySlug)
+            ? buskolIdsForKey(dto.categorySlug) ?? []
+            : await this.categories.getSubtreeIds(dto.categorySlug);
           if (ids.length === 0) return { items: [], total: 0, page, pageCount: 0 };
           where.OR = [
             { subCategoryId: { in: ids } },
@@ -214,6 +219,12 @@ export class CityMarketService {
   ): ProductDto {
     const photos = gallery.map((f) => f.url);
     const photoThumbs = gallery.map((f) => f.thumbUrl ?? f.url);
+    // دستهٔ ایمچ (۲۶-۱۱) — عین products.service.toDto (این کپی آگاهانه است)
+    const v2Key = v2KeyForBuskol(
+      p.subCategoryId,
+      names.cats.get(p.subCategoryId) ?? null,
+    );
+    const v2Path = v2PathForKey(v2Key);
     const features = Array.isArray(p.features)
       ? (p.features as Array<{ key: string; value: string }>)
       : [];
@@ -236,6 +247,9 @@ export class CityMarketService {
       categoryName: names.cats.get(p.categoryId) ?? UNKNOWN,
       subCategoryId: p.subCategoryId,
       subCategoryName: names.cats.get(p.subCategoryId) ?? UNKNOWN,
+      v2Key: v2Key ?? null,
+      v2Path: v2Path.length ? v2Path : v2Key ? [v2Key] : [],
+      v2LeafName: v2Path.at(-1) ?? null,
       provinceId: p.provinceId,
       provinceName: names.provs.get(p.provinceId) ?? UNKNOWN,
       cityId: p.cityId,

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.module';
 import { CacheService, TTL } from '../common/cache/cache.module';
+import { buskolIdsForKey, isTaxonomyKey } from '../common/taxonomy';
 
 export interface CategoryNode {
   id: number;
@@ -105,6 +106,35 @@ export class CategoriesService {
     };
     collect(target);
     return ids;
+  }
+
+  /** همهٔ دسته‌های «برگ» (بدون فرزند) باسکول — از درخت کش‌شده؛ برای
+   *  نماینده‌یابی کلید v2 → دستهٔ ذخیره‌شدنی باسکول (۲۶-۱۱) */
+  async getLeafIdSet(): Promise<Set<number>> {
+    const all = await this.getAllCategories(); // کش‌شده
+    const leaves = new Set<number>();
+    const walk = (nodes: CategoryNode[]): void => {
+      for (const n of nodes) {
+        if (!n.children.length) leaves.add(n.id);
+        else walk(n.children);
+      }
+    };
+    walk(all);
+    return leaves;
+  }
+
+  /**
+   * نمایندهٔ باسکولِ یک کلید v2 (۲۶-۱۱ — دستهٔ عمومی ایمچ صحنه / باسکول
+   * پشت صحنه): فرانت انتخاب‌گرش درخت v2 را نشان می‌دهد و کلید v2 می‌فرستد؛
+   * اینجا به یک id باسکولِ «برگ» ترجمه می‌شود تا رکوردها مثل قبل ذخیره
+   * شوند (اولین برگِ نگاشت‌شده؛ نبود برگ → اولین id). null = نامعتبر.
+   */
+  async representativeBuskolId(v2Key: string): Promise<number | null> {
+    if (!isTaxonomyKey(v2Key)) return null;
+    const ids = buskolIdsForKey(v2Key) ?? [];
+    if (ids.length === 0) return null;
+    const leaves = await this.getLeafIdSet();
+    return ids.find((id) => leaves.has(id)) ?? ids[0];
   }
 
   /**
