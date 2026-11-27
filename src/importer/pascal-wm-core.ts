@@ -635,6 +635,100 @@ function inversePass(reg: Float32Array, a: Float32Array, cPlanes: Float32Array[]
  * حذف واترمارک از RGB خام (Uint8 درهم ۳کاناله) — v4.
  * خروجی: باکس مؤثر یا null. پیکسل‌های بیرون از باکس دست نمی‌خورند.
  */
+// ─── (۲۷-۱۱) گارد بج سفید + درون‌یابی باکس ─────────────────────────────────
+/** آیا ناحیهٔ واترمارکِ «پیش از حذف» بجِ روشنی دارد که پاس تمپلیت نمی‌برد؟
+ *  ملاک: میانگین روشنایی داخل باکسِ جوهر (reg0 = تصویر اصلی ناحیه) نسبت به
+ *  حلقهٔ حاشیهٔ ۱۲پیکسلی دور باکس — اختلاف ≥ ۱۲ واحد روشنایی یعنی بج روشن. */
+export function badgeResidual(
+  reg0: Float32Array,
+  rgb: Uint8Array,
+  w: number,
+  h: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): boolean {
+  const bw = x2 - x1;
+  const bh = y2 - y1;
+  // داخل باکس
+  let innerSum = 0;
+  const innerN = bw * bh;
+  for (let j = 0; j < bh; j++) {
+    for (let i = 0; i < bw; i++) {
+      const p = ((y1 + j) * w + x1 + i) * 3;
+      innerSum += 0.299 * rgb[p] + 0.587 * rgb[p + 1] + 0.114 * rgb[p + 2];
+    }
+  }
+  // حلقهٔ حاشیه (۱۲px بیرون باکس) — فقط پیکسل‌های موجود
+  const M = 12;
+  let ringSum = 0;
+  let ringN = 0;
+  for (let j = -M; j < bh + M; j++) {
+    for (let i = -M; i < bw + M; i++) {
+      if (i >= 0 && i < bw && j >= 0 && j < bh) continue;
+      const X = x1 + i;
+      const Y = y1 + j;
+      if (X < 0 || Y < 0 || X >= w || Y >= h) continue;
+      const p = (Y * w + X) * 3;
+      ringSum += 0.299 * rgb[p] + 0.587 * rgb[p + 1] + 0.114 * rgb[p + 2];
+      ringN++;
+    }
+  }
+  if (!ringN || !innerN) return false;
+  const innerAvg = innerSum / innerN;
+  const ringAvg = ringSum / ringN;
+  return innerAvg - ringAvg >= 12;
+}
+
+/** بازسازی کامل باکس با درون‌یابی وزنی-فاصله‌ای از ۴ لبهٔ باکس + بلور ملایم
+ *  ترکیب لبه‌ها — همان پروتوتایپ اثبات‌شدهٔ v2 (۱۱-۲۷): هر پیکسل = میانگین
+ *  وزن‌دارِ معکوس‌فاصله از نمونه‌های لبهٔ بالا/پایین/چپ/راست. بیرون از باکس
+ *  هیچ پیکسلی تغییر نمی‌کند. */
+export function inpaintBox(
+  rgb: Uint8Array,
+  w: number,
+  h: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): void {
+  const bw = x2 - x1;
+  const bh = y2 - y1;
+  const base = new Float32Array(bw * bh * 3);
+  for (let j = 0; j < bh; j++) {
+    for (let i = 0; i < bw; i++) {
+      const X = x1 + i;
+      const Y = y1 + j;
+      const dt = Math.hypot(i, j) + 1;
+      const db = Math.hypot(bw - 1 - i, bh - 1 - j) + 1;
+      const dl = Math.hypot(i, bh - 1 - j) + 1;
+      const dr = Math.hypot(bw - 1 - i, j) + 1;
+      const top = ((y1 - 1) * w + X) * 3;
+      const bot = ((y1 + bh) * w + X) * 3;
+      const lef = (Y * w + x1 - 1) * 3;
+      const rig = (Y * w + x1 + bw) * 3;
+      const ws = 1 / dt + 1 / db + 1 / dl + 1 / dr;
+      for (let c = 0; c < 3; c++) {
+        base[(j * bw + i) * 3 + c] =
+          (rgb[top + c] / dt + rgb[bot + c] / db + rgb[lef + c] / dl + rgb[rig + c] / dr) / ws;
+      }
+    }
+  }
+  // بلور ملایم روی پایه تا شیب‌های مصنوعی میان‌لبه‌ها هموار شود (σ≈2)
+  const blurred = gaussianBlurRegion(base, bw, bh, 2.0);
+  for (let j = 0; j < bh; j++) {
+    for (let i = 0; i < bw; i++) {
+      const p = (y1 + j) * w + x1 + i;
+      for (let c = 0; c < 3; c++) {
+        const v = blurred[(j * bw + i) * 3 + c];
+        rgb[p * 3 + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+      }
+    }
+  }
+}
+
 export function removeWatermarkRgb(
   rgb: Uint8Array,
   w: number,
@@ -717,6 +811,16 @@ export function removeWatermarkRgb(
         }
       }
     }
+  }
+
+  // (۲۷-۱۱) گارد «بج سفید» — واترمارک پاسکال در برخی عکس‌ها دو-لایه است:
+  // بج/پس‌زمینهٔ نیمه‌شفافِ روشن زیر حروف. پاس تمپلیت فقط حروف را برمی‌دارد و
+  // بج روشن باقی می‌ماند (نورده). تشخیص: میانگین روشنایی ناحیهٔ جوهرِ باقی‌مانده
+  // نسبت به حلقهٔ حاشیهٔ باکس — اگر معیباً روشن‌تر بود، کل باکس را با درون‌یابی
+  // وزنی-فاصله‌ای از ۴ لبهٔ باکس بازسازی می‌کنیم (خارج از باکس دست نمی‌خورد).
+  if (badgeResidual(reg0, rgb, w, h, x1, y1, x2, y2)) {
+    inpaintBox(rgb, w, h, x1, y1, x2, y2);
+    return { x1, y1, x2, y2 };
   }
 
   // نوشتن با ماسک جوهر + clip
