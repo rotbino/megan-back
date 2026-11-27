@@ -64,8 +64,10 @@ export class GetAdsReportDto {
  *  • فقط آگهی‌های confirmed (وضعیت دیگر قابل انتخاب نیست)؛
  *  • nodeKey فقط کلید v2 یا خالی ('unmapped' ادمینی پذیرفته نیست)؛
  *  • شماره تلفن فروشنده هرگز برنمی‌گردد؛
- *  • sort: جدیدترین (پیش‌فرض) | ارزان‌ترین | گران‌ترین — سورت قیمت فقط
- *    بین آگهی‌های دارای قیمت (> 0) اعمال می‌شود.
+ *  • sort: جدیدترین (پیش‌فرض) | ارزان‌ترین | گران‌ترین | کمترین حداقل خرید |
+ *    بیشترین موجودی — سورت قیمت فقط بین آگهی‌های دارای قیمت (> 0) اعمال می‌شود؛
+ *  • (۲۸-۱۱ بازطراحی صفحهٔ فیلتر پیشرفته — طرح تامینان) بازهٔ قیمت و حجم
+ *    خرید + فاست‌های هر گزینه (شمارش کنار فیلترها) از همین DTO می‌آیند.
  */
 export class GetCatalogListDto {
   @IsOptional()
@@ -93,9 +95,33 @@ export class GetCatalogListDto {
   @IsObject()
   attrs?: Record<string, string[]>;
 
+  /** کف قیمت هر واحد (تومان) — منفی یعنی دادهٔ خراب */
   @IsOptional()
-  @IsIn(['newest', 'price-asc', 'price-desc'])
-  sort?: 'newest' | 'price-asc' | 'price-desc';
+  @Type(() => Number)
+  @IsInt()
+  priceMin?: number;
+
+  /** سقف قیمت هر واحد (تومان) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  priceMax?: number;
+
+  /** کف حداقل میزان فروش (به واحد دسته) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  moqMin?: number;
+
+  /** سقف حداقل میزان فروش */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  moqMax?: number;
+
+  @IsOptional()
+  @IsIn(['newest', 'price-asc', 'price-desc', 'moq-asc', 'stock-desc'])
+  sort?: 'newest' | 'price-asc' | 'price-desc' | 'moq-asc' | 'stock-desc';
 
   @IsOptional()
   @Type(() => Number)

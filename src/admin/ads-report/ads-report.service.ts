@@ -12,6 +12,7 @@ import {
   effectiveAttrs,
   findTaxonomyNode,
   flattenTaxonomy,
+  taxonomyPath,
   type TaxonomyAttr,
   type TaxonomyNode,
 } from './taxonomy-v2';
@@ -74,6 +75,26 @@ export interface PublicCatalogRow {
   photo: string | null;
   updated_at: Date;
   resolved_attrs?: Record<string, string>;
+}
+
+/** (۲۸-۱۱ طرح تامینان) شمارش «چند آگهی با این گزینه می‌ماند» — کنار هر گزینهٔ
+ *  فیلتر نمایش می‌آید؛ شمار صفر = گزینهٔ خاموش. شمار استان/شهر با بقیهٔ
+ *  فیلترها به‌جز مکان محاسبه می‌شود (کاربر ببییند بازار در کجاست). */
+export interface PublicCatalogFacets {
+  provinces: { id: number; name: string; count: number }[];
+  cities: { id: number; name: string; count: number }[];
+  /** attrKey → برچسب گزینه → شمار آگهی (بقیهٔ فیلترها + همین گزینه) */
+  attrs: Record<string, Record<string, number>>;
+  /** بازهٔ واقعی قیمت/حداقل‌سفارش در گرهٔ فعلی — پلیس‌هولدر فرم بازه */
+  price: { min: number | null; max: number | null };
+  moq: { min: number | null; max: number | null };
+}
+
+/** واحد فروش پرتکرار گره — برچسب واحد در فیلتر حجم خرید از اینجا می‌آید؛
+ *  برای «همهٔ دسته‌ها» null است (واحد یکتا ندارد) */
+export interface PublicCatalogUnitStats {
+  unit: string;
+  count: number;
 }
 
 /** گره انتخابی معتبر گزارش — 'all'، 'unmapped' یا کلید v2 */
@@ -350,7 +371,20 @@ export class AdsReportService {
 
   // ─── لیست عمومی کاتالوگ v2 — صفحهٔ /product-filter ─────────────────────────
 
-  /** POST /catalog/v2/getList — فقط confirmed، بدون تلفن، سورت جدیدترین/قیمت */
+  /**
+   * POST /catalog/v2/getList — فقط confirmed، بدون تلفن؛ (۲۸-۱۱ طرح تامینان)
+   * فیلترها: گره + استان/شهر + جستجو + اتریبیوت‌ها + بازهٔ قیمت + بازهٔ حجم خرید؛
+   * سورت: جدیدترین/ارزان‌ترین/گران‌ترین/کمترین حداقل خرید/بیشترین موجودی.
+   *
+   * پاسخ افزوده‌های صفحهٔ فیلتر پیشرفته را هم می‌آورد:
+   *  • facets — شمارش کنار هر گزینه (استان/شهر/اتریبیوت) + بازهٔ واقعی قیمت/حجم؛
+   *  • unit — واحد پرتکرار گره برای برچسب‌های فیلتر حجم؛
+   *  • node — نام و مسیر گرهٔ انتخابی (breadcrumbs فرانت).
+   *
+   * دو مسیر اجرا: گره‌های دارای اتریبیوت (۱۳+ برگ/خانوادهٔ فعلی) نام‌محورند —
+   * نامزدها یک‌بار خوانده می‌شوند، همهٔ فیلترها + فاست‌ها در حافظه؛ بقیهٔ گره‌ها
+   * خالص SQL می‌مانند (۶۲هزار آگهی «همهٔ دسته‌ها» را به حافظه نمی‌کشیم).
+   */
   async getPublicList(dto: GetCatalogListDto) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(48, Math.max(1, dto.perPage ?? 24));
@@ -361,43 +395,111 @@ export class AdsReportService {
         ? dto.nodeKey
         : null;
 
-    const priceSort = dto.sort === 'price-asc' || dto.sort === 'price-desc';
+    const sortKey = dto.sort ?? 'newest';
+    const priceSort = sortKey === 'price-asc' || sortKey === 'price-desc';
+    const moqSort = sortKey === 'moq-asc';
+
+    // بازه‌ها — منفی/صفر = نامعتبر
+    const priceMin = dto.priceMin && dto.priceMin > 0 ? dto.priceMin : undefined;
+    const priceMax = dto.priceMax && dto.priceMax > 0 ? dto.priceMax : undefined;
+    const moqMin = dto.moqMin && dto.moqMin > 0 ? dto.moqMin : undefined;
+    const moqMax = dto.moqMax && dto.moqMax > 0 ? dto.moqMax : undefined;
+    const rangeConds: Prisma.ProductWhereInput[] = [
+      ...(priceMin != null ? [{ minSalePrice: { gte: priceMin } }] : []),
+      ...(priceMax != null ? [{ minSalePrice: { lte: priceMax } }] : []),
+      ...(moqMin != null ? [{ minSaleAmount: { gte: moqMin } }] : []),
+      ...(moqMax != null ? [{ minSaleAmount: { lte: moqMax } }] : []),
+    ];
+
+    // «base» عمداً فاقد بازه‌ها و گاردهای سورت است: بازه‌ها در مسیر SQL به
+    // whereٔ لیست می‌روند و در مسیر اتریبیوتی در حافظه اعمال می‌شوند؛ گاردهای
+    // «قیمت/حجم تعیین‌نشده» فقط ترتیبِ لیست را صاف می‌کنند و نباید شمارش فاست را خراب کنند
     const base: Prisma.ProductWhereInput[] = [
       { status: 'confirmed' },
-      ...(priceSort ? [{ minSalePrice: { gt: 0 } }] : []),
       ...(dto.provinceId ? [{ provinceId: dto.provinceId }] : []),
       ...(dto.cityId ? [{ cityId: dto.cityId }] : []),
     ];
     const s = (dto.search ?? '').trim();
     if (s) base.push({ productName: { contains: s } });
 
+    let nodeIds: number[] = [];
     if (nodeKey) {
-      const ids = this.keyToBuskolIds.get(nodeKey) ?? [];
-      if (ids.length === 0) return this.emptyPublicList(page, perPage, []);
-      base.push({ OR: [{ subCategoryId: { in: ids } }, { categoryId: { in: ids } }] });
+      nodeIds = this.keyToBuskolIds.get(nodeKey) ?? [];
+      if (nodeIds.length === 0) return this.emptyPublicList(page, perPage, nodeKey);
+      base.push({ OR: [{ subCategoryId: { in: nodeIds } }, { categoryId: { in: nodeIds } }] });
     }
 
     const attrs = nodeKey ? effectiveAttrs(nodeKey) : [];
     const attrSelection = this.sanitizeAttrSelection(attrs, dto.attrs);
-    const attrActive = Object.keys(attrSelection).length > 0;
+
+    /** شرط بدون مکان — پایهٔ فاست استان/شهر (شمارش بدون فیلتر مکان) */
+    const noLocation = base.filter((w) => !('provinceId' in w) && !('cityId' in w));
 
     let total: number;
     let rows: Awaited<ReturnType<PrismaService['product']['findMany']>>;
+    let facets: PublicCatalogFacets;
 
-    if (attrActive) {
-      // نام‌محور — مثل گزارش ادمین: نامزدها → تطبیق در حافظه → صفحه‌بندی
-      // (سورت قیمت در حالت اتریبیوتی فعال نیست؛ ترتیب = آخرین به‌روزرسانی)
+    if (attrs.length > 0) {
+      // ── مسیر نام‌محور — گرهٔ دارای اتریبیوت (اندازهٔ محدود به زیردرخت) ──
+      // نامزدها بدون مکان/بازه خوانده می‌شوند تا فاست‌ها «به‌جز همین فیلتر» بتوانند
       const candidates = await this.prisma.product.findMany({
-        where: { AND: base },
-        select: { id: true, productName: true },
+        where: { AND: noLocation },
+        select: {
+          id: true, productName: true, provinceId: true, cityId: true, unit: true,
+          minSalePrice: true, minSaleAmount: true, stock: true, isLadder: true, updatedAt: true,
+        },
       });
-      const matched = candidates.filter((c) =>
-        passesAttrFilter(c.productName, attrs, attrSelection),
-      );
-      total = matched.length;
-      const pageIds = matched
-        .slice((page - 1) * perPage, page * perPage)
-        .map((m) => m.id);
+
+      // نرمال‌سازی/توکن یک‌بار به‌ازای هر نام — کل تطبیق‌های بعدی از همین می‌گذرند
+      const enriched = candidates.map((c) => {
+        const normalized = normalizeFa(c.productName);
+        return { ...c, normalized, tokens: new Set(normalized.split(TOKEN_SPLIT).filter(Boolean)) };
+      });
+
+      /** آیا نام، گزینهٔ خواسته‌شدهٔ یک اتریبیوت را می‌زند؟ (wanted خالی = بی‌فیلتر) */
+      const hitsWanted = (
+        c: (typeof enriched)[number],
+        attr: TaxonomyAttr,
+        wanted?: Set<string>,
+      ): boolean => {
+        if (!wanted || wanted.size === 0) return true;
+        for (const opt of attr.options) {
+          if (!wanted.has(opt.label)) continue;
+          if (opt.match.some((alias) => matchesAlias(c.normalized, c.tokens, alias))) return true;
+        }
+        return false;
+      };
+
+      /** تطبیق کامل یک نامزده — با پرش اختیاری یک گروه فیلتر (فاست/بازه) */
+      const rangeFilters = { priceMin, priceMax, moqMin, moqMax };
+      const matchC = (
+        c: (typeof enriched)[number],
+        skip: { loc?: boolean; price?: boolean; moq?: boolean; attr?: string } = {},
+      ): boolean => {
+        if (!skip.loc) {
+          if (dto.provinceId && c.provinceId !== dto.provinceId) return false;
+          if (dto.cityId && c.cityId !== dto.cityId) return false;
+        }
+        if (!skip.price && (rangeFilters.priceMin != null || rangeFilters.priceMax != null)) {
+          if (c.minSalePrice <= 0) return false;
+          if (rangeFilters.priceMin != null && c.minSalePrice < rangeFilters.priceMin) return false;
+          if (rangeFilters.priceMax != null && c.minSalePrice > rangeFilters.priceMax) return false;
+        }
+        if (!skip.moq) {
+          if (rangeFilters.moqMin != null && c.minSaleAmount < rangeFilters.moqMin) return false;
+          if (rangeFilters.moqMax != null && c.minSaleAmount > rangeFilters.moqMax) return false;
+        }
+        for (const attr of attrs) {
+          if (attr.key === skip.attr) continue;
+          if (!hitsWanted(c, attr, attrSelection[attr.key])) return false;
+        }
+        return true;
+      };
+
+      const list = enriched.filter((c) => matchC(c));
+      total = list.length;
+      list.sort(this.inMemorySorter(sortKey));
+      const pageIds = list.slice((page - 1) * perPage, page * perPage).map((c) => c.id);
       rows = pageIds.length
         ? await this.prisma.product.findMany({ where: { id: { in: pageIds } } })
         : [];
@@ -405,14 +507,67 @@ export class AdsReportService {
       rows = rows
         .slice()
         .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+      // ── فاست‌ها (به‌جز همین فیلتر) — الگوی شمارش زندهٔ دیوار/تامینان ──
+      const noLoc = enriched.filter((c) => matchC(c, { loc: true }));
+      const provinceCount = new Map<number, number>();
+      const cityCount = new Map<number, number>();
+      for (const c of noLoc) {
+        provinceCount.set(c.provinceId, (provinceCount.get(c.provinceId) ?? 0) + 1);
+        cityCount.set(c.cityId, (cityCount.get(c.cityId) ?? 0) + 1);
+      }
+
+      // شمارش هر اتریبیوت با بقیهٔ فیلترها (به‌جز خودش)
+      const attrCounts: Record<string, Record<string, number>> = {};
+      for (const attr of attrs) {
+        const subset = enriched.filter((c) => matchC(c, { attr: attr.key }));
+        const counts: Record<string, number> = {};
+        for (const opt of attr.options) {
+          counts[opt.label] = subset.filter((c) =>
+            opt.match.some((alias) => matchesAlias(c.normalized, c.tokens, alias)),
+          ).length;
+        }
+        attrCounts[attr.key] = counts;
+      }
+
+      // بازهٔ واقعی قیمت/حجم در همین گره — پلیس‌هولدر فرم بازه در فرانت
+      const boundsSet = enriched.filter((c) => matchC(c, { price: true, moq: true }));
+      const priced = boundsSet.filter((c) => c.minSalePrice > 0).map((c) => c.minSalePrice);
+      const moqs = boundsSet.filter((c) => c.minSaleAmount > 0).map((c) => c.minSaleAmount);
+
+      facets = {
+        ...(await this.locRows(provinceCount, cityCount)),
+        attrs: attrCounts,
+        price: {
+          min: priced.length ? Math.min(...priced) : null,
+          max: priced.length ? Math.max(...priced) : null,
+        },
+        moq: {
+          min: moqs.length ? Math.min(...moqs) : null,
+          max: moqs.length ? Math.max(...moqs) : null,
+        },
+      };
     } else {
+      // ── مسیر SQL خالص — گره بدون اتریبیوت یا «همهٔ دسته‌ها» ──
+      // بازه‌ها + گاردهای سورت فقط به whereٔ لیست می‌روند
+      const where: Prisma.ProductWhereInput = {
+        AND: [
+          ...base,
+          ...rangeConds,
+          ...(priceSort ? [{ minSalePrice: { gt: 0 } }] : []),
+          ...(moqSort ? [{ minSaleAmount: { gt: 0 } }] : []),
+        ],
+      };
       const orderBy: Prisma.ProductOrderByWithRelationInput[] =
-        dto.sort === 'price-asc'
+        sortKey === 'price-asc'
           ? [{ minSalePrice: 'asc' }, { updatedAt: 'desc' }]
-          : dto.sort === 'price-desc'
+          : sortKey === 'price-desc'
             ? [{ minSalePrice: 'desc' }, { updatedAt: 'desc' }]
-            : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
-      const where: Prisma.ProductWhereInput = { AND: base };
+            : sortKey === 'moq-asc'
+              ? [{ minSaleAmount: 'asc' }, { updatedAt: 'desc' }]
+              : sortKey === 'stock-desc'
+                ? [{ stock: 'desc' }, { updatedAt: 'desc' }]
+                : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
       [total, rows] = await Promise.all([
         this.prisma.product.count({ where }),
         this.prisma.product.findMany({
@@ -422,15 +577,117 @@ export class AdsReportService {
           take: perPage,
         }),
       ]);
+
+      // فاست‌های SQL — groupBy ارزان روی ستون‌های فهرست‌شده
+      // مکان از شرط فاست حذف می‌شود تا همهٔ استان‌ها شمرده شوند؛ بازه‌ها می‌مانند
+      const facetWhere: Prisma.ProductWhereInput = { AND: [...noLocation, ...rangeConds] };
+      // بازهٔ واقعی — شرط با مکان و بدون بازه‌ها
+      const boundsWhere: Prisma.ProductWhereInput = { AND: base };
+      const [byProvince, byCity, priceAgg, moqAgg] = await Promise.all([
+        this.prisma.product.groupBy({ by: ['provinceId'], _count: { _all: true }, where: facetWhere }),
+        this.prisma.product.groupBy({ by: ['cityId'], _count: { _all: true }, where: facetWhere }),
+        this.prisma.product.aggregate({
+          where: { ...boundsWhere, minSalePrice: { gt: 0 } },
+          _min: { minSalePrice: true },
+          _max: { minSalePrice: true },
+        }),
+        this.prisma.product.aggregate({
+          where: { ...boundsWhere, minSaleAmount: { gt: 0 } },
+          _min: { minSaleAmount: true },
+          _max: { minSaleAmount: true },
+        }),
+      ]);
+      const provinceCount = new Map<number, number>();
+      for (const g of byProvince) provinceCount.set(g.provinceId, g._count._all);
+      const cityCount = new Map<number, number>();
+      for (const g of byCity) cityCount.set(g.cityId, g._count._all);
+      facets = {
+        ...(await this.locRows(provinceCount, cityCount)),
+        attrs: {},
+        price: {
+          min: priceAgg._min.minSalePrice ?? null,
+          max: priceAgg._max.minSalePrice ?? null,
+        },
+        moq: {
+          min: moqAgg._min.minSaleAmount ?? null,
+          max: moqAgg._max.minSaleAmount ?? null,
+        },
+      };
     }
+
+    // واحد پرتکرار گره — همیشه از خود زیردرخت (بدون جستجو/فیلتر) تا برچسب پایدار بماند
+    const unitStats = nodeKey
+      ? await this.prisma.product.groupBy({
+          by: ['unit'],
+          _count: { _all: true },
+          where: {
+            status: 'confirmed',
+            OR: [{ subCategoryId: { in: nodeIds } }, { categoryId: { in: nodeIds } }],
+          },
+          orderBy: { _count: { unit: 'desc' } },
+          take: 6,
+        })
+      : [];
 
     return {
       total,
       page,
       perPage,
       pageCount: Math.max(1, Math.ceil(total / perPage)),
+      node: nodeKey ? this.nodeInfo(nodeKey) : null,
       attrs,
+      unit: unitStats.length
+        ? { top: unitStats[0].unit, list: unitStats.map((u) => ({ unit: u.unit, count: u._count._all })) }
+        : null,
+      facets,
       items: await this.toPublicRows(rows, attrs.length > 0),
+    };
+  }
+
+  /** سورت درون‌حافظه‌ای مسیر اتریبیوتی — آگهی‌های «تماس بگیرید» (۰) انتهای سورت قیمت */
+  private inMemorySorter(sortKey: string) {
+    switch (sortKey) {
+      case 'price-asc':
+        return (a: { minSalePrice: number; updatedAt: Date }, b: { minSalePrice: number; updatedAt: Date }) =>
+          (a.minSalePrice || Infinity) - (b.minSalePrice || Infinity) ||
+          b.updatedAt.getTime() - a.updatedAt.getTime();
+      case 'price-desc':
+        return (a: { minSalePrice: number; updatedAt: Date }, b: { minSalePrice: number; updatedAt: Date }) =>
+          b.minSalePrice - a.minSalePrice ||
+          b.updatedAt.getTime() - a.updatedAt.getTime();
+      case 'moq-asc':
+        return (a: { minSaleAmount: number }, b: { minSaleAmount: number }) =>
+          (a.minSaleAmount || Infinity) - (b.minSaleAmount || Infinity);
+      case 'stock-desc':
+        return (a: { stock: number }, b: { stock: number }) => b.stock - a.stock;
+      default:
+        return (a: { isLadder: boolean; updatedAt: Date }, b: { isLadder: boolean; updatedAt: Date }) =>
+          Number(b.isLadder) - Number(a.isLadder) || b.updatedAt.getTime() - a.updatedAt.getTime();
+    }
+  }
+
+  /** نام و مسیر گره برای پاسخ — breadcrumb فرانت بدون درخت کامل */
+  private nodeInfo(key: string) {
+    return { key, name: findTaxonomyNode(key)?.name ?? key, path: taxonomyPath(key) };
+  }
+
+  /** تبدیل شمارش خام استان/شهر به ردیف‌های نام‌دار فاست */
+  private async locRows(
+    provinceCount: Map<number, number>,
+    cityCount: Map<number, number>,
+  ): Promise<{ provinces: { id: number; name: string; count: number }[]; cities: { id: number; name: string; count: number }[] }> {
+    const provinceIds = [...provinceCount.keys()];
+    const cityIds = [...cityCount.keys()];
+    if (!provinceIds.length && !cityIds.length) return { provinces: [], cities: [] };
+    const names = await this.locations.getNames(provinceIds, cityIds);
+    const UNKNOWN = '—';
+    return {
+      provinces: provinceIds
+        .map((id) => ({ id, name: names.provinces.get(id) ?? UNKNOWN, count: provinceCount.get(id) ?? 0 }))
+        .sort((a, b) => b.count - a.count),
+      cities: cityIds
+        .map((id) => ({ id, name: names.cities.get(id) ?? UNKNOWN, count: cityCount.get(id) ?? 0 }))
+        .sort((a, b) => b.count - a.count),
     };
   }
 
@@ -479,13 +736,22 @@ export class AdsReportService {
     };
   }
 
-  private emptyPublicList(page: number, perPage: number, attrs: TaxonomyAttr[]) {
+  private emptyPublicList(page: number, perPage: number, nodeKey: string) {
     return {
       total: 0,
       page,
       perPage,
       pageCount: 1,
-      attrs,
+      node: nodeKey ? this.nodeInfo(nodeKey) : null,
+      attrs: [] as TaxonomyAttr[],
+      unit: null,
+      facets: {
+        provinces: [],
+        cities: [],
+        attrs: {},
+        price: { min: null, max: null },
+        moq: { min: null, max: null },
+      } satisfies PublicCatalogFacets,
       items: [] as PublicCatalogRow[],
     };
   }

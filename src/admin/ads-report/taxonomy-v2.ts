@@ -86,7 +86,37 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
           { key: 'agri.fruit.mango', name: 'انبه', example: 'پاکستانی' },
           { key: 'agri.fruit.pineapple', name: 'آناناس', example: 'درجه یک' },
           { key: 'agri.fruit.olive', name: 'زیتون', example: 'طارم' },
-          { key: 'agri.fruit.date', name: 'خرما', example: 'مضافتی' },
+          {
+            key: 'agri.fruit.date', name: 'خرما', example: 'مضافتی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم خرما — مضافتی، کبکاب، زاهدی، پیارم…',
+                options: [
+                  { label: 'مضافتی', match: ['مضافتی', 'مظفتی'] },
+                  { label: 'کبکاب', match: ['کبکاب'] },
+                  { label: 'زاهدی', match: ['زاهدی'] },
+                  { label: 'پیارم', match: ['پیارم'] },
+                  { label: 'خاصویی', match: ['خاصویی', 'خاصو'] },
+                  { label: 'کلوته', match: ['کلوته', 'کلیته'] },
+                  { label: 'شاهانی', match: ['شاهانی'] },
+                  { label: 'برحی', match: ['برحی', 'بر هی'] },
+                  { label: 'استعمران', match: ['استعمران', 'سعمران', 'عسمران'] },
+                  { label: 'مرداسنگ', match: ['مرداسنگ'] },
+                  { label: 'قصب', match: ['قصب'] },
+                ],
+              },
+              {
+                key: 'proc',
+                label: 'عمل‌آوری',
+                options: [
+                  { label: 'رطب (تازه)', match: ['رطب', 'تازه'] },
+                  { label: 'تمر (خشک)', match: ['تمر'] },
+                ],
+              },
+            ],
+          },
         ],
       },
       {
@@ -265,15 +295,196 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
       {
         key: 'agri.nuts',
         name: 'خشکبار',
+        /** ویژگی‌های کل خانوادهٔ خشکبار — با ارث‌بری به همهٔ برگ‌های زیرمجموعه (۲۸-۱۱) */
+        attrs: [
+          {
+            key: 'grade',
+            label: 'درجه کیفیت',
+            options: [
+              { label: 'ممتاز (صادراتی)', match: ['ممتاز', 'صادراتی'] },
+              { label: 'درجه ۱', match: ['درجه 1', 'درجه یک', 'درجه۱', 'درجهیک', 'درجه ۱'] },
+              { label: 'درجه ۲', match: ['درجه 2', 'درجه دو', 'درجه۲'] },
+              { label: 'خرد / زیر درجه', match: ['خرد', 'زیر درجه', 'شکسته', 'ضایعات'] },
+            ],
+          },
+          {
+            key: 'harvest',
+            label: 'سال برداشت',
+            options: [
+              { label: 'امسال (تازه)', match: ['امسال', 'تازه', 'نوبر'] },
+              { label: 'پارسال', match: ['پارسال', 'سال قبل'] },
+            ],
+          },
+          {
+            key: 'pack',
+            label: 'بسته‌بندی بار',
+            options: [
+              { label: 'فله', match: ['فله'] },
+              { label: 'کیسه ۲۵ کیلویی', match: ['کیسه 25', '25 کیلو', '۲۵ کیلو'] },
+              { label: 'کیسه ۵۰ کیلویی', match: ['کیسه 50', '50 کیلو', '۵۰ کیلو'] },
+              { label: 'بسته مصرفی', match: ['بسته مصرفی', 'پاکت', 'گرمی'] },
+            ],
+          },
+        ],
         children: [
-          { key: 'agri.nuts.pistachio', name: 'پسته', example: 'فندقی' },
-          { key: 'agri.nuts.almond', name: 'بادام', example: 'منقا' },
-          { key: 'agri.nuts.walnut', name: 'گردو', example: 'تویسرکان' },
+          {
+            key: 'agri.nuts.pistachio', name: 'پسته', example: 'فندقی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم پسته — مثل: اکبری، احمدآقایی، کله‌قوچی…',
+                options: [
+                  { label: 'اکبری', match: ['اکبری'] },
+                  { label: 'احمدآقایی', match: ['احمد آقایی', 'احمدآقایی', 'احمداقایی', 'اقایی', 'آقایی', 'احمد ائی'] },
+                  { label: 'کله‌قوچی', match: ['کله قوچی', 'کلهقوچی', 'قوچی', 'کله'] },
+                  { label: 'فندقی', match: ['فندقی', 'فندوقی'] },
+                  { label: 'بادامی', match: ['بادامی'] },
+                  { label: 'خندانی', match: ['خندان', 'خندانی', 'خندم'] },
+                  { label: 'عباسعلی', match: ['عباسعلی', 'عباس علی'] },
+                  { label: 'بنه / کوهی', match: ['بنه', 'کوهی'] },
+                ],
+              },
+              {
+                key: 'form',
+                label: 'شکل عرضه',
+                options: [
+                  { label: 'مغز', match: ['مغز'] },
+                  { label: 'با پوست', match: ['پوست', 'غلاف', 'درشکاف'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.nuts.almond', name: 'بادام', example: 'منقا',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم/خانوادهٔ بادام — درختی، هندی، زمینی، تلخ…',
+                options: [
+                  { label: 'درختی (شیرین)', match: ['درختی', 'درخت', 'شیرین', 'شاهرودی', 'مامایی', 'منقا', 'ربیع', 'آستانه'] },
+                  { label: 'کاغذی', match: ['کاغذی'] },
+                  { label: 'هندی', match: ['هندی'] },
+                  { label: 'زمینی', match: ['زمینی'] },
+                  { label: 'تلخ', match: ['تلخ'] },
+                  { label: 'کوهی / سنگی', match: ['کوهی', 'سنگی'] },
+                ],
+              },
+              {
+                key: 'form',
+                label: 'شکل عرضه',
+                options: [
+                  { label: 'مغز', match: ['مغز'] },
+                  { label: 'با پوست', match: ['پوست', 'غلاف'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.nuts.walnut', name: 'گردو', example: 'تویسرکان',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم/پوستهٔ گردو — کاغذی، چینه‌ای، دندانه…',
+                options: [
+                  { label: 'کاغذی', match: ['کاغذی'] },
+                  { label: 'چینه‌ای', match: ['چینی', 'چینه ای', 'چینهای'] },
+                  { label: 'دندانه (پوست‌ضخیم)', match: ['دندانه', 'ضخیم'] },
+                  { label: 'نازک‌پوست', match: ['نازک'] },
+                ],
+              },
+              {
+                key: 'form',
+                label: 'شکل عرضه',
+                options: [
+                  { label: 'مغز', match: ['مغز'] },
+                  { label: 'با پوست', match: ['پوست'] },
+                ],
+              },
+              {
+                key: 'origin',
+                label: 'خاستگاه',
+                options: [
+                  { label: 'همدان / تویسرکان', match: ['تویسرکان', 'همدان', 'ملایر'] },
+                  { label: 'آذرشهر / آذربایجان', match: ['آذرشهر'] },
+                  { label: 'دماوند', match: ['دماوند'] },
+                  { label: 'ایرانی / محلی', match: ['ایرانی', 'محلی'] },
+                  { label: 'خارجی', match: ['خارجی'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.nuts.hazelnut', name: 'فندق', example: 'دوپوست' },
-          { key: 'agri.nuts.raisin', name: 'کشمش', example: 'سبز' },
+          {
+            key: 'agri.nuts.raisin', name: 'کشمش', example: 'سبز',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم کشمش — پلویی، آفتابی، تیزابی، مویز…',
+                options: [
+                  { label: 'پلویی', match: ['پلویی', 'پلوی'] },
+                  { label: 'آفتابی', match: ['آفتابی', 'افتابی'] },
+                  { label: 'تیزابی', match: ['تیزابی', 'تیزآبی', 'تیزاب'] },
+                  { label: 'سبز / سبزه', match: ['سبز', 'سبزه'] },
+                  { label: 'سیاه', match: ['سیاه'] },
+                  { label: 'طلایی', match: ['طلایی', 'گلدن'] },
+                  { label: 'قلمی', match: ['قلمی'] },
+                  { label: 'مویز', match: ['مویز'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.nuts.barberry', name: 'زرشک', example: 'زیرتالاری' },
-          { key: 'agri.nuts.sunflower', name: 'تخمه آفتابگردان', example: 'کانادایی' },
-          { key: 'agri.nuts.dried-fruit', name: 'میوه خشک', example: 'قیسی' },
+          {
+            key: 'agri.nuts.sunflower', name: 'تخمه آفتابگردان', example: 'کانادایی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'تخمه آفتابگردان، کدو، هندوانه (سنقری) یا مغز',
+                options: [
+                  { label: 'کانادایی (اس)', match: ['کانادایی', 'اس'] },
+                  { label: 'دور سفید', match: ['دور سفید', 'دورسفید', 'دور'] },
+                  { label: 'گوشتی', match: ['گوشتی'] },
+                  { label: 'کدو', match: ['کدو'] },
+                  { label: 'هندوانه / سنقری', match: ['هندوانه', 'سنقری', 'شمشیری'] },
+                  { label: 'مغز', match: ['مغز'] },
+                  { label: 'سیاه', match: ['سیاه'] },
+                ],
+              },
+              {
+                key: 'proc',
+                label: 'عمل‌آوری',
+                options: [
+                  { label: 'خام', match: ['خام'] },
+                  { label: 'سرخ / برشته', match: ['سرخ', 'برشته', 'مزهدار', 'مزه دار'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.nuts.dried-fruit', name: 'میوه خشک', example: 'قیسی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'میوهٔ خشک‌شده — آلو، قیسی (زردآلو)، انجیر، پرتقال…',
+                options: [
+                  { label: 'آلو / آلوخشک', match: ['آلو', 'آلوخشک', 'آلو خشک'] },
+                  { label: 'قیسی (زردآلو)', match: ['قیسی', 'زردآلو', 'زرد الو'] },
+                  { label: 'انجیر', match: ['انجیر'] },
+                  { label: 'پرتقال', match: ['پرتقال'] },
+                  { label: 'آلبالو', match: ['آلبالو', 'البالو'] },
+                  { label: 'سیب', match: ['سیب'] },
+                  { label: 'خرمالو', match: ['خرمالو'] },
+                  { label: 'به', match: ['به'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.nuts.dried-herbs', name: 'سبزی خشک', example: 'نعنا خشک' },
         ],
       },
@@ -281,7 +492,35 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
         key: 'agri.spices',
         name: 'ادویه و گیاهان دارویی',
         children: [
-          { key: 'agri.spices.saffron', name: 'زعفران', example: 'سرگل' },
+          {
+            key: 'agri.spices.saffron', name: 'زعفران', example: 'سرگل',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'نگین، سوپرنگین، سرگل، اتویی، پوشال…',
+                options: [
+                  { label: 'نگین', match: ['نگین'] },
+                  { label: 'سوپرنگین', match: ['سوپرنگین', 'سوپر نگین', 'سوپر'] },
+                  { label: 'سرگل', match: ['سرگل', 'سر گل'] },
+                  { label: 'اتویی', match: ['اتویی', 'اتوی'] },
+                  { label: 'پوشال', match: ['پوشال'] },
+                  { label: 'دسته', match: ['دسته'] },
+                  { label: 'ریشه', match: ['ریشه'] },
+                  { label: 'شکسته', match: ['شکسته'] },
+                  { label: 'پودر', match: ['پودر'] },
+                ],
+              },
+              {
+                key: 'origin',
+                label: 'خاستگاه',
+                options: [
+                  { label: 'قائنات', match: ['قائنات', 'قاینات', 'قنات'] },
+                  { label: 'تربت حیدریه', match: ['تربت'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.spices.turmeric', name: 'زردچوبه', example: 'قلم' },
           { key: 'agri.spices.cinnamon', name: 'دارچین', example: 'قلم' },
           { key: 'agri.spices.black-pepper', name: 'فلفل سیاه', example: 'پودری' },
@@ -516,7 +755,26 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
           { key: 'food.canned.ready-meal', name: 'غذای نیمه‌آماده', example: 'پیاز سرخ شده' },
         ],
       },
-      { key: 'food.honey', name: 'عسل و فرآورده‌های زنبور', example: 'چهل گیاه' },
+      {
+        key: 'food.honey', name: 'عسل و فرآورده‌های زنبور', example: 'چهل گیاه',
+        attrs: [
+          {
+            key: 'ctype',
+            label: 'نوع عسل',
+            hint: 'منشأ گل — چهل‌گیاه، گون، کنار، آویشن…',
+            options: [
+              { label: 'چهل/چند گیاه', match: ['چهل گیاه', 'چهلگیاه', 'چند گیاه', 'چندگیاه', 'چهل'] },
+              { label: 'گون', match: ['گون'] },
+              { label: 'کنار', match: ['کنار'] },
+              { label: 'آویشن', match: ['اویشن', 'آویشن'] },
+              { label: 'گشنیز', match: ['گشنیز'] },
+              { label: 'بهاره', match: ['بهاره'] },
+              { label: 'کوهی / کوهستان', match: ['کوهی', 'کوهستان', 'کوه'] },
+              { label: 'ژل رویال', match: ['رویال', 'ژل'] },
+            ],
+          },
+        ],
+      },
     ],
   },
   {
