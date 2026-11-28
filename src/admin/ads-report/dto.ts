@@ -1,6 +1,21 @@
-import { IsIn, IsInt, IsObject, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PRODUCT_STATUSES, type ProductStatusKey } from '../admin-products/dto';
+
+/** (۲۸-۱۱ دور ۵) نوع فروشنده از نگاه خریدار — مقیاس باسکول؛ مقادیر مجاز در
+ *  ads-report.service (SELLER_TYPES) نگه‌داری و سرویس پاک‌سازی می‌کند */
+export const SELLER_TYPE_OPTIONS = [
+  'کشاورز',
+  'تولیدکننده',
+  'بسته‌بندی‌کننده',
+  'پخش رسمی',
+  'عمده‌فروش بازار',
+  'صادرکننده',
+  'واردکننده',
+] as const;
+
+/** (۲۸-۱۱ دور ۵) نحوه‌های پذیرش پرداخت */
+export const PAYMENT_OPTIONS = ['نقد', 'چک سررسید', 'اعتباری'] as const;
 
 /**
  * گزارش آگهی‌ها بر پایهٔ تاکسونومی v2 (گروه‌بندی جدید ایمچ).
@@ -120,6 +135,28 @@ export class GetCatalogListDto {
   @Type(() => Number)
   @IsInt()
   moqMax?: number;
+
+  /** (۲۸-۱۱ دور ۵) فیلتر نوع فروشنده — چندانتخابی؛ فقط مقادیر مجاز */
+  @IsOptional()
+  @IsString({ each: true })
+  sellerTypes?: string[];
+
+  /** (۲۸-۱۱ دور ۵) فیلتر نحوهٔ پرداخت — چندانتخابی (آگهی باید یکی از آنها را پذیرد) */
+  @IsOptional()
+  @IsString({ each: true })
+  payments?: string[];
+
+  /** (۲۸-۱۱ دور ۵) فقط بارهای دارای گواهی/آنالیز کیفیت */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  analysisOnly?: boolean;
+
+  /** (۲۸-۱۱ دور ۵) فقط آگهی‌های ارسال‌دار (باربری) */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  shippingOnly?: boolean;
 
   @IsOptional()
   @IsIn(['related', 'newest', 'price-asc', 'price-desc', 'moq-asc', 'stock-desc'])

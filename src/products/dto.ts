@@ -1,5 +1,6 @@
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PAYMENT_OPTIONS, SELLER_TYPE_OPTIONS } from '../admin/ads-report/dto';
 
 /** ویژگی مرحله «جزئیات نهایی» ویزارد */
 export class ProductFeatureDto {
@@ -229,6 +230,30 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ProductFeatureDto)
   features?: ProductFeatureDto[];
+
+  /** ── (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — همان چیزی که فیلتر پیشرفته فیلتر می‌کند ──
+ *  نوع فروشنده از نگاه خریدار؛ فقط مقادیر مجاز (IsIn) — خالی = نامشخص */
+  @IsOptional()
+  @IsIn(SELLER_TYPE_OPTIONS as unknown as string[])
+  sellerType?: string;
+
+  /** نحوه‌های پذیرش پرداخت — چندانتخابی؛ فقط مقادیر مجاز */
+  @IsOptional()
+  @IsArray()
+  @IsIn(PAYMENT_OPTIONS as unknown as string[], { each: true })
+  paymentTypes?: string[];
+
+  /** بار دارای گواهی/آنالیز کیفیت */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  hasAnalysis?: boolean;
+
+  /** ارسال با باربری */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  shipping?: boolean;
 
   /** URLهای عمومی حاصل از uploadImage (حداکثر ۴ عکس مثل پاسکال) */
   @IsOptional()

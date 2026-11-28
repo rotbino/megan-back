@@ -543,6 +543,18 @@ model Product {
   isOld      Boolean @default(false) @map("is_old")
   viewCount  Int     @default(0) @map("view_count")
 
+  /// ── (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — فیلترهای هم‌مقیاس خریدار عمده ──
+  /// نوع فروشنده از نگاه خریدار (باسکول‌مقیاس): کشاورز | تولیدکننده | بسته‌بندی‌کننده
+  /// | پخش رسمی | عمده‌فروش بازار | صادرکننده | واردکننده — null = هنوز اعلام‌نشده
+  /// (آگهی‌های قدیمی؛ فیلترها فقط روی مقدار‌دار اعمال می‌شوند و «نامشخص» جایی نمی‌نشیند)
+  sellerType   String? @map("seller_type")
+  /// نحوه‌های پذیرش پرداخت — چندانتخابی: نقد | چک سررسید | اعتباری (خالی = نامشخص)
+  paymentTypes String[] @default([]) @map("payment_types")
+  /// بار دارای گواهی/آنالیز کیفیت (آزما / به‌سایت استاندارد و …)
+  hasAnalysis  Boolean @default(false) @map("has_analysis")
+  /// ارسال با باربری — فروشنده بار را می‌فرستد
+  shipping    Boolean @default(false) @map("shipping")
+
   /// (۱۸-۱۱ «ثبت گروهی محصول») آگهیِ ایمپورت‌شدهٔ پیشینی که مالکش هنوز با
   /// دکمهٔ «ایمپورت از وب» اجازه/اطلاع خود را نداده — در پنل خودِ مالک
   /// (getMyProducts) دیده نمی‌شود ولی در سطح عمومی سایت و جستجو عادی است.
@@ -589,6 +601,14 @@ model Product {
   /// جستجوی چندشهری بازار شهری (/cityMarket/getProducts — cityId IN (…))
   /// بدون استان — سریع روی ۵۰هزار آگهی (خواستهٔ مالک ۹-۱۱)
   @@index([cityId, status])
+  /// (۲۸-۱۱ دور ۵) فیلترهای شرایط معاملهٔ عمده در /product-filter — فاست‌های
+  /// نوع فروشنده/گواهی/باربری روی ۶۲هزار آگهی بدون ایندکس ~۲.۵ث می‌کشیدند؛
+  /// با اینها IXSCAN می‌شوند (compound با status چون همهٔ شرط‌ها confirmed دارند)
+  @@index([sellerType, status])
+  @@index([hasAnalysis, status])
+  @@index([shipping, status])
+  /// پذیرش پرداخت — آرایه (ایندکس multikey مونگو؛ has/hasSome از آن استفاده می‌کند)
+  @@index([paymentTypes])
   @@index([userId, status])
   @@index([slug])
 }

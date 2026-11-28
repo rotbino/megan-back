@@ -642,7 +642,7 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
                 label: 'نوع کالا',
                 hint: 'رقم برنج ایرانی یا نوع وارداتی — با انتخاب کشور، فقط همان خانواده می‌آید',
                 options: [
-                  // ایرانی — فقط با کشور=ایران
+                  // ایرانی — فقط با کشور=ایران (ارقام واقعی شمال)
                   { label: 'طارم', match: ['طارم'], when: { key: 'country', any: ['ایران'] } },
                   { label: 'هاشمی', match: ['هاشمی'], when: { key: 'country', any: ['ایران'] } },
                   { label: 'شیرودی', match: ['شیرودی'], when: { key: 'country', any: ['ایران'] } },
@@ -650,31 +650,40 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
                   { label: 'عنبربو', match: ['عنبربو', 'عنبر بو'], when: { key: 'country', any: ['ایران'] } },
                   { label: 'دم‌سیاه / دم‌قهوه‌ای', match: ['دم سیاه', 'دمسیاه', 'دم قهوه'], when: { key: 'country', any: ['ایران'] } },
                   { label: 'گرده', match: ['گرده'], when: { key: 'country', any: ['ایران'] } },
-                  { label: 'کوهسار', match: ['کوهسار'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'علی‌کاظمی', match: ['علی کاظمی', 'علی‌کاظمی', 'کاظمی'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'امراللهی', match: ['امراللهی', 'امر اللهی'], when: { key: 'country', any: ['ایران'] } },
                   // پاکستانی — فقط با کشور=پاکستان
                   { label: 'صدری (پاکستانی)', match: ['صدری', 'سادری', 'سدری'], when: { key: 'country', any: ['پاکستان'] } },
                   { label: 'سوپر باسمتی', match: ['سوپر باسمتی', 'سوپر کرنل'], when: { key: 'country', any: ['پاکستان'] } },
-                  { label: 'کانام', match: ['کانام', 'کالانام', 'کاناما'], when: { key: 'country', any: ['پاکستان'] } },
-                  // هندی — فقط با کشور=هند
-                  { label: 'باسمتی هندی', match: ['باسمتی هندی'], when: { key: 'country', any: ['هند'] } },
+                  // هندی — فقط با کشور=هند (۱۱۲۱ دانه‌بلند معروف بازار ایران)
+                  { label: 'باسمتی ۱۱۲۱', match: ['1121', '۱۱۲۱', 'دانه بلند', 'دانه‌بلند', 'دونه بلند'], when: { key: 'country', any: ['هند'] } },
                   { label: 'ایری ۵۰۴ / ۵۱۵', match: ['۵۰۴', '504', '۵۱۵', '515', 'ایری'], when: { key: 'country', any: ['هند'] } },
                 ],
               },
-              // برند (دور ۴) — «بدون برند» برای فلهٔ بی‌نشان؛ برندهای معرف بازار
-              // با وابستگی کشور؛ «سایر» بدون قید برای برندهای کمتر رایج
+              // برند (دور ۵) — برندهای واقعی بازار ایران (سرچ ۲۸-۱۱)؛ «بدون برند»
+              // برای فلهٔ بی‌نشان؛ «سایر» بدون قید برای برندهای کمتر رایج.
+              // ایرانی: بانشان/هامون/داتیس/شالیزار طلایی — بسته‌بندی‌های واقعی شمال؛
+              // پاکستانی: لال قله/سبز بهار/طبیعت/یال؛ هندی: محسن/احمد/مژده/تبرک/آوازه/خاطره
               {
                 key: 'brand',
                 label: 'برند',
                 hint: '«بدون برند» برای فلهٔ بی‌نشان؛ با انتخاب کشور فقط برندهای همان خانواده',
                 options: [
                   { label: 'بدون برند', match: [] },
-                  { label: 'بنی هاشم', match: ['بنی هاشم'], when: { key: 'country', any: ['ایران'] } },
-                  { label: 'کاسپین', match: ['کاسپین'], when: { key: 'country', any: ['ایران'] } },
-                  { label: 'دلاور', match: ['دلاور'], when: { key: 'country', any: ['ایران'] } },
-                  { label: 'زیما', match: ['زیما'], when: { key: 'country', any: ['ایران'] } },
-                  { label: 'لال قله', match: ['لال قله', 'لال قلا'], when: { key: 'country', any: ['پاکستان'] } },
-                  { label: 'فلک', match: ['فلک'], when: { key: 'country', any: ['پاکستان'] } },
-                  { label: 'گارد', match: ['گارد'], when: { key: 'country', any: ['پاکستان'] } },
+                  { label: 'بانشان', match: ['بانشان', 'بانشام', 'بنشان'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'هامون', match: ['هامون'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'داتیس', match: ['داتیس'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'شالیزار طلایی', match: ['شالیزار طلایی', 'شالیزار'], when: { key: 'country', any: ['ایران'] } },
+                  { label: 'لال قله', match: ['لال قله', 'لال قلا', 'لالقله'], when: { key: 'country', any: ['پاکستان'] } },
+                  { label: 'سبز بهار', match: ['سبز بهار', 'سبزبهار'], when: { key: 'country', any: ['پاکستان'] } },
+                  { label: 'طبیعت', match: ['طبیعت'], when: { key: 'country', any: ['پاکستان'] } },
+                  { label: 'یال', match: ['یال'], when: { key: 'country', any: ['پاکستان'] } },
+                  { label: 'محسن', match: ['محسن'], when: { key: 'country', any: ['هند'] } },
+                  { label: 'احمد', match: ['احمد'], when: { key: 'country', any: ['هند'] } },
+                  { label: 'مژده', match: ['مژده'], when: { key: 'country', any: ['هند'] } },
+                  { label: 'تبرک', match: ['تبرک'], when: { key: 'country', any: ['هند'] } },
+                  { label: 'آوازه', match: ['آوازه'], when: { key: 'country', any: ['هند'] } },
+                  { label: 'خاطره', match: ['خاطره'], when: { key: 'country', any: ['هند'] } },
                   { label: 'سایر', match: [] },
                 ],
               },

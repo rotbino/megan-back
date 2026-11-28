@@ -169,6 +169,11 @@ export interface ProductDto {
   status: string;
   features?: Array<{ key: string; value: string }>;
   rejectionReasons?: string[];
+  /** (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — فرم ویرایش برای پیش‌پر کردن همین‌ها را می‌خواند */
+  sellerType?: string | null;
+  paymentTypes?: string[];
+  hasAnalysis?: boolean;
+  shipping?: boolean;
 }
 
 /** قالب تاریخ پاسکال: «YYYY-MM-DD HH:mm:ss» */
@@ -865,6 +870,12 @@ export class ProductsService {
         priceValidityDays: dto.priceValidityDays ?? 3,
         priceUpdatedAt: new Date(),
         features: (dto.features ?? []) as unknown as object,
+        // (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — فیلتر پیشرفته همین‌ها را فیلتر می‌کند؛
+        // DTO فقط مقادیر مجاز را رد می‌کند (IsIn)
+        sellerType: dto.sellerType ?? null,
+        paymentTypes: dto.paymentTypes ?? [],
+        hasAnalysis: dto.hasAnalysis ?? false,
+        shipping: dto.shipping ?? false,
         status: 'pending',
         userId: user.id,
         // فروشنده ویژه = بسته فعال — denorm برای سورت لیست (۳۰-۱۰)
@@ -1285,6 +1296,12 @@ export class ProductsService {
         priceValidityDays: dto.priceValidityDays ?? p.priceValidityDays ?? 3,
         ...(dto.minSalePrice !== p.minSalePrice ? { priceUpdatedAt: new Date() } : {}),
         features: (dto.features ?? []) as unknown as object,
+        // (۲۸-۱۱ دور ۵) شرایط معامله — مثل بقیهٔ فیلدهای فرم از فرانت می‌آید؛
+        // خالی‌فرستادن = پاک‌شدن انتخاب قبلی (فرم کل مقادیر فعلی را می‌فرستد)
+        sellerType: dto.sellerType ?? null,
+        paymentTypes: dto.paymentTypes ?? [],
+        hasAnalysis: dto.hasAnalysis ?? false,
+        shipping: dto.shipping ?? false,
         // بدون تایید مجدد (خواسته مالک ۴-۱۱): وضعیت فعلی می‌ماند؛ فقط ردشده
         // برای بازبینیِ اصلاحات به «در انتظار» می‌رود
         status: p.status === 'rejected' ? 'pending' : p.status,
@@ -1856,6 +1873,11 @@ export class ProductsService {
       status: string;
       features: unknown;
       rejectionReasons: unknown;
+      // (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده
+      sellerType?: string | null;
+      paymentTypes?: string[];
+      hasAnalysis?: boolean;
+      shipping?: boolean;
       createdAt: Date;
       updatedAt: Date;
     },
@@ -1932,6 +1954,11 @@ export class ProductsService {
       // status همیشه می‌رود — تب‌های «محصولات من» به آن فیلتر می‌شوند
       status: p.status,
       features,
+      // (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — برای پیش‌پر کردن فرم ویرایش/دیده‌شدن پنل
+      sellerType: p.sellerType ?? null,
+      paymentTypes: Array.isArray(p.paymentTypes) ? p.paymentTypes : [],
+      hasAnalysis: p.hasAnalysis === true,
+      shipping: p.shipping === true,
       ...(p.status !== 'confirmed' ? { rejectionReasons } : {}),
     };
   }

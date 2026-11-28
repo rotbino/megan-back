@@ -17,6 +17,39 @@ import {
   type TaxonomyNode,
 } from './taxonomy-v2';
 import type { GetAdsReportDto, GetCatalogListDto } from './dto';
+import { PAYMENT_OPTIONS, SELLER_TYPE_OPTIONS } from './dto';
+
+/** ── (۲۸-۱۱ دور ۵) شرایط معاملهٔ عمده — فیلترهای هم‌مقیاس خریدار عمده ──
+ *  همان زبان فیلتر باسکول: نوع فروشنده (کشاورز/تولیدکننده/…) + نحوهٔ پرداخت
+ *  (نقد/چک سررسید/اعتباری) + سوییچ‌های «دارای گواهی/آنالیز» و «ارسال‌دار
+ *  (باربری)». آگهی‌های قدیمیِ بدون مقدار = «نامشخص» — فیلتر فقط روی مقدار‌دارها
+ *  اعمال می‌شود و «نامشخص» هیچ سبدی را نمی‌نشیند. */
+const SELLER_TYPES = new Set<string>(SELLER_TYPE_OPTIONS);
+const PAYMENTS = new Set<string>(PAYMENT_OPTIONS);
+
+/** پاک‌سازی انتخاب کاربر — فقط مقادیر مجاز فیلترها */
+function sanitizeTrade(
+  dto: GetCatalogListDto,
+): { sellerTypes: string[]; payments: string[]; analysisOnly: boolean; shippingOnly: boolean } {
+  return {
+    sellerTypes: (dto.sellerTypes ?? []).filter((s) => SELLER_TYPES.has(s)),
+    payments: (dto.payments ?? []).filter((p) => PAYMENTS.has(p)),
+    analysisOnly: dto.analysisOnly === true,
+    shippingOnly: dto.shippingOnly === true,
+  };
+}
+
+/** شرط‌های SQL شرایط معامله — برای مسیر خالص؛ هر گزینه = شرط مستقل */
+function tradeConds(
+  t: { sellerTypes: string[]; payments: string[]; analysisOnly: boolean; shippingOnly: boolean },
+): Prisma.ProductWhereInput[] {
+  return [
+    ...(t.sellerTypes.length ? [{ sellerType: { in: t.sellerTypes } }] : []),
+    ...(t.payments.length ? [{ paymentTypes: { hasSome: t.payments } }] : []),
+    ...(t.analysisOnly ? [{ hasAnalysis: true }] : []),
+    ...(t.shippingOnly ? [{ shipping: true }] : []),
+  ];
+}
 
 /** نود درخت پاسخ getTree — با شمار آگهی زیر همان گره */
 export interface TaxonomyCountNode {
@@ -54,6 +87,11 @@ export interface AdsReportRow {
   updated_at: Date;
   /** اتریبیوت‌های استخراج‌شده از نام آزاد — فقط برای گره‌های دارای تعریف attrs */
   resolved_attrs?: Record<string, string>;
+  /** (۲۸-۱۱ دور ۵) شرایط معامله — بج کارت */
+  seller_type?: string | null;
+  payment_types?: string[];
+  has_analysis?: boolean;
+  shipping?: boolean;
 }
 
 /** ردیف عمومی کاتالوگ v2 — بدون تلفن/وضعیت ادمین (صفحهٔ /product-filter) */
@@ -75,6 +113,23 @@ export interface PublicCatalogRow {
   photo: string | null;
   updated_at: Date;
   resolved_attrs?: Record<string, string>;
+  /** (۲۸-۱۱ دور ۵) شرایط معامله — بج کارت برای اعتماد خریدار */
+  seller_type?: string | null;
+  payment_types?: string[];
+  has_analysis?: boolean;
+  shipping?: boolean;
+}
+
+/** (۲۸-۱۱ دور ۵) شمارش فیلترهای شرایط معامله — کنار هر گزینه، مثل بقیهٔ فاست‌ها */
+export interface PublicCatalogTradeFacets {
+  /** نوع فروشنده → شمار آگهی (بقیهٔ فیلترها به‌جز خودش)؛ «نامشخص» شمرده نمی‌شود */
+  sellerTypes: Record<string, number>;
+  /** نحوهٔ پرداخت → شمار آگهی که آن را می‌پذیرد */
+  payments: Record<string, number>;
+  /** شمار آگهی‌های دارای گواهی/آنالیز کیفیت */
+  analysis: number;
+  /** شمار آگهی‌های ارسال‌دار (باربری) */
+  shipping: number;
 }
 
 /** (۲۸-۱۱ طرح تامینان) شمارش «چند آگهی با این گزینه می‌ماند» — کنار هر گزینهٔ
@@ -88,6 +143,8 @@ export interface PublicCatalogFacets {
   /** بازهٔ واقعی قیمت/حداقل‌سفارش در گرهٔ فعلی — پلیس‌هولدر فرم بازه */
   price: { min: number | null; max: number | null };
   moq: { min: number | null; max: number | null };
+  /** (۲۸-۱۱ دور ۵) شرایط معامله */
+  trade: PublicCatalogTradeFacets;
 }
 
 /** واحد فروش پرتکرار گره — برچسب واحد در فیلتر حجم خرید از اینجا می‌آید؛
@@ -470,6 +527,9 @@ export class AdsReportService {
     const attrs = nodeKey ? effectiveAttrs(nodeKey) : [];
     const attrSelection = this.sanitizeAttrSelection(attrs, dto.attrs);
 
+    /** (۲۸-۱۱ دور ۵) شرایط معامله — پاک‌سازی‌شده روی مقادیر مجاز */
+    const trade = sanitizeTrade(dto);
+
     /** شرط بدون مکان — پایهٔ فاست استان/شهر (شمارش بدون فیلتر مکان) */
     const noLocation = base.filter((w) => !('provinceId' in w) && !('cityId' in w));
 
@@ -487,6 +547,8 @@ export class AdsReportService {
         select: {
           id: true, productName: true, features: true, provinceId: true, cityId: true, unit: true,
           minSalePrice: true, minSaleAmount: true, stock: true, isLadder: true, updatedAt: true,
+          // (دور ۵) شرایط معامله — فیلتر/فاست در حافظه مثل بقیه
+          sellerType: true, paymentTypes: true, hasAnalysis: true, shipping: true,
         },
       });
 
@@ -513,11 +575,20 @@ export class AdsReportService {
         return wanted.has(resolvedMap.get(c.id)?.[attr.key] ?? '');
       };
 
-      /** تطبیق کامل یک نامزده — با پرش اختیاری یک گروه فیلتر (فاست/بازه) */
+      /** تطبیق کامل یک نامزده — با پرش اختیاری یک گروه فیلتر (فاست/بازه/شرایط معامله) */
       const rangeFilters = { priceMin, priceMax, moqMin, moqMax };
       const matchC = (
         c: (typeof enriched)[number],
-        skip: { loc?: boolean; price?: boolean; moq?: boolean; attr?: string } = {},
+        skip: {
+          loc?: boolean;
+          price?: boolean;
+          moq?: boolean;
+          attr?: string;
+          sellerType?: boolean;
+          payment?: boolean;
+          analysis?: boolean;
+          shipping?: boolean;
+        } = {},
       ): boolean => {
         if (!skip.loc) {
           if (dto.provinceId && c.provinceId !== dto.provinceId) return false;
@@ -536,6 +607,23 @@ export class AdsReportService {
           if (attr.key === skip.attr) continue;
           if (!hitsWanted(c, attr, attrSelection[attr.key])) return false;
         }
+        // (۲۸-۱۱ دور ۵) شرایط معامله — با پرش اختیاری خودشان (فاست)
+        if (
+          !skip.sellerType &&
+          trade.sellerTypes.length &&
+          !trade.sellerTypes.includes(c.sellerType ?? '')
+        ) {
+          return false;
+        }
+        if (
+          !skip.payment &&
+          trade.payments.length &&
+          !trade.payments.some((p) => (c.paymentTypes ?? []).includes(p))
+        ) {
+          return false;
+        }
+        if (!skip.analysis && trade.analysisOnly && !c.hasAnalysis) return false;
+        if (!skip.shipping && trade.shippingOnly && !c.shipping) return false;
         return true;
       };
 
@@ -573,6 +661,25 @@ export class AdsReportService {
         attrCounts[attr.key] = counts;
       }
 
+      // (۲۸-۱۱ دور ۵) فاست شرایط معامله — بقیهٔ فیلترها به‌جز خودِ هر گزینه؛
+      // «نامشخص» (null/خالی) شمرده نمی‌شود — فیلترها فقط روی مقدار‌دارها کار می‌کنند
+      const sellerTypeCounts: Record<string, number> = {};
+      for (const label of SELLER_TYPE_OPTIONS) {
+        const subset = enriched.filter((c) => matchC(c, { sellerType: true }));
+        sellerTypeCounts[label] = subset.filter((c) => c.sellerType === label).length;
+      }
+      const paymentCounts: Record<string, number> = {};
+      for (const label of PAYMENT_OPTIONS) {
+        const subset = enriched.filter((c) => matchC(c, { payment: true }));
+        paymentCounts[label] = subset.filter((c) => (c.paymentTypes ?? []).includes(label)).length;
+      }
+      const analysisCount = enriched
+        .filter((c) => matchC(c, { analysis: true }))
+        .filter((c) => c.hasAnalysis).length;
+      const shippingCount = enriched
+        .filter((c) => matchC(c, { shipping: true }))
+        .filter((c) => c.shipping).length;
+
       // بازهٔ واقعی قیمت/حجم در همین گره — پلیس‌هولدر فرم بازه در فرانت
       const boundsSet = enriched.filter((c) => matchC(c, { price: true, moq: true }));
       const priced = boundsSet.filter((c) => c.minSalePrice > 0).map((c) => c.minSalePrice);
@@ -581,6 +688,12 @@ export class AdsReportService {
       facets = {
         ...(await this.locRows(provinceCount, cityCount)),
         attrs: attrCounts,
+        trade: {
+          sellerTypes: sellerTypeCounts,
+          payments: paymentCounts,
+          analysis: analysisCount,
+          shipping: shippingCount,
+        },
         price: {
           min: priced.length ? Math.min(...priced) : null,
           max: priced.length ? Math.max(...priced) : null,
@@ -592,11 +705,13 @@ export class AdsReportService {
       };
     } else {
       // ── مسیر SQL خالص — گره بدون اتریبیوت یا «همهٔ دسته‌ها» ──
-      // بازه‌ها + گاردهای سورت فقط به whereٔ لیست می‌روند
+      // بازه‌ها + گاردهای سورت + شرایط معامله (دور ۵) فقط به whereٔ لیست می‌روند
+      const tConds = tradeConds(trade);
       const where: Prisma.ProductWhereInput = {
         AND: [
           ...base,
           ...rangeConds,
+          ...tConds,
           ...(priceSort ? [{ minSalePrice: { gt: 0 } }] : []),
           ...(moqSort ? [{ minSaleAmount: { gt: 0 } }] : []),
         ],
@@ -607,9 +722,9 @@ export class AdsReportService {
         //    کاربر اول، بعد بقیه؛ در هر پاره: نردبان بعد تازگی. ۶۲هزار آگهی به
         //    حافظه کشیده نمی‌شود — صفحۀ خواسته‌شده از روی مرز دو پاره برش می‌خورد.
         const cityOf = viewerLoc.cityId;
-        const whereA: Prisma.ProductWhereInput = { AND: [...base, ...rangeConds, { cityId: cityOf }] };
+        const whereA: Prisma.ProductWhereInput = { AND: [...base, ...rangeConds, ...tConds, { cityId: cityOf }] };
         const whereB: Prisma.ProductWhereInput = {
-          AND: [...base, ...rangeConds, { cityId: { not: cityOf } }],
+          AND: [...base, ...rangeConds, ...tConds, { cityId: { not: cityOf } }],
         };
         const orderBy: Prisma.ProductOrderByWithRelationInput[] = [
           { isLadder: 'desc' },
@@ -657,31 +772,98 @@ export class AdsReportService {
       }
 
       // فاست‌های SQL — groupBy ارزان روی ستون‌های فهرست‌شده
-      // مکان از شرط فاست حذف می‌شود تا همهٔ استان‌ها شمرده شوند؛ بازه‌ها می‌مانند
-      const facetWhere: Prisma.ProductWhereInput = { AND: [...noLocation, ...rangeConds] };
+      // مکان از شرط فاست حذف می‌شود تا همهٔ استان‌ها شمرده شوند؛ بازه‌ها +
+      // شرایط معامله می‌مانند (فاست استان/شهر همهٔ فیلترهای غیرمکان را می‌بیند)
+      const facetWhere: Prisma.ProductWhereInput = { AND: [...noLocation, ...rangeConds, ...tConds] };
       // بازهٔ واقعی — شرط با مکان و بدون بازه‌ها
       const boundsWhere: Prisma.ProductWhereInput = { AND: base };
-      const [byProvince, byCity, priceAgg, moqAgg] = await Promise.all([
-        this.prisma.product.groupBy({ by: ['provinceId'], _count: { _all: true }, where: facetWhere }),
-        this.prisma.product.groupBy({ by: ['cityId'], _count: { _all: true }, where: facetWhere }),
-        this.prisma.product.aggregate({
-          where: { ...boundsWhere, minSalePrice: { gt: 0 } },
-          _min: { minSalePrice: true },
-          _max: { minSalePrice: true },
-        }),
-        this.prisma.product.aggregate({
-          where: { ...boundsWhere, minSaleAmount: { gt: 0 } },
-          _min: { minSaleAmount: true },
-          _max: { minSaleAmount: true },
-        }),
-      ]);
+      const [byProvince, byCity, priceAgg, moqAgg, bySellerType, payCount, payCheque, payCredit, analysisN, shippingN] =
+        await Promise.all([
+          this.prisma.product.groupBy({ by: ['provinceId'], _count: { _all: true }, where: facetWhere }),
+          this.prisma.product.groupBy({ by: ['cityId'], _count: { _all: true }, where: facetWhere }),
+          this.prisma.product.aggregate({
+            where: { ...boundsWhere, minSalePrice: { gt: 0 } },
+            _min: { minSalePrice: true },
+            _max: { minSalePrice: true },
+          }),
+          this.prisma.product.aggregate({
+            where: { ...boundsWhere, minSaleAmount: { gt: 0 } },
+            _min: { minSaleAmount: true },
+            _max: { minSaleAmount: true },
+          }),
+          // ── (دور ۵) فاست شرایط معامله — هر گروه با «بقیهٔ فیلترها به‌جز خودش» ──
+          // نوع فروشنده: همهٔ شرط‌ها جز sellerType (null = نامشخص، شمرده نمی‌شود)
+          this.prisma.product.groupBy({
+            by: ['sellerType'],
+            _count: { _all: true },
+            where: {
+              AND: [
+                ...noLocation,
+                ...rangeConds,
+                ...tradeConds({ ...trade, sellerTypes: [] }),
+              ],
+            },
+          }),
+          // پرداخت: سه شمارش جدا (hasSome = «یکی از» OR است؛ هر گزینه باید خودش
+          // با بقیهٔ شرط‌ها جز پرداخت شمرده شود)
+          this.prisma.product.count({
+            where: {
+              AND: [
+                ...noLocation,
+                ...rangeConds,
+                ...tradeConds({ ...trade, payments: [] }),
+                { paymentTypes: { has: 'نقد' } },
+              ],
+            },
+          }),
+          this.prisma.product.count({
+            where: {
+              AND: [
+                ...noLocation,
+                ...rangeConds,
+                ...tradeConds({ ...trade, payments: [] }),
+                { paymentTypes: { has: 'چک سررسید' } },
+              ],
+            },
+          }),
+          this.prisma.product.count({
+            where: {
+              AND: [
+                ...noLocation,
+                ...rangeConds,
+                ...tradeConds({ ...trade, payments: [] }),
+                { paymentTypes: { has: 'اعتباری' } },
+              ],
+            },
+          }),
+          this.prisma.product.count({
+            where: {
+              AND: [...noLocation, ...rangeConds, ...tradeConds({ ...trade, analysisOnly: false }), { hasAnalysis: true }],
+            },
+          }),
+          this.prisma.product.count({
+            where: {
+              AND: [...noLocation, ...rangeConds, ...tradeConds({ ...trade, shippingOnly: false }), { shipping: true }],
+            },
+          }),
+        ]);
       const provinceCount = new Map<number, number>();
       for (const g of byProvince) provinceCount.set(g.provinceId, g._count._all);
       const cityCount = new Map<number, number>();
       for (const g of byCity) cityCount.set(g.cityId, g._count._all);
+      const sellerTypeCounts: Record<string, number> = {};
+      for (const g of bySellerType) {
+        if (g.sellerType) sellerTypeCounts[g.sellerType] = g._count._all;
+      }
       facets = {
         ...(await this.locRows(provinceCount, cityCount)),
         attrs: {},
+        trade: {
+          sellerTypes: sellerTypeCounts,
+          payments: { 'نقد': payCount, 'چک سررسید': payCheque, 'اعتباری': payCredit },
+          analysis: analysisN,
+          shipping: shippingN,
+        },
         price: {
           min: priceAgg._min.minSalePrice ?? null,
           max: priceAgg._max.minSalePrice ?? null,
@@ -868,6 +1050,7 @@ export class AdsReportService {
         attrs: {},
         price: { min: null, max: null },
         moq: { min: null, max: null },
+        trade: { sellerTypes: {}, payments: {}, analysis: 0, shipping: 0 },
       } satisfies PublicCatalogFacets,
       items: [] as PublicCatalogRow[],
     };
@@ -880,6 +1063,7 @@ export class AdsReportService {
       provinceId: number; cityId: number; userId: string; stock: number; minSaleAmount: number;
       minSalePrice: number; unit: string; isLadder: boolean; viewCount: number;
       createdAt: Date; updatedAt: Date;
+      sellerType?: string | null; paymentTypes?: string[]; hasAnalysis?: boolean; shipping?: boolean;
     }>,
     withAttrs: boolean,
   ): Promise<PublicCatalogRow[]> {
@@ -905,6 +1089,11 @@ export class AdsReportService {
       photo: r.photo,
       updated_at: r.updated_at,
       ...(r.resolved_attrs ? { resolved_attrs: r.resolved_attrs } : {}),
+      // (۲۸-۱۱ دور ۵) شرایط معامله — بج کارت
+      ...(r.seller_type != null ? { seller_type: r.seller_type } : {}),
+      ...(r.payment_types?.length ? { payment_types: r.payment_types } : {}),
+      ...(r.has_analysis ? { has_analysis: true } : {}),
+      ...(r.shipping ? { shipping: true } : {}),
     }));
   }
 
@@ -915,6 +1104,7 @@ export class AdsReportService {
       provinceId: number; cityId: number; userId: string; stock: number; minSaleAmount: number;
       minSalePrice: number; unit: string; isLadder: boolean; viewCount: number;
       createdAt: Date; updatedAt: Date; features?: unknown;
+      sellerType?: string | null; paymentTypes?: string[]; hasAnalysis?: boolean; shipping?: boolean;
     }>,
     withAttrs: boolean,
   ): Promise<AdsReportRow[]> {
@@ -976,6 +1166,11 @@ export class AdsReportService {
         ...(withAttrs && v2Key
           ? { resolved_attrs: resolveProductAttrs(p.productName, p.features, effectiveAttrs(v2Key)) }
           : {}),
+        // (۲۸-۱۱ دور ۵) شرایط معامله — عبور مستقیم برای بج کارت
+        ...(p.sellerType != null ? { seller_type: p.sellerType } : {}),
+        ...(p.paymentTypes?.length ? { payment_types: p.paymentTypes } : {}),
+        ...(p.hasAnalysis ? { has_analysis: true } : {}),
+        ...(p.shipping ? { shipping: true } : {}),
       };
     });
   }
