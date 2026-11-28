@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, Length } from 'class-validator';
@@ -7,6 +7,9 @@ import { GetCatalogListDto } from '../admin/ads-report/dto';
 import { CategoriesService } from '../categories/categories.service';
 import { isTaxonomyKey, v2KeyForBuskol, v2PathForKey } from '../common/taxonomy';
 import { ok } from '../common/api-response';
+import { OptionalJwtAuthGuard } from '../common/guards';
+import { MaybeCurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../common/guards';
 
 /**
  * ورودی resolveSlug — slug یا نام فارسی دستهٔ باسکول از URLهای قدیمی
@@ -33,10 +36,16 @@ export class CatalogV2Controller {
     return ok(await this.report.getTree());
   }
 
+  /** توکن اختیاری — مهمان همان جواب را می‌گیرد؛ کاربر واردشده سورت «مرتبط‌ترین»
+   *  را با شهر خودش شخصی‌شده می‌گیرد (امتیاز تطابق سمت سرور) */
   @Post('getList')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'آگهی‌های confirmed روی دستهٔ جدید — فیلتر گره/شهر/جستجو/اتریبیوت/سورت' })
-  async getList(@Body() dto: GetCatalogListDto) {
-    return ok(await this.report.getPublicList(dto));
+  async getList(
+    @Body() dto: GetCatalogListDto,
+    @MaybeCurrentUser() user: AuthUser | null,
+  ) {
+    return ok(await this.report.getPublicList(dto, user?.id));
   }
 
   /** (۲۶-۱۱) سوییچ عمومی سایت به تاکسونومی ایمچ — ریدایرکت یکتای لینک‌های

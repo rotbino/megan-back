@@ -64,8 +64,10 @@ export class GetAdsReportDto {
  *  • فقط آگهی‌های confirmed (وضعیت دیگر قابل انتخاب نیست)؛
  *  • nodeKey فقط کلید v2 یا خالی ('unmapped' ادمینی پذیرفته نیست)؛
  *  • شماره تلفن فروشنده هرگز برنمی‌گردد؛
- *  • sort: جدیدترین (پیش‌فرض) | ارزان‌ترین | گران‌ترین | کمترین حداقل خرید |
- *    بیشترین موجودی — سورت قیمت فقط بین آگهی‌های دارای قیمت (> 0) اعمال می‌شود؛
+ *  • sort: مرتبط‌ترین (پیش‌فرض — امتیاز تطابق: شهر/استانِ کاربر واردشده +
+ *    کامل بودن ویژگی‌ها + تازگی؛ امتیاز به کاربر نمایش نمی‌یابد) | جدیدترین |
+ *    ارزان‌ترین | گران‌ترین | کمترین حداقل خرید | بیشترین موجودی — سورت قیمت فقط
+ *    بین آگهی‌های دارای قیمت (> 0) اعمال می‌شود؛
  *  • (۲۸-۱۱ بازطراحی صفحهٔ فیلتر پیشرفته — طرح تامینان) بازهٔ قیمت و حجم
  *    خرید + فاست‌های هر گزینه (شمارش کنار فیلترها) از همین DTO می‌آیند.
  */
@@ -120,8 +122,8 @@ export class GetCatalogListDto {
   moqMax?: number;
 
   @IsOptional()
-  @IsIn(['newest', 'price-asc', 'price-desc', 'moq-asc', 'stock-desc'])
-  sort?: 'newest' | 'price-asc' | 'price-desc' | 'moq-asc' | 'stock-desc';
+  @IsIn(['related', 'newest', 'price-asc', 'price-desc', 'moq-asc', 'stock-desc'])
+  sort?: 'related' | 'newest' | 'price-asc' | 'price-desc' | 'moq-asc' | 'stock-desc';
 
   @IsOptional()
   @Type(() => Number)

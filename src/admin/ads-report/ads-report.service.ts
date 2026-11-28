@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.module';
-import { CacheService } from '../../common/cache/cache.module';
+import { CacheService, TTL } from '../../common/cache/cache.module';
 import { CategoriesService } from '../../categories/categories.service';
 import { LocationsService } from '../../locations/locations.service';
 import { UploadsService } from '../../uploads/uploads.service';
@@ -374,7 +374,14 @@ export class AdsReportService {
   /**
    * POST /catalog/v2/getList — فقط confirmed، بدون تلفن؛ (۲۸-۱۱ طرح تامینان)
    * فیلترها: گره + استان/شهر + جستجو + اتریبیوت‌ها + بازهٔ قیمت + بازهٔ حجم خرید؛
-   * سورت: جدیدترین/ارزان‌ترین/گران‌ترین/کمترین حداقل خرید/بیشترین موجودی.
+   * سورت: مرتبط‌ترین (پیش‌فرض — امتیاز تطابق) | جدیدترین | ارزان‌ترین | گران‌ترین |
+   * کمترین حداقل خرید | بیشترین موجودی.
+   *
+   * «مرتبط‌ترین» (۲۸-۱۱ دور ۳): امتیاز تطابق سمت سرور — آگهی‌های شهر خودِ کاربر
+   * واردشده بالاتر از هم‌استان، هم‌استان بالاتر از بقیه؛ در گره‌های اتریبیوت‌دار
+   * کامل بودن ویژگی‌ها (برخورد نام با ویژگی‌های تعریف‌شده) هم امتیاز دارد؛
+   * تای‌بریک: نردبان بعد تازگی. امتیاز هرگز به کاربر نمایش نمی‌یابد. مهمان
+   * (بدون توکن/شهر) = همان newest.
    *
    * پاسخ افزوده‌های صفحهٔ فیلتر پیشرفته را هم می‌آورد:
    *  • facets — شمارش کنار هر گزینه (استان/شهر/اتریبیوت) + بازهٔ واقعی قیمت/حجم؛
@@ -385,7 +392,7 @@ export class AdsReportService {
    * نامزدها یک‌بار خوانده می‌شوند، همهٔ فیلترها + فاست‌ها در حافظه؛ بقیهٔ گره‌ها
    * خالص SQL می‌مانند (۶۲هزار آگهی «همهٔ دسته‌ها» را به حافظه نمی‌کشیم).
    */
-  async getPublicList(dto: GetCatalogListDto) {
+  async getPublicList(dto: GetCatalogListDto, viewerId?: string) {
     const page = Math.max(1, dto.page ?? 1);
     const perPage = Math.min(48, Math.max(1, dto.perPage ?? 24));
 
@@ -395,9 +402,15 @@ export class AdsReportService {
         ? dto.nodeKey
         : null;
 
-    const sortKey = dto.sort ?? 'newest';
+    const sortKey = dto.sort ?? 'related';
     const priceSort = sortKey === 'price-asc' || sortKey === 'price-desc';
     const moqSort = sortKey === 'moq-asc';
+
+    /** مکان بینندهٔ واردشده — فقط برای امتیاز تطابق «مرتبط‌ترین» (۳۰ث کش) */
+    const viewerLoc =
+      sortKey === 'related' && viewerId
+        ? await this.viewerLocation(viewerId)
+        : null;
 
     // بازه‌ها — منفی/صفر = نامعتبر
     const priceMin = dto.priceMin && dto.priceMin > 0 ? dto.priceMin : undefined;
@@ -450,10 +463,25 @@ export class AdsReportService {
         },
       });
 
-      // نرمال‌سازی/توکن یک‌بار به‌ازای هر نام — کل تطبیق‌های بعدی از همین می‌گذرند
+      // نرمال‌سازی/توکن یک‌بار به‌ازای هر نام — کل تطبیق‌های بعدی از همین می‌گذرند؛
+      // attrHits = کامل بودن ویژگی‌ها (برخورد نام با چند ویژگی تعریف‌شدهٔ گره) —
+      // بخشی از امتیاز «مرتبط‌ترین»
       const enriched = candidates.map((c) => {
         const normalized = normalizeFa(c.productName);
-        return { ...c, normalized, tokens: new Set(normalized.split(TOKEN_SPLIT).filter(Boolean)) };
+        const tokens = new Set(normalized.split(TOKEN_SPLIT).filter(Boolean));
+        return {
+          ...c,
+          normalized,
+          tokens,
+          attrHits: attrs.reduce(
+            (n, attr) =>
+              n +
+              (attr.options.some((opt) => opt.match.some((alias) => matchesAlias(normalized, tokens, alias)))
+                ? 1
+                : 0),
+            0,
+          ),
+        };
       });
 
       /** آیا نام، گزینهٔ خواسته‌شدهٔ یک اتریبیوت را می‌زند؟ (wanted خالی = بی‌فیلتر) */
@@ -498,7 +526,7 @@ export class AdsReportService {
 
       const list = enriched.filter((c) => matchC(c));
       total = list.length;
-      list.sort(this.inMemorySorter(sortKey));
+      list.sort(this.inMemorySorter(sortKey, viewerLoc));
       const pageIds = list.slice((page - 1) * perPage, page * perPage).map((c) => c.id);
       rows = pageIds.length
         ? await this.prisma.product.findMany({ where: { id: { in: pageIds } } })
@@ -558,25 +586,60 @@ export class AdsReportService {
           ...(moqSort ? [{ minSaleAmount: { gt: 0 } }] : []),
         ],
       };
-      const orderBy: Prisma.ProductOrderByWithRelationInput[] =
-        sortKey === 'price-asc'
-          ? [{ minSalePrice: 'asc' }, { updatedAt: 'desc' }]
-          : sortKey === 'price-desc'
-            ? [{ minSalePrice: 'desc' }, { updatedAt: 'desc' }]
-            : sortKey === 'moq-asc'
-              ? [{ minSaleAmount: 'asc' }, { updatedAt: 'desc' }]
-              : sortKey === 'stock-desc'
-                ? [{ stock: 'desc' }, { updatedAt: 'desc' }]
-                : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
-      [total, rows] = await Promise.all([
-        this.prisma.product.count({ where }),
-        this.prisma.product.findMany({
-          where,
-          orderBy,
-          skip: (page - 1) * perPage,
-          take: perPage,
-        }),
-      ]);
+
+      if (sortKey === 'related' && viewerLoc?.cityId) {
+        // ── «مرتبط‌ترین» با بینندهٔ واردشده — دو پارهٔ SQL: آگهی‌های شهر خودِ
+        //    کاربر اول، بعد بقیه؛ در هر پاره: نردبان بعد تازگی. ۶۲هزار آگهی به
+        //    حافظه کشیده نمی‌شود — صفحۀ خواسته‌شده از روی مرز دو پاره برش می‌خورد.
+        const cityOf = viewerLoc.cityId;
+        const whereA: Prisma.ProductWhereInput = { AND: [...base, ...rangeConds, { cityId: cityOf }] };
+        const whereB: Prisma.ProductWhereInput = {
+          AND: [...base, ...rangeConds, { cityId: { not: cityOf } }],
+        };
+        const orderBy: Prisma.ProductOrderByWithRelationInput[] = [
+          { isLadder: 'desc' },
+          { updatedAt: 'desc' },
+        ];
+        const [countA, countB] = await Promise.all([
+          this.prisma.product.count({ where: whereA }),
+          this.prisma.product.count({ where: whereB }),
+        ]);
+        total = countA + countB;
+        const skip = (page - 1) * perPage;
+        const takeA = Math.max(0, Math.min(perPage, countA - skip));
+        const skipB = Math.max(0, skip - countA);
+        const takeB = Math.max(0, Math.min(perPage - takeA, countB - skipB));
+        const [rowsA, rowsB] = await Promise.all([
+          takeA > 0
+            ? this.prisma.product.findMany({ where: whereA, orderBy, skip, take: takeA })
+            : Promise.resolve([]),
+          takeB > 0
+            ? this.prisma.product.findMany({ where: whereB, orderBy, skip: skipB, take: takeB })
+            : Promise.resolve([]),
+        ]);
+        rows = [...rowsA, ...rowsB];
+      } else {
+        const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+          sortKey === 'price-asc'
+            ? [{ minSalePrice: 'asc' }, { updatedAt: 'desc' }]
+            : sortKey === 'price-desc'
+              ? [{ minSalePrice: 'desc' }, { updatedAt: 'desc' }]
+              : sortKey === 'moq-asc'
+                ? [{ minSaleAmount: 'asc' }, { updatedAt: 'desc' }]
+                : sortKey === 'stock-desc'
+                  ? [{ stock: 'desc' }, { updatedAt: 'desc' }]
+                  // related بدون بیننده (مهمان) = همان جدیدترین (نردبان + تازگی)
+                  : [{ isLadder: 'desc' }, { updatedAt: 'desc' }];
+        [total, rows] = await Promise.all([
+          this.prisma.product.count({ where }),
+          this.prisma.product.findMany({
+            where,
+            orderBy,
+            skip: (page - 1) * perPage,
+            take: perPage,
+          }),
+        ]);
+      }
 
       // فاست‌های SQL — groupBy ارزان روی ستون‌های فهرست‌شده
       // مکان از شرط فاست حذف می‌شود تا همهٔ استان‌ها شمرده شوند؛ بازه‌ها می‌مانند
@@ -644,8 +707,27 @@ export class AdsReportService {
     };
   }
 
-  /** سورت درون‌حافظه‌ای مسیر اتریبیوتی — آگهی‌های «تماس بگیرید» (۰) انتهای سورت قیمت */
-  private inMemorySorter(sortKey: string) {
+  /** سورت درون‌حافظه‌ای مسیر اتریبیوتی — آگهی‌های «تماس بگیرید» (۰) انتهای سورت قیمت؛
+   *  related = امتیاز تطابق: شهر بیننده ۱۰۰ / هم‌استان ۴۰ / هر ویژگیِ برخوردهٔ نام ۱؛
+   *  تای‌بریک: نردبان بعد تازگی (خواستهٔ مالک ۲۸-۱۱ دور ۳) */
+  private inMemorySorter(
+    sortKey: string,
+    viewerLoc?: { provinceId?: number; cityId?: number } | null,
+  ) {
+    if (sortKey === 'related') {
+      const v = viewerLoc ?? null;
+      const score = (c: { provinceId: number; cityId: number; attrHits: number }) =>
+        (v?.cityId != null && c.cityId === v.cityId ? 100 : 0) +
+        (v?.provinceId != null && c.provinceId === v.provinceId ? 40 : 0) +
+        c.attrHits;
+      return (
+        a: { provinceId: number; cityId: number; attrHits: number; isLadder: boolean; updatedAt: Date },
+        b: { provinceId: number; cityId: number; attrHits: number; isLadder: boolean; updatedAt: Date },
+      ) =>
+        score(b) - score(a) ||
+        Number(b.isLadder) - Number(a.isLadder) ||
+        b.updatedAt.getTime() - a.updatedAt.getTime();
+    }
     switch (sortKey) {
       case 'price-asc':
         return (a: { minSalePrice: number; updatedAt: Date }, b: { minSalePrice: number; updatedAt: Date }) =>
@@ -669,6 +751,26 @@ export class AdsReportService {
   /** نام و مسیر گره برای پاسخ — breadcrumb فرانت بدون درخت کامل */
   private nodeInfo(key: string) {
     return { key, name: findTaxonomyNode(key)?.name ?? key, path: taxonomyPath(key) };
+  }
+
+  /** مکان بینندهٔ واردشده (city/province) — فقط برای امتیاز «مرتبط‌ترین»؛
+   *  ۳۰ث کش (همان TTL SHORT) تا هر اسکرول بی‌دیه DB نزند */
+  private async viewerLocation(viewerId: string): Promise<{ provinceId?: number; cityId?: number } | null> {
+    return this.cache.wrap(
+      `catalog:v2:viewer:${viewerId}`,
+      { ttlMs: TTL.SHORT },
+      () =>
+        this.prisma.user
+          .findUnique({
+            where: { id: viewerId },
+            select: { isActive: true, provinceId: true, cityId: true },
+          })
+          .then((u) =>
+            u && u.isActive && u.cityId != null
+              ? { provinceId: u.provinceId ?? undefined, cityId: u.cityId }
+              : null,
+          ),
+    );
   }
 
   /** تبدیل شمارش خام استان/شهر به ردیف‌های نام‌دار فاست */
