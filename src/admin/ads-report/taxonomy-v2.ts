@@ -64,25 +64,212 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
       {
         key: 'agri.fruit',
         name: 'میوه',
+        // (۲۸-۱۱ دور ۲) ویژگی‌های عمده‌فروشی میوهٔ فله — ارثی برای همهٔ
+        // برگ‌های میوه؛ گزینه‌ها از نمونه‌گیری واقعی نام ۴٬۰۰۰ آگهی میوه
+        attrs: [
+          {
+            key: 'grade',
+            label: 'درجه کیفیت',
+            options: [
+              { label: 'ممتاز / صادراتی', match: ['ممتاز', 'صادراتی', 'صادرات'] },
+              { label: 'درجه ۱', match: ['درجه 1', 'درجه یک', 'درجه۱', 'درجهیک', 'درجه ۱'] },
+              { label: 'درجه ۲', match: ['درجه 2', 'درجه دو', 'درجه۲'] },
+              { label: 'لوکس / سوپر', match: ['لوکس', 'سوپر'] },
+              { label: 'خرد / زیر درجه', match: ['خرد', 'زیر درجه', 'شکسته', 'ضایعات'] },
+            ],
+          },
+          {
+            key: 'state',
+            label: 'وضعیت بار',
+            options: [
+              { label: 'تازه (نوبر)', match: ['تازه', 'نوبر'] },
+              { label: 'سردخانه‌ای', match: ['سردخانه', 'سردخانه ای'] },
+            ],
+          },
+          {
+            key: 'pack',
+            label: 'بسته‌بندی بار',
+            options: [
+              { label: 'فله', match: ['فله'] },
+              { label: 'کارتن', match: ['کارتن'] },
+              { label: 'شانه / سبد', match: ['شانه', 'سبد'] },
+              { label: 'جعبه / باکس', match: ['جعبه', 'باکس'] },
+            ],
+          },
+        ],
         children: [
-          { key: 'agri.fruit.apple', name: 'سیب', example: 'قرمز' },
-          { key: 'agri.fruit.pear', name: 'گلابی', example: 'درگزی' },
+          {
+            // ۹۱۰ آگهی — بزرگ‌ترین برگ میوه؛ گزینه‌ها از توکن‌های واقعی نام‌ها
+            key: 'agri.fruit.apple', name: 'سیب', example: 'قرمز',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم سیب — قرمز، زرد (گلدن)، سفید، سبز…',
+                options: [
+                  { label: 'قرمز (رد دلیشز)', match: ['قرمز', 'وقرمز', 'رد'] },
+                  { label: 'زرد (گلدن)', match: ['زرد', 'وزرد', 'گلدن'] },
+                  { label: 'سفید', match: ['سفید', 'وسفید'] },
+                  { label: 'سبز (گرانی اسمیت)', match: ['سبز'] },
+                  { label: 'لبنانی / وارداتی', match: ['لبنانی', 'لبنان', 'فرانسوی', 'فرانسه', 'وارداتی'] },
+                  { label: 'درختی (باغی)', match: ['درختی', 'باغی'] },
+                ],
+              },
+              {
+                key: 'size',
+                label: 'اندازه / سورت',
+                options: [
+                  { label: 'درشت', match: ['درشت'] },
+                  { label: 'متوسط', match: ['متوسط'] },
+                  { label: 'خرد / ریز', match: ['خرد', 'ریز', 'کوچک'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.fruit.pear', name: 'گلابی', example: 'درگزی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم گلابی',
+                options: [
+                  { label: 'درگزی', match: ['درگزی', 'درگز', 'درگزین'] },
+                  { label: 'بیروتی', match: ['بیروتی'] },
+                  { label: 'اسپادانا', match: ['اسپادانا'] },
+                  { label: 'مشو', match: ['مشو'] },
+                  { label: 'دوشیز', match: ['دوشیز'] },
+                  { label: 'کوشیا', match: ['کوشیا'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.fruit.quince', name: 'به', example: 'درجه یک' },
           { key: 'agri.fruit.peach', name: 'هلو و شلیل', example: 'درجه یک' },
           { key: 'agri.fruit.apricot', name: 'زردآلو', example: 'درجه یک' },
           { key: 'agri.fruit.sour-cherry', name: 'آلبالو', example: 'مجاری' },
           { key: 'agri.fruit.cherry', name: 'گیلاس', example: 'تکدانه' },
-          { key: 'agri.fruit.grape', name: 'انگور', example: 'سیاه' },
-          { key: 'agri.fruit.pomegranate', name: 'انار', example: 'قرمز' },
+          {
+            key: 'agri.fruit.grape', name: 'انگور', example: 'سیاه',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم انگور — سیاه، بی‌دانه، عسگری…',
+                options: [
+                  { label: 'سیاه', match: ['سیاه'] },
+                  { label: 'بی‌دانه (کشمشی)', match: ['بی دانه', 'بیدانه', 'کشمشی', 'کشمش'] },
+                  { label: 'قرمز (فلیم)', match: ['قرمز', 'فلیم'] },
+                  { label: 'عسگری', match: ['عسگری'] },
+                  { label: 'رسه', match: ['رشه'] },
+                  { label: 'شانی', match: ['شانی'] },
+                  { label: 'سفید', match: ['سفید'] },
+                  { label: 'غوره', match: ['غوره'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.fruit.pomegranate', name: 'انار', example: 'ملس',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم انار — ملس، رباب، شیرین…',
+                options: [
+                  { label: 'ملس', match: ['ملس'] },
+                  { label: 'رباب', match: ['رباب'] },
+                  { label: 'شیرین', match: ['شیرین'] },
+                  { label: 'سیاه / مشکی', match: ['سیاه', 'مشکی'] },
+                  { label: 'دون (پوست‌سخت)', match: ['دون', 'دونه'] },
+                  { label: 'قرمز', match: ['قرمز'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.fruit.fig', name: 'انجیر', example: 'زرد' },
           { key: 'agri.fruit.strawberry', name: 'توت‌فرنگی', example: 'گلخانه' },
-          { key: 'agri.fruit.orange', name: 'پرتقال', example: 'والنسیا' },
-          { key: 'agri.fruit.tangerine', name: 'نارنگی', example: 'درجه یک' },
-          { key: 'agri.fruit.sour-lemon', name: 'لیمو ترش', example: 'لیسبون' },
+          {
+            key: 'agri.fruit.orange', name: 'پرتقال', example: 'تامسون',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم پرتقال — تامسون، خونی، والنسیا…',
+                options: [
+                  { label: 'تامسون', match: ['تامسون', 'وتامسون'] },
+                  { label: 'خونی', match: ['خونی', 'وخونی'] },
+                  { label: 'والنسیا', match: ['والنسیا'] },
+                  { label: 'ناول', match: ['ناول'] },
+                  { label: 'یافا', match: ['یافا'] },
+                  { label: 'محلی / شمالی', match: ['محلی', 'شمال', 'شمالی'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.fruit.tangerine', name: 'نارنگی', example: 'ژاپنی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'ژاپنی', match: ['ژاپنی', 'ژاینی'] },
+                  { label: 'محلی', match: ['محلی'] },
+                  { label: 'خارو', match: ['خارو'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.fruit.sour-lemon', name: 'لیمو ترش', example: 'لیسبون',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'سنگی، لایم، کوات، لیسبون…',
+                options: [
+                  { label: 'سنگی', match: ['سنگی'] },
+                  { label: 'محلی', match: ['محلی'] },
+                  { label: 'لایم', match: ['لایم'] },
+                  { label: 'کوات', match: ['کوات'] },
+                  { label: 'لیسبون', match: ['لیسبون'] },
+                  { label: 'جهرمی', match: ['جهرم'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.fruit.sweet-lemon', name: 'لیمو شیرین', example: 'درجه یک' },
           { key: 'agri.fruit.grapefruit', name: 'گریپ فروت', example: 'درجه یک' },
-          { key: 'agri.fruit.kiwi', name: 'کیوی', example: 'هایوارد' },
-          { key: 'agri.fruit.banana', name: 'موز', example: 'سومالی' },
+          {
+            key: 'agri.fruit.kiwi', name: 'کیوی', example: 'هایوارد',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'هایوارد', match: ['هایوارد', 'هاروارد'] },
+                  { label: 'طلایی', match: ['طلایی'] },
+                  { label: 'خونی', match: ['خونی'] },
+                  { label: 'دوقلو', match: ['دوقلو'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.fruit.banana', name: 'موز', example: 'هندی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'هندی', match: ['هندی', 'هندوستان', 'هند'] },
+                  { label: 'پاکستانی', match: ['پاکستانی', 'پاکستان'] },
+                  { label: 'اکوادوری', match: ['اکوادور', 'اکوادوری', 'اکوادر'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.fruit.mango', name: 'انبه', example: 'پاکستانی' },
           { key: 'agri.fruit.pineapple', name: 'آناناس', example: 'درجه یک' },
           { key: 'agri.fruit.olive', name: 'زیتون', example: 'طارم' },
@@ -122,19 +309,232 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
       {
         key: 'agri.veg',
         name: 'صیفی و سبزی',
+        // (۲۸-۱۱ دور ۲) ویژگی‌های عمده‌فروشی صیفی — ارثی برای همهٔ برگ‌ها؛
+        // گزینه‌ها از نمونه‌گیری واقعی نام ~۴٬۰۰۰ آگهی صیفی
+        attrs: [
+          {
+            key: 'grade',
+            label: 'درجه کیفیت',
+            options: [
+              { label: 'ممتاز / صادراتی', match: ['ممتاز', 'صادراتی', 'صادرات'] },
+              { label: 'درجه ۱', match: ['درجه 1', 'درجه یک', 'درجه۱', 'درجهیک', 'درجه ۱'] },
+              { label: 'درجه ۲', match: ['درجه 2', 'درجه دو', 'درجه۲'] },
+              { label: 'لوکس / سوپر', match: ['لوکس', 'سوپر'] },
+              { label: 'خرد / زیر درجه', match: ['خرد', 'زیر درجه', 'شکسته', 'ضایعات'] },
+            ],
+          },
+          {
+            key: 'state',
+            label: 'وضعیت بار',
+            options: [
+              { label: 'تازه', match: ['تازه', 'نوبر'] },
+              { label: 'سردخانه‌ای', match: ['سردخانه', 'سردخانه ای'] },
+            ],
+          },
+          {
+            key: 'pack',
+            label: 'بسته‌بندی بار',
+            options: [
+              { label: 'فله', match: ['فله'] },
+              { label: 'کارتن', match: ['کارتن'] },
+              { label: 'گونی / کیسه', match: ['گونی', 'کیسه'] },
+              { label: 'سبد / صندوق', match: ['سبد', 'صندوق'] },
+            ],
+          },
+        ],
         children: [
-          { key: 'agri.veg.tomato', name: 'گوجه', example: 'متین' },
-          { key: 'agri.veg.onion', name: 'پیاز', example: 'قرمز' },
-          { key: 'agri.veg.potato', name: 'سیب‌زمینی', example: 'آگریا' },
-          { key: 'agri.veg.garlic', name: 'سیر', example: 'طارم' },
+          {
+            key: 'agri.veg.tomato', name: 'گوجه', example: 'متین',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم/نوع گوجه — متین، گلخانه‌ای، فرنگی…',
+                options: [
+                  { label: 'متین', match: ['متین'] },
+                  { label: 'گلخانه‌ای', match: ['گلخانه', 'گلخانه ای'] },
+                  { label: 'فرنگی', match: ['فرنگی'] },
+                  { label: 'ربی', match: ['ربی'] },
+                  { label: 'بروبیا', match: ['بروبیا', 'بروبیو', 'برویو', 'بریویو', 'برو'] },
+                  { label: 'بدرو', match: ['بدرو'] },
+                  { label: 'برنتا', match: ['برنتا'] },
+                  { label: 'زیتونی', match: ['زیتونی'] },
+                  { label: 'سبز / گیلاسی', match: ['سبز', 'گیلاسی'] },
+                  { label: 'سانسید / افرا', match: ['سانسید', 'افرا'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.onion', name: 'پیاز', example: 'قرمز',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'پیاز قرمز، زرد (طلایی)، سفید، فلات…',
+                options: [
+                  { label: 'قرمز', match: ['قرمز', 'وقرمز'] },
+                  { label: 'زرد / طلایی', match: ['زرد', 'وزرد', 'طلایی'] },
+                  { label: 'سفید', match: ['سفید', 'وسفید', 'صدفی'] },
+                  { label: 'فلات (بناب)', match: ['فلات', 'بناب'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.potato', name: 'سیب‌زمینی', example: 'آگریا',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'رقم سیب‌زمینی — جیلی، آگریا، اسپریت…',
+                options: [
+                  { label: 'جیلی', match: ['جیلی', 'جلی'] },
+                  { label: 'آگریا', match: ['آگریا', 'اگریا'] },
+                  { label: 'اسپریت', match: ['اسپریت'] },
+                  { label: 'بامبا / بامبو', match: ['بامبا', 'بانبا', 'بامبو'] },
+                  { label: 'سانتا', match: ['سانتا', 'سانته'] },
+                  { label: 'بذری', match: ['بذری', 'بذر'] },
+                  { label: 'چلنجر', match: ['چلنجر'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.garlic', name: 'سیر', example: 'سفید',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'سفید', match: ['سفید'] },
+                  { label: 'سیاه', match: ['سیاه'] },
+                  { label: 'قرمز', match: ['قرمز'] },
+                  { label: 'موسیر', match: ['موسیر'] },
+                ],
+              },
+              {
+                key: 'proc',
+                label: 'عمل‌آوری',
+                options: [
+                  { label: 'خشک', match: ['خشک'] },
+                  { label: 'ترشی', match: ['ترشی'] },
+                ],
+              },
+              {
+                key: 'origin',
+                label: 'خاستگاه',
+                options: [
+                  { label: 'همدان / ملایر', match: ['همدان', 'ملایر'] },
+                  { label: 'مغان / گوگان', match: ['مغان', 'گوگان'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.veg.carrot', name: 'هویج', example: 'درجه یک' },
-          { key: 'agri.veg.cucumber', name: 'خیار', example: 'ویژه' },
-          { key: 'agri.veg.eggplant', name: 'بادمجان', example: 'درجه یک' },
+          {
+            key: 'agri.veg.cucumber', name: 'خیار', example: 'گلخانه‌ای',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'گلخانه‌ای', match: ['گلخانه', 'گلخانه ای'] },
+                  { label: 'خاردار', match: ['خاردار'] },
+                  { label: 'خطی', match: ['خطی'] },
+                  { label: 'شور (کال)', match: ['شور', 'شوری'] },
+                  { label: 'محلی / زمینی', match: ['محلی', 'زمینی'] },
+                  { label: 'رویال / سناتور', match: ['رویال', 'سناتور'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.eggplant', name: 'بادمجان', example: 'لامپی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'لامپی', match: ['لامپی'] },
+                  { label: 'دلمه‌ای', match: ['دلمه', 'دلمه ای'] },
+                  { label: 'قلمی', match: ['قلمی', 'قلم'] },
+                  { label: 'گلخانه‌ای', match: ['گلخانه', 'گلخانه ای'] },
+                  { label: 'قصری', match: ['قصری'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.veg.pepper', name: 'فلفل', example: 'قلمی' },
-          { key: 'agri.veg.bell-pepper', name: 'فلفل دلمه‌ای', example: 'رنگی' },
-          { key: 'agri.veg.cabbage', name: 'کلم', example: 'برگ' },
-          { key: 'agri.veg.lettuce', name: 'کاهو', example: 'آیسبرگ' },
-          { key: 'agri.veg.mushroom', name: 'قارچ', example: 'دکمه ای' },
+          {
+            key: 'agri.veg.bell-pepper', name: 'فلفل دلمه‌ای', example: 'رنگی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'رنگی', match: ['رنگی'] },
+                  { label: 'سبز', match: ['سبز'] },
+                  { label: 'قرمز', match: ['قرمز'] },
+                  { label: 'زرد', match: ['زرد'] },
+                  { label: 'گلخانه‌ای', match: ['گلخانه', 'گلخانه ای'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.cabbage', name: 'کلم', example: 'سفید',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'سفید (پیچ)', match: ['سفید', 'پیچ'] },
+                  { label: 'کلم‌گل', match: ['گل'] },
+                  { label: 'بروکلی', match: ['بروکلی'] },
+                  { label: 'برگ', match: ['برگ'] },
+                  { label: 'قرمز', match: ['قرمز'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.lettuce', name: 'کاهو', example: 'آیسبرگ',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'فرانسوی', match: ['فرانسوی', 'فرانسه'] },
+                  { label: 'آیسبرگ', match: ['آیسبرگ', 'ایسبرگ', 'آیس', 'ایس'] },
+                  { label: 'رومی / رومانو', match: ['رومی', 'رومانو'] },
+                  { label: 'سالادی', match: ['سالادی'] },
+                  { label: 'چینی', match: ['چینی'] },
+                  { label: 'پیچ', match: ['پیچ'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.mushroom', name: 'قارچ', example: 'دکمه‌ای',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'دکمه‌ای، ترافل، دنبلان، صدفی…',
+                options: [
+                  { label: 'دکمه‌ای', match: ['دکمه', 'دکمه ای', 'دگمه'] },
+                  { label: 'ترافل', match: ['ترافل'] },
+                  { label: 'دنبلان', match: ['دنبلان'] },
+                  { label: 'صدفی', match: ['صدفی'] },
+                  { label: 'سیاه', match: ['سیاه'] },
+                  { label: 'کوهی / جنگلی', match: ['کوهی', 'جنگلی'] },
+                  { label: 'اسلایس', match: ['اسلایس'] },
+                  { label: 'شیتاکه / گانودرما', match: ['شیتاکه', 'گانودرما'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.veg.okra', name: 'بامیه', example: 'درجه یک' },
           { key: 'agri.veg.green-bean', name: 'لوبیا سبز', example: 'درجه یک' },
           { key: 'agri.veg.celery', name: 'کرفس', example: 'درجه یک' },
@@ -142,8 +542,39 @@ export const TAXONOMY_V2_ROOTS: TaxonomyNode[] = [
           { key: 'agri.veg.squash', name: 'کدو', example: 'حلوایی' },
           { key: 'agri.veg.herbs', name: 'سبزی', example: 'ریحان' },
           { key: 'agri.veg.dill', name: 'شوید', example: 'درجه یک' },
-          { key: 'agri.veg.watermelon', name: 'هندوانه', example: 'بیضی' },
-          { key: 'agri.veg.melon', name: 'خربزه', example: 'مشهدی' },
+          {
+            key: 'agri.veg.watermelon', name: 'هندوانه', example: 'بیضی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                hint: 'هندوانه بیضی، گرد، بذری، ابوجهل…',
+                options: [
+                  { label: 'بیضی', match: ['بیضی', 'بی ضی'] },
+                  { label: 'گرد', match: ['گرد', 'وگرد'] },
+                  { label: 'میکادو', match: ['میکادو'] },
+                  { label: 'خطی', match: ['خطی'] },
+                  { label: 'بذری', match: ['بذری', 'بذر'] },
+                  { label: 'ابوجهل', match: ['ابوجهل', 'گورخری'] },
+                ],
+              },
+            ],
+          },
+          {
+            key: 'agri.veg.melon', name: 'خربزه', example: 'مشهدی',
+            attrs: [
+              {
+                key: 'ctype',
+                label: 'نوع کالا',
+                options: [
+                  { label: 'مشهدی', match: ['مشهدی'] },
+                  { label: 'راک', match: ['راک'] },
+                  { label: 'جانا', match: ['جانا', 'جانان'] },
+                  { label: 'افغانی', match: ['افغانی', 'افغان', 'کابل'] },
+                ],
+              },
+            ],
+          },
           { key: 'agri.veg.cantaloupe', name: 'طالبی', example: 'درجه یک' },
         ],
       },
