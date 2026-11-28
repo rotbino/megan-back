@@ -146,21 +146,45 @@ export function resolveAttrsForName(
   return out;
 }
 
-/** فیلتر اتریبیوتی — نام باید از هر ویژگیِ انتخاب‌شده حداقل یک گزینه بزند */
+/** اتریبیوت‌های واقعی یک آگهی — نام‌محور + ویژگی‌های دستیِ فرم (دور ۴):
+ *  فروشنده در پنل ویژگی‌های کالا را از اتریبیوت‌های دسته‌اش انتخاب می‌کند
+ *  (features با key = کلید یا برچسب ویژگی، value = برچسب گزینه/نام‌مترادف)؛
+ *  دستی بر نام‌محور مقدم است؛ مقدار دستی فقط وقتی پذیرفته می‌شود که به یک
+ *  گزینهٔ معتبر همان ویژگی بخورد — گزینهٔ «سایر/بدون برند» هم مثل بقیه. */
+export function resolveProductAttrs(
+  productName: string,
+  features: unknown,
+  attrs: TaxonomyAttr[],
+): Record<string, string> {
+  const out = resolveAttrsForName(productName, attrs);
+  if (!attrs.length || !Array.isArray(features)) return out;
+  for (const f of features) {
+    if (!f || typeof f.key !== 'string' || typeof f.value !== 'string') continue;
+    const value = f.value.trim();
+    if (!value) continue;
+    const attr = attrs.find((a) => a.key === f.key || a.label === f.key);
+    if (!attr) continue;
+    const opt = attr.options.find(
+      (o) => o.label === value || o.match.includes(value),
+    );
+    if (opt) out[attr.key] = opt.label;
+  }
+  return out;
+}
+
+/** فیلتر اتریبیوتی — اتریبیوت‌های واقعی (نام + ویژگی‌های دستی — دور ۴) باید
+ *  از هر ویژگیِ انتخاب‌شده حداقل یک گزینه بزند */
 function passesAttrFilter(
   name: string,
   attrs: TaxonomyAttr[],
   selection: Record<string, Set<string>>,
+  features: unknown = [],
 ): boolean {
-  const normalized = normalizeFa(name);
-  const tokens = new Set(normalized.split(TOKEN_SPLIT).filter(Boolean));
+  const resolved = resolveProductAttrs(name, features, attrs);
   for (const attr of attrs) {
     const wanted = selection[attr.key];
     if (!wanted || wanted.size === 0) continue;
-    const hit = attr.options.some(
-      (opt) => wanted.has(opt.label) && opt.match.some((alias) => matchesAlias(normalized, tokens, alias)),
-    );
-    if (!hit) return false;
+    if (!wanted.has(resolved[attr.key] ?? '')) return false;
   }
   return true;
 }
@@ -294,13 +318,14 @@ export class AdsReportService {
     let counts: Record<string, number>;
 
     if (attrActive) {
-      // نام‌محور — نامزدها را می‌خوانیم، در حافظه تطبیق می‌دهیم، بعد صفحه می‌بندیم
+      // نامزدها (با features فرم فروشنده) خوانده می‌شوند، در حافظه تطبیق
+      // می‌شوند، بعد صفحه بسته می‌شود
       const candidates = await this.prisma.product.findMany({
         where: { AND: base },
-        select: { id: true, productName: true, status: true },
+        select: { id: true, productName: true, status: true, features: true },
       });
       const matched = candidates.filter((c) =>
-        passesAttrFilter(c.productName, attrs, attrSelection),
+        passesAttrFilter(c.productName, attrs, attrSelection, c.features),
       );
       total = matched.length;
 
@@ -453,49 +478,39 @@ export class AdsReportService {
     let facets: PublicCatalogFacets;
 
     if (attrs.length > 0) {
-      // ── مسیر نام‌محور — گرهٔ دارای اتریبیوت (اندازهٔ محدود به زیردرخت) ──
-      // نامزدها بدون مکان/بازه خوانده می‌شوند تا فاست‌ها «به‌جز همین فیلتر» بتوانند
+      // ── مسیر اتریبیوت‌محور — گرهٔ دارای اتریبیوت (اندازهٔ محدود به زیردرخت) ──
+      // نامزدها بدون مکان/بازه خوانده می‌شوند تا فاست‌ها «به‌جز همین فیلتر» بتوانند؛
+      // features (ویژگی‌های دستی فرم پنل — دور ۴) هم می‌آیند: اتریبیوت واقعی
+      // هر آگهی = نام + دستی، دستی مقدم
       const candidates = await this.prisma.product.findMany({
         where: { AND: noLocation },
         select: {
-          id: true, productName: true, provinceId: true, cityId: true, unit: true,
+          id: true, productName: true, features: true, provinceId: true, cityId: true, unit: true,
           minSalePrice: true, minSaleAmount: true, stock: true, isLadder: true, updatedAt: true,
         },
       });
 
-      // نرمال‌سازی/توکن یک‌بار به‌ازای هر نام — کل تطبیق‌های بعدی از همین می‌گذرند؛
-      // attrHits = کامل بودن ویژگی‌ها (برخورد نام با چند ویژگی تعریف‌شدهٔ گره) —
-      // بخشی از امتیاز «مرتبط‌ترین»
+      // اتریبیوت‌های واقعی یک‌بار به‌ازای هر نامزده محاسبه می‌شوند (نام + دستی)؛
+      // attrHits = کامل بودن ویژگی‌ها (چند ویژگی از گره پُر شده) — بخشی از امتیاز
+      // «مرتبط‌ترین»
+      const resolvedMap = new Map<number, Record<string, string>>();
       const enriched = candidates.map((c) => {
-        const normalized = normalizeFa(c.productName);
-        const tokens = new Set(normalized.split(TOKEN_SPLIT).filter(Boolean));
+        const resolved = resolveProductAttrs(c.productName, c.features, attrs);
+        resolvedMap.set(c.id, resolved);
         return {
           ...c,
-          normalized,
-          tokens,
-          attrHits: attrs.reduce(
-            (n, attr) =>
-              n +
-              (attr.options.some((opt) => opt.match.some((alias) => matchesAlias(normalized, tokens, alias)))
-                ? 1
-                : 0),
-            0,
-          ),
+          attrHits: attrs.reduce((n, attr) => n + (resolved[attr.key] ? 1 : 0), 0),
         };
       });
 
-      /** آیا نام، گزینهٔ خواسته‌شدهٔ یک اتریبیوت را می‌زند؟ (wanted خالی = بی‌فیلتر) */
+      /** آیا آگهی، گزینهٔ خواسته‌شدهٔ یک اتریبیوت را دارد؟ (wanted خالی = بی‌فیلتر) */
       const hitsWanted = (
         c: (typeof enriched)[number],
         attr: TaxonomyAttr,
         wanted?: Set<string>,
       ): boolean => {
         if (!wanted || wanted.size === 0) return true;
-        for (const opt of attr.options) {
-          if (!wanted.has(opt.label)) continue;
-          if (opt.match.some((alias) => matchesAlias(c.normalized, c.tokens, alias))) return true;
-        }
-        return false;
+        return wanted.has(resolvedMap.get(c.id)?.[attr.key] ?? '');
       };
 
       /** تطبیق کامل یک نامزده — با پرش اختیاری یک گروه فیلتر (فاست/بازه) */
@@ -551,8 +566,8 @@ export class AdsReportService {
         const subset = enriched.filter((c) => matchC(c, { attr: attr.key }));
         const counts: Record<string, number> = {};
         for (const opt of attr.options) {
-          counts[opt.label] = subset.filter((c) =>
-            opt.match.some((alias) => matchesAlias(c.normalized, c.tokens, alias)),
+          counts[opt.label] = subset.filter(
+            (c) => resolvedMap.get(c.id)?.[attr.key] === opt.label,
           ).length;
         }
         attrCounts[attr.key] = counts;
@@ -899,7 +914,7 @@ export class AdsReportService {
       id: number; productName: string; status: string; categoryId: number; subCategoryId: number;
       provinceId: number; cityId: number; userId: string; stock: number; minSaleAmount: number;
       minSalePrice: number; unit: string; isLadder: boolean; viewCount: number;
-      createdAt: Date; updatedAt: Date;
+      createdAt: Date; updatedAt: Date; features?: unknown;
     }>,
     withAttrs: boolean,
   ): Promise<AdsReportRow[]> {
@@ -959,7 +974,7 @@ export class AdsReportService {
         created_at: p.createdAt,
         updated_at: p.updatedAt,
         ...(withAttrs && v2Key
-          ? { resolved_attrs: resolveAttrsForName(p.productName, effectiveAttrs(v2Key)) }
+          ? { resolved_attrs: resolveProductAttrs(p.productName, p.features, effectiveAttrs(v2Key)) }
           : {}),
       };
     });
